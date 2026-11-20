@@ -240,6 +240,11 @@ deployment. The first full Rotterdam manifest was too big to send in one go, so 
 temporary KV namespace in chunks, deleted afterwards. Upload tokens are written to a private
 temporary file and removed after use; nothing secret lives in the repository.
 
+Adding Amsterdam (403 squares, 2,087 new files) needed the same trick at a bigger size: the API
+side can only reach Cloudflare's own API, not the web, so the list of new file hashes went to a
+temporary KV namespace in four checksummed pieces, was merged there into the previous deployment's
+manifest, and the namespace was deleted afterwards.
+
 **Lesson:** when your files are named by content, deploys are cheap and rollbacks are free.
 
 ## Multiplayer

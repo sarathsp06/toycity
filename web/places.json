@@ -4,7 +4,11 @@
     "name": "Rotterdam",
     "about": "The city centre: Coolsingel, the Markthal, Lijnbaan and the Erasmusbrug over the Maas.",
     "region": "rotterdam",
-    "start": { "x": 92539.4, "y": 437527.9, "label": "Coolsingel 40, Rotterdam" },
+    "start": {
+      "x": 92539.4,
+      "y": 437527.9,
+      "label": "Coolsingel 40, Rotterdam"
+    },
     "photo": "regions/rotterdam/a/185_875_s.jpg"
   },
   {
@@ -12,7 +16,23 @@
     "name": "Barendrecht",
     "about": "A village of hedges, canals and parked cars, just south of Rotterdam.",
     "region": "rotterdam",
-    "start": { "x": 96008.364, "y": 430133.397, "label": "Schaatsbaan 43, Barendrecht" },
+    "start": {
+      "x": 96008.364,
+      "y": 430133.397,
+      "label": "Schaatsbaan 43, Barendrecht"
+    },
     "photo": "regions/rotterdam/a/192_860_s.jpg"
+  },
+  {
+    "id": "amsterdam",
+    "name": "Amsterdam",
+    "about": "The canal ring: the Dam, the Jordaan, De Pijp, the Rijksmuseum and the IJ behind Centraal Station.",
+    "region": "amsterdam",
+    "start": {
+      "x": 121347.9,
+      "y": 487347.5,
+      "label": "Dam 1, Amsterdam"
+    },
+    "photo": "regions/amsterdam/a/242_974_s.jpg"
   }
 ]

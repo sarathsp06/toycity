@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Bake whole Dutch municipalities into 500 m squares for streaming (step 1 of 2: collect data).
 
-Usage: tilebake.py SLUG --gemeente Barendrecht [--gemeente Rotterdam] [--workers 6] [--only I_J ...]
+Usage: tilebake.py SLUG --gemeente Barendrecht [--gemeente Rotterdam] [--workers 6] [--only I_J ...] [--bbox X0 Y0 X1 Y1]
+                   [--osm data/extracts/noord-holland.osm.pbf]
                    [--title "Rotterdam + Barendrecht"] [--start "Coolsingel 40, Rotterdam"]
 Then:  node tools/buildtiles.mjs SLUG      (step 2: pre-build GPU-ready geometry)
 
@@ -40,7 +41,7 @@ LOCATIESERVER = "https://api.pdok.nl/bzk/locatieserver/search/v3_1/free"
 WMS = ("https://service.pdok.nl/hwh/luchtfotorgb/wms/v1_0?service=WMS&version=1.3.0&request=GetMap"
        "&layers=Actueel_orthoHR&styles=&crs=EPSG:28992&format=image/jpeg")
 AERIAL_PX = (("", 2048), ("_s", 512))   # file suffix and size: 2048 px = 25 cm per pixel up close, 512 px far away
-PBF = os.path.join(HERE, "data", "extracts", "zuid-holland.osm.pbf")
+PBF = os.path.join(HERE, "data", "extracts", "zuid-holland.osm.pbf")   # default; --osm picks another province
 BGT_LAYERS = ["waterdeel", "wegdeel", "ondersteunendwegdeel", "begroeidterreindeel", "onbegroeidterreindeel",
               "vegetatieobject_punt", "vegetatieobject_vlak", "paal", "straatmeubilair", "scheiding_vlak"]
 FURNITURE = {
@@ -483,12 +484,19 @@ def main():
     ap.add_argument("--only", nargs="*", help="bake only these squares, as I_J")
     ap.add_argument("--title")
     ap.add_argument("--start", help="address to start at")
+    ap.add_argument("--osm", help="Geofabrik province extract (.osm.pbf), default zuid-holland")
+    ap.add_argument("--bbox", nargs=4, type=float, metavar=("X0", "Y0", "X1", "Y1"), help="keep only squares inside this RD box")
     a = ap.parse_args()
+    global PBF
+    PBF = a.osm or PBF
 
     polys = [p for g in a.gemeente for p in municipality(g)]
     squares = squares_for(polys)
     if a.only:
         squares = [s for s in squares if f"{s[0]}_{s[1]}" in a.only]
+    if a.bbox:
+        x0, y0, x1, y1 = a.bbox
+        squares = [(i, j) for i, j in squares if x0 <= i * T < x1 and y0 <= j * T < y1]
     print(f"{len(squares)} squares for {', '.join(a.gemeente)}")
     osm, bagnames = osm_layers(a.slug, squares)
 

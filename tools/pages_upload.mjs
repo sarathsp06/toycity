@@ -3,7 +3,9 @@
 // Writes dist/manifest.json ({ "/path": hash }). The deployment is then created with that manifest; for
 // small updates, merge only the changed entries into the previous deployment's `files` map (GET
 // .../deployments/<id>) instead of sending the whole manifest again.
-// Usage: CF_PAGES_JWT_FILE=/tmp/jwt node tools/pages_upload.mjs
+// Usage: CF_PAGES_JWT_FILE=/tmp/jwt node tools/pages_upload.mjs   (SITE_DIR and MANIFEST_OUT override the folder and manifest path)
+// Big manifest changes: upload the changed entries as one JSON file to a throwaway preview deployment,
+// then let the Cloudflare API side fetch it and merge it into the production manifest.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,7 +13,7 @@ import { createRequire } from 'node:module';
 const { hash } = createRequire(import.meta.url)('blake3-wasm');
 
 const HERE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SITE = path.join(HERE, 'dist', 'site'), API = 'https://api.cloudflare.com/client/v4/pages/assets';
+const SITE = process.env.SITE_DIR || path.join(HERE, 'dist', 'site'), API = 'https://api.cloudflare.com/client/v4/pages/assets';
 const jwt = fs.readFileSync(process.env.CF_PAGES_JWT_FILE, 'utf8').trim();
 const TYPES = { html: 'text/html', js: 'application/javascript', json: 'application/json', jpg: 'image/jpeg', glb: 'model/gltf-binary', txt: 'text/plain', bin: 'application/octet-stream' };
 
@@ -43,5 +45,5 @@ const flush = async () => {
 for (const a of todo) { if (size + a.b64.length > 40e6) await flush(); batch.push(a); size += a.b64.length; }
 await flush();
 await call('/upsert-hashes', { hashes: assets.map(a => a.key) });
-fs.writeFileSync(path.join(HERE, 'dist', 'manifest.json'), JSON.stringify(Object.fromEntries(assets.map(a => [a.route, a.key]))));
+fs.writeFileSync(process.env.MANIFEST_OUT || path.join(HERE, 'dist', 'manifest.json'), JSON.stringify(Object.fromEntries(assets.map(a => [a.route, a.key]))));
 console.log('manifest written');

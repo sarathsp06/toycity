@@ -66,6 +66,9 @@ formal design is in **[Rendering architecture](docs/rendering-architecture.md)**
 ```sh
 # 1. Fetch and clip the open data for a town (PDOK, 3D BAG, OpenStreetMap)
 python3 tilebake.py barendrecht --gemeente Barendrecht
+#    another province needs its Geofabrik extract, and --bbox keeps part of a big city, e.g. Amsterdam inside the A10:
+#    python3 tilebake.py amsterdam --gemeente Amsterdam --bbox 115500 481500 126000 491500 \
+#        --osm data/extracts/noord-holland.osm.pbf --title Amsterdam --start "Dam 1, Amsterdam"
 
 # 2. Bake the squares and the overview
 node tools/buildtiles.mjs barendrecht
@@ -76,7 +79,7 @@ tools/.venv/bin/python tools/overview_aerial.py barendrecht
 python3 tools/serve.py 8765        # then open http://127.0.0.1:8765/city.html
 
 # 4. Make the static site
-sh tools/build_site.sh             # → dist/site (REGION=rotterdam by default: Rotterdam + Barendrecht)
+sh tools/build_site.sh             # → dist/site, with every region web/places.json uses
 
 # 5. Tests
 node --test tests/*.test.mjs
