@@ -54,13 +54,50 @@ Voice is **call-only**. Seeing someone never sends audio. (The first version sen
 
 ### Connection lifecycle
 
-```
-A and B in the same room (Nostr) ─► WebRTC offer/answer through the relays (TURN if needed) ─► data channel open
-  ─► state messages both ways (10 per second / 1 per second)
-A taps B ─► call:invite ─► B answers ─► call:join ─► both open the mic ─► addStream on the same connection
-  ─► onPeerStream ─► PositionalAudio on the caller's avatar
-someone leaves the call ─► call:leave ─► removeStream; the other side drops the audio when the track ends
-B leaves the room, closes the tab or is silent for 5 s ─► avatar, audio and footprint removed, connection closed
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as Anna's browser
+    participant R as Nostr relays
+    participant T as TURN relay (Cloudflare)
+    participant B as Joost's browser
+
+    Note over A,B: Meeting: both stand in the same 500 m square, room nl:<square>
+    A->>R: announce in room
+    B->>R: announce in room
+    R-->>A: Joost is here (WebRTC offer / answer)
+    R-->>B: Anna is here
+    alt direct path works
+        A<<->>B: WebRTC connection
+    else network blocks direct connections
+        A<<->>T: relayed WebRTC connection
+        T<<->>B: (encrypted end to end, the relay can't listen)
+    end
+    Note over R: relays are out of the picture from here
+
+    loop 10 x per second moving, 1 x per second standing
+        A->>B: state [seq, x, y, heading, speed, name, look, mic]
+        B->>A: state
+    end
+
+    Note over A,B: Calling: Anna taps Joost
+    A->>B: call: invite
+    B-->>B: toast "Anna wants to talk": Answer / Not now
+    B->>A: call: join
+    A->>A: open microphone
+    B->>B: open microphone
+    A->>B: add audio track (same connection)
+    B->>A: add audio track
+    Note over A,B: each hears the other at full volume, from where they stand
+
+    Note over A,B: Hanging up
+    A->>B: call: leave
+    A->>A: stop track, release microphone
+    B->>B: audio ends with the track, microphone released
+
+    Note over A,B: Leaving: closed tab, left the room, or 5 s without a state message
+    B--xA: gone
+    A->>A: remove avatar, audio and collision footprint
 ```
 
 ## Background sounds

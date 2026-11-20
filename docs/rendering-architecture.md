@@ -4,16 +4,30 @@ Status 2026-11-20. Rotterdam and Barendrecht (one region, 670 squares) run on th
 
 ## 1. High-level architecture
 
-```
- PDOK (BGT, BAG, aerial), 3D BAG, OSM            offline, on a build machine
-        │  tilebake.py        fetch + clip per 500 m square  -> data/<region>/raw/I_J.json
-        │  tools/buildtiles.mjs   triangulate, extrude, place  -> t/I_J.{b,d,f}.bin  (near, near, far)
-        │  tools/overview.mjs     merge into blocks per 2 km    -> o/OI_OJ.bin
-        │  tools/overview_aerial.py  aerial mosaic per 2 km     -> o/OI_OJ.jpg
-        ▼
- static files (tiles.json, t/, a/, o/)  ── CDN ──►  browser
-                                                    ├─ 2 loader workers: fetch, gunzip, decode JPEG, Cache Storage
-                                                    └─ main thread: choose squares, upload buffers, three.js render
+```mermaid
+flowchart TD
+    subgraph offline["Offline, on a build machine"]
+        SRC["PDOK (BGT, BAG, aerial), 3D BAG, OSM"]
+        TB["tilebake.py<br/>fetch + clip per 500 m square"]
+        BT["tools/buildtiles.mjs<br/>triangulate, extrude, place"]
+        OV["tools/overview.mjs<br/>merge into blocks per 2 km"]
+        OA["tools/overview_aerial.py<br/>aerial mosaic per 2 km"]
+        SRC --> TB
+        TB -- "data/&lt;region&gt;/raw/I_J.json" --> BT
+        TB -- "raw squares" --> OV
+        TB -- "a/I_J.jpg" --> OA
+    end
+    BT -- "t/I_J.b.bin, .d.bin (near), .f.bin (far)" --> FILES
+    OV -- "o/OI_OJ.bin" --> FILES
+    OA -- "o/OI_OJ.jpg" --> FILES
+    FILES[("static files<br/>tiles.json, t/, a/, o/")] --> CDN["CDN: plain file server"]
+    subgraph browser["Browser"]
+        W["2 loader workers<br/>fetch, gunzip, decode JPEG, Cache Storage"]
+        M["Main thread<br/>choose squares, upload buffers, three.js render"]
+        M -- "wanted squares, by priority" --> W
+        W -- "typed arrays, ready for the GPU" --> M
+    end
+    CDN --> W
 ```
 
 No database and no server logic: the CDN is a plain file server. The browser never sees raw OSM,

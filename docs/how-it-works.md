@@ -16,16 +16,24 @@ The browser never sees raw map data. No OpenStreetMap XML, no building footprint
 triangulation. Everything that can be computed ahead of time is computed ahead of time, on a
 laptop, and saved as files that a GPU can swallow almost directly.
 
-```
-PDOK (BGT surfaces, BAG addresses, 25 cm aerial photos)
-3D BAG (every Dutch building in LoD 1.2 and 2.2)
-OpenStreetMap (shops, bus stops, benches, street names)
-        │
-        │  tilebake.py            fetch and clip per 500 m square
-        │  tools/buildtiles.mjs   triangulate, extrude, place trees, cars and doors
-        │  tools/overview.mjs     merge whole neighbourhoods into blocks per 2 km
-        ▼
-static files ──► Cloudflare CDN ──► browser: download, unzip, upload to GPU, draw
+```mermaid
+flowchart TD
+    subgraph sources["Open data"]
+        PDOK["PDOK: BGT surfaces, BAG addresses,<br/>25 cm aerial photos"]
+        BAG3D["3D BAG: every Dutch building,<br/>LoD 1.2 and 2.2"]
+        OSM["OpenStreetMap: shops, bus stops,<br/>benches, street names"]
+    end
+    subgraph bake["Baked once, on a laptop"]
+        TB["tilebake.py<br/>fetch and clip per 500 m square"]
+        BT["tools/buildtiles.mjs<br/>triangulate, extrude, place trees, cars and doors"]
+        OV["tools/overview.mjs<br/>merge neighbourhoods into blocks per 2 km"]
+    end
+    PDOK & BAG3D & OSM --> TB
+    TB -- "raw squares" --> BT
+    TB -- "raw squares" --> OV
+    BT -- "near and far squares" --> FILES[("static files")]
+    OV -- "2 km overview" --> FILES
+    FILES --> CDN["Cloudflare CDN"] --> BR["Browser: download, unzip,<br/>upload to GPU, draw"]
 ```
 
 **Lesson:** the cheapest work in the browser is work it never has to do. Triangulating, clipping
