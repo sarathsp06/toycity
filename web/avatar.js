@@ -16,8 +16,7 @@ export const PERSONAS = [
   // { id: 'stacey', file: 'persona_stacey.glb', height: 1.68,
   //   clothes: { top: ['Human.toigo_turtleneck_halter_top'], bottom: ['Human.toigo_harem_pants'], shoes: ['Human.culturalibre_sneakers'] },
   //   hair: ['Human.culturalibre_hair_13'] },
-  { id: 'billy', file: 'persona_billy.glb', height: 1.8,
-    clothes: { top: ['Baju_unique_t shirt'], bottom: ['Baju_unique_pants'], shoes: ['sepatu.002', 'sepatu.003'] } },
+  // Billy (CC0, data/personas_wip) works but looks like a shop mannequin next to Zuri, so not used
 ];
 const PEOPLE = PERSONAS.filter(p => p.clothes);
 // a look is "persona:outfit", e.g. "stacey:4821"
