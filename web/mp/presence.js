@@ -31,7 +31,7 @@ export async function createPresence({ scene, player, toRD, fromRD, slug }) {
   let seq = 0, sendT = 0, lastSent = null, roomT = 0;
   const rooms = new Map();          // key -> { room, send }
   const peers = new Map();          // id -> peer
-  const listeners = { leave: [], room: [] };
+  const listeners = { leave: [], room: [], call: [] };
 
   function peer(id) {
     let p = peers.get(id);
@@ -55,9 +55,12 @@ export async function createPresence({ scene, player, toRD, fromRD, slug }) {
       const l = parseLook(look) ? look : 'classic';
       if (l !== p.look) { p.look = l; if (p.player) setLook(p.player, l); }
     });
+    // call invitations and answers go straight to one player (see index.js)
+    const [sendCall, receiveCall] = room.makeAction('call');
+    receiveCall((m, id) => { if (m && typeof m === 'object') for (const f of listeners.call) f(m, id); });
     room.onPeerJoin(id => { const p = peer(id); p.rooms.add(key); p.last ||= performance.now() / 1000; lastSent = null; });   // say hello right away
     room.onPeerLeave(id => { const p = peers.get(id); if (p) { p.rooms.delete(key); if (!p.rooms.size) drop(p); } });
-    rooms.set(key, { room, send });
+    rooms.set(key, { room, send, sendCall });
     for (const f of listeners.room) f(key, room);
   }
   function leave(key) {
@@ -110,6 +113,8 @@ export async function createPresence({ scene, player, toRD, fromRD, slug }) {
     setName(n) { n = cleanName(n); if (!n) return; myName = n; localStorage.setItem('toycity.name', n); lastSent = null; },
     // for a peer-to-peer voice transport: the same WebRTC connection, always through one room
     roomFor(p) { const k = [...p.rooms].sort().find(k => rooms.has(k)); return k && rooms.get(k).room; },
+    sendTo(id, msg) { const p = peers.get(id); const k = p && [...p.rooms].sort().find(k => rooms.has(k)); if (k) rooms.get(k).sendCall(msg, id); return !!k; },
+    onCall(f) { listeners.call.push(f); },
     onRoom(f) { listeners.room.push(f); for (const [k, r] of rooms) f(k, r.room); },
     onLeave(f) { listeners.leave.push(f); },
   };

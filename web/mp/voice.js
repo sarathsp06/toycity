@@ -30,7 +30,7 @@ export function p2pTransport(presence) {
   };
 }
 
-export function createVoice({ camera, player, presence, transport, params }) {
+export function createVoice({ camera, player, presence, transport, params, inCall = () => true }) {
   // The ears sit on my character's head, turned the way the camera looks. (They used to be on the
   // camera, which floats metres above and behind: other voices were beyond their 10 m range.)
   const listener = new THREE.AudioListener(), ears = new THREE.Object3D();
@@ -65,7 +65,8 @@ export function createVoice({ camera, player, presence, transport, params }) {
     const pa = new THREE.PositionalAudio(listener);
     pa.setMediaStreamSource(stream);
     pa.panner.panningModel = 'HRTF';
-    pa.setDistanceModel('linear'); pa.setRefDistance(MP.voiceFull); pa.setMaxDistance(MP.voiceSilent); pa.setRolloffFactor(1);
+    // a call: everyone in it is heard at full volume wherever they stand, still from their direction
+    pa.setDistanceModel('linear'); pa.setRefDistance(1e4); pa.setMaxDistance(1e5); pa.setRolloffFactor(1);
     pa.position.y = 1.6;
     s.audio = { el, pa, level: levelMeter(ctx, stream), stream };
     // keep playing until the sender stops sending; distance only turns the volume down. (Dropping it
@@ -103,7 +104,7 @@ export function createVoice({ camera, player, presence, transport, params }) {
     }
     for (const p of presence.peers.values()) {
       const s = st(p.id);
-      const send = s.sendGate.update(p.dist, dt);
+      const send = inCall(p.id);   // my voice goes only to the people I am in a call with
       if (send && mic && !s.sending) s.sending = transport.send(p, mic);
       if ((!send || !mic) && s.sending) { transport.stop(p, mic); s.sending = false; }
       if (s.audio) {

@@ -24,6 +24,15 @@
   .me-arrow { width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-bottom: 18px solid #e24a3b; filter: drop-shadow(0 0 2px #fff); }
   canvas { touch-action: none; }
   #mp { margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 12px; color: #4a5a66; }
+  #mpcall { position: fixed; left: 50%; bottom: 74px; transform: translateX(-50%); z-index: 30; background: rgba(20,30,40,.88); color: #fff; border-radius: 22px; padding: 8px 10px 8px 14px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; max-width: 92vw; font: 14px system-ui, sans-serif; }
+  #mpcall .who { background: rgba(255,255,255,.14); border-radius: 999px; padding: 3px 10px; transition: box-shadow .15s; }
+  #mpcall .who.talking { box-shadow: 0 0 0 2px #7CFC9A; }
+  #mpcall small { opacity: .65; }
+  #mpcall .end, #mptoasts button { font: inherit; border: 0; border-radius: 999px; padding: 5px 12px; cursor: pointer; }
+  #mpcall .end { background: #e5484d; color: #fff; }
+  #mptoasts { position: fixed; left: 50%; top: 12px; transform: translateX(-50%); z-index: 40; display: flex; flex-direction: column; gap: 6px; align-items: center; }
+  #mptoasts .toast { background: rgba(20,30,40,.92); color: #fff; border-radius: 14px; padding: 8px 12px; display: flex; gap: 8px; align-items: center; font: 14px system-ui, sans-serif; }
+  #mptoasts button { background: #fff; color: #142028; }
   #mplist { flex-basis: 100%; display: flex; flex-direction: column; gap: 4px; max-height: 30vh; overflow: auto; }
   #mplist button { padding: 1px 10px; margin-left: 6px; }
   #mp button { font: inherit; font-size: 13px; padding: 4px 8px; border: 1px solid #c5d2da; border-radius: 999px; background: #fff; cursor: pointer; }

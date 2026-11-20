@@ -35,7 +35,7 @@ All distances and rates are in `web/mp/config.js`.
 
 - **Off by default.** The microphone button asks for permission. Echo cancellation, noise suppression and automatic gain are all on.
 - **Seeing someone never sends audio.** I send my microphone to a player once they're within **4 m**. I stop when they've been beyond **6 m** for **3 s**, so walking back and forth across the boundary doesn't reconnect. Receiving uses the same rule.
-- **Volume:** a Three.js `PositionalAudio` attached to the speaker's avatar. Full volume up to 2 m, fading linearly to silent at 10 m (about as far as you can see someone), with HRTF panning so you can hear which side someone is on. The listener moves with the camera.
+- **Calls:** voice only flows inside a call. Tap a person (or 📞 Talk in the people list) to invite them; they Accept or decline; inviting more people makes a group call. Everyone in a call is heard at full volume from their direction (HRTF), wherever they stand. Invitations and answers travel on a `call` data-channel action straight to one player.
 - There is **one connection per pair of players** and no separate voice link. The stream is added to the existing connection, always through the same room. Each microphone is sent raw, and mixing happens only in the listener's browser.
 - **Talking indicator:** a ring under the speaker's feet lights up with their loudness. My own microphone button fills with my level.
 - **Chrome quirk:** WebRTC audio only reaches Web Audio if the stream also feeds a muted `<audio>` element. A stream can also arrive a moment before its track does, so the code waits for the track.
