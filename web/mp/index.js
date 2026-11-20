@@ -7,12 +7,12 @@ import { createPresence } from './presence.js';
 import { createVoice, p2pTransport } from './voice.js';
 import { createAmbience } from './ambience.js';
 import { MP } from './config.js';
+import { PERSON } from '../solids.js';
 import * as THREE from 'three';
 
-export async function start({ scene, camera, player, toRD, fromRD, slug, params, hud, surroundings, useAvatar, view, goToRD }) {
+export async function start({ scene, camera, player, toRD, fromRD, slug, params, hud, surroundings, useAvatar, view, goToRD, solids }) {
   hud.innerHTML = `<button id="mpname" title="Change your name"></button>
     <button id="mpview" title="Switch between seeing through your eyes and from behind (V)"></button>
-    <button id="mpmic" title="Mute or unmute yourself in a call" hidden></button>
     <button id="mpsound" title="Birds, wind and traffic"></button>
     <button id="mppeople">Looking for people nearby…</button><div id="mplist" hidden></div>`;
   // the call panel and invitations sit at the bottom of the screen, where thumbs are
@@ -20,58 +20,84 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
   const toasts = document.createElement('div'); toasts.id = 'mptoasts'; document.body.append(toasts);
   const $ = s => hud.querySelector(s);
   const presence = await createPresence({ scene, player, toRD, fromRD, slug });
-  // Calls: tap a person (or Talk in the people list) to invite them. Voice only flows between people
-  // in the same call, at full volume wherever they are. Inviting someone else adds them to the call.
-  let call = null;                       // { id, members: Set of player ids }
+  // other people are solid: you walk around them, not through them
+  solids?.live(() => [...presence.peers.values()].filter(p => p.player?.group.visible && p.dist < 20)
+    .map(p => ({ x: p.player.group.position.x, z: p.player.group.position.z, r: PERSON.r })));
+  // Calls. The people near you are listed as "📞 Talk to …" buttons at the bottom of the screen; tapping
+  // one (or the person themselves, or Talk in the people list) rings them. Only people in the same call
+  // hear each other, at full volume wherever they stand. Ringing someone else while in a call adds them.
+  // The microphone is on only while a call is connected.
+  let call = null;                       // { id, members: Set of ids, ringing: Map id -> timer }
   const voice = createVoice({ camera, player, presence, transport: p2pTransport(presence), params, inCall: id => !!call?.members.has(id) });
   const nameOf = id => presence.peers.get(id)?.name || 'Visitor';
+  const RING_S = 25;
   function toast(text, buttons = [], ms = 8000) {
     const t = document.createElement('div'); t.className = 'toast'; t.append(text);
     for (const [label, fn] of buttons) { const b = document.createElement('button'); b.textContent = label; b.onclick = () => { t.remove(); fn(); }; t.append(b); }
     toasts.append(t); if (ms) setTimeout(() => t.remove(), ms); return t;
   }
-  async function micOn() { if (!voice.micOn) try { presence.setMic(await voice.setMic(true)); } catch (e) { toast('Could not use the microphone: ' + (e.message || e)); } }
-  function invite(id) {
-    if (call?.members.has(id)) return;
-    call ||= { id: Math.random().toString(36).slice(2), members: new Set() };
-    presence.sendTo(id, { t: 'invite', call: call.id, members: [...call.members] });
-    call.pending = id; micOn();
-    toast(`Calling ${nameOf(id)}…`, [], 5000); renderCall();
+  const setMic = on => voice.setMic(on).then(v => presence.setMic(v)).catch(e => toast('Could not use the microphone: ' + (e.message || e)));
+  function settle() {                    // after any change: end an empty call, match the mic to it
+    if (call && !call.members.size && !call.ringing.size) call = null;
+    const want = !!call?.members.size;
+    if (want !== voice.micOn) setMic(want);
+    renderCall();
   }
+  function ring(id) {
+    if (call?.members.has(id) || call?.ringing.has(id)) return;
+    call ||= { id: Math.random().toString(36).slice(2), members: new Set(), ringing: new Map() };
+    presence.sendTo(id, { t: 'invite', call: call.id, members: [...call.members] });
+    call.ringing.set(id, setTimeout(() => { if (call?.ringing.delete(id)) { toast(`${nameOf(id)} didn't answer`, [], 4000); settle(); } }, RING_S * 1000));
+    settle();
+  }
+  function stopRinging(id) { if (call?.ringing.has(id)) { clearTimeout(call.ringing.get(id)); call.ringing.delete(id); } }
   function leave() {
     if (!call) return;
-    for (const id of call.members) presence.sendTo(id, { t: 'leave', call: call.id });
-    call = null; if (voice.micOn) voice.setMic(false).then(on => presence.setMic(on)); renderCall();
+    for (const id of [...call.members, ...call.ringing.keys()]) { presence.sendTo(id, { t: 'leave', call: call.id }); stopRinging(id); }
+    call = null; settle();
   }
-  presence.onCall(async (m, from) => {
+  presence.onCall((m, from) => {
     if (m.t === 'invite') {
-      toast(`📞 ${nameOf(from)} wants to talk`, [
-        ['Accept', async () => {
+      const t = toast(`📞 ${nameOf(from)} wants to talk`, [
+        ['Answer', () => {
           if (call && call.id !== m.call) leave();
-          call = { id: m.call, members: new Set([from, ...(m.members || []).filter(id => presence.peers.has(id))]) };
+          call = { id: m.call, members: new Set([from, ...(m.members || []).filter(id => presence.peers.has(id))]), ringing: new Map() };
           for (const id of call.members) presence.sendTo(id, { t: 'join', call: call.id });
-          await micOn(); renderCall();
+          settle();
         }],
-        ['No thanks', () => presence.sendTo(from, { t: 'decline', call: m.call })],
-      ], 20000);
-    } else if (m.t === 'join' && call?.id === m.call) { call.members.add(from); renderCall(); }
-    else if (m.t === 'decline' && call?.id === m.call) { toast(`${nameOf(from)} can't talk right now`); if (!call.members.size) call = null; renderCall(); }
-    else if (m.t === 'leave' && call?.id === m.call) {
-      call.members.delete(from); toast(`${nameOf(from)} left the call`, [], 4000);
-      if (!call.members.size) leave(); renderCall();
-    }
+        ['Not now', () => presence.sendTo(from, { t: 'decline', call: m.call })],
+      ], RING_S * 1000);
+      t.classList.add('ring'); t.dataset.call = m.call;
+    } else if (call?.id === m.call) {
+      if (m.t === 'join') { stopRinging(from); call.members.add(from); }
+      else if (m.t === 'decline') { stopRinging(from); toast(`${nameOf(from)} can't talk right now`, [], 4000); }
+      else if (m.t === 'leave') { stopRinging(from); if (call.members.delete(from)) toast(`${nameOf(from)} left the call`, [], 4000); }
+      settle();
+    } else if (m.t === 'leave') toasts.querySelectorAll(`.ring[data-call="${m.call}"]`).forEach(t => t.remove());   // they hung up before I answered
   });
-  presence.onLeave(p => { if (call?.members.delete(p.id)) { if (!call.members.size) leave(); renderCall(); } });
+  presence.onLeave(p => { if (call) { stopRinging(p.id); call.members.delete(p.id); settle(); } });
+  const pill = (text, cls) => Object.assign(document.createElement('span'), { className: cls, textContent: text });
+  let callSig = '';
   function renderCall() {
-    if (!call || !call.members.size) { callBox.hidden = true; $('#mpmic').hidden = true; return; }
-    callBox.hidden = false; $('#mpmic').hidden = false;
-    const people = [...call.members].map(id => {
-      const s = voice._state.get(id), talking = (s?.audio?.level() || 0) > 0.02;
-      const el = document.createElement('span'); el.className = 'who' + (talking ? ' talking' : ''); el.textContent = nameOf(id); return el;
-    });
-    const end = document.createElement('button'); end.textContent = 'Leave'; end.className = 'end'; end.onclick = leave;
-    const hint = document.createElement('small'); hint.textContent = 'tap someone else to add them';
-    callBox.replaceChildren('📞 ', ...people, hint, end);
+    // rebuilt only when something visible changed, so a button is never swapped out under a finger
+    const nearIds = [...presence.peers.values()].filter(p => p.dist <= MP.talkReach).map(p => p.id + p.name).sort();
+    const sig = JSON.stringify([call && [...call.members].map(id => [id, nameOf(id), (voice._state.get(id)?.audio?.level() || 0) > 0.02]), call && [...call.ringing.keys()], voice.micOn, nearIds]);
+    if (sig === callSig) return; callSig = sig;
+    // in a call: who is in it (lit while talking), who is being rung, Mute and Leave
+    if (call) {
+      const items = [...call.members].map(id => pill(nameOf(id), 'who' + ((voice._state.get(id)?.audio?.level() || 0) > 0.02 ? ' talking' : '')));
+      for (const id of call.ringing.keys()) items.push(pill(`ringing ${nameOf(id)}…`, 'who ringing'));
+      const mute = document.createElement('button'); mute.className = 'mute';
+      mute.textContent = voice.micOn ? '🎙️ Mute' : '🔇 Muted'; mute.disabled = !call.members.size;
+      mute.onclick = () => setMic(!voice.micOn).then(renderCall);
+      const end = document.createElement('button'); end.textContent = call.members.size ? 'Leave' : 'Cancel'; end.className = 'end'; end.onclick = leave;
+      callBox.replaceChildren('📞 ', ...items, mute, end);
+    } else callBox.replaceChildren();
+    // the people close to me that I could talk to, as buttons
+    const near = [...presence.peers.values()].filter(p => p.dist <= MP.talkReach && !call?.members.has(p.id) && !call?.ringing.has(p.id))
+      .sort((a, b) => a.dist - b.dist).slice(0, 3);
+    for (const p of near) { const b = document.createElement('button'); b.className = 'talk'; b.textContent = `📞 Talk to ${p.name || 'Visitor'}`; b.onclick = () => ring(p.id); callBox.append(b); }
+    callBox.hidden = !callBox.childNodes.length;
   }
   // tapping a person on screen: the nearest one within a thumb's width of the tap
   const _v = new THREE.Vector3(); let down = null;
@@ -91,20 +117,18 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
     if (!best) return;
     e.stopImmediatePropagation();       // a tap on a person is not a "walk there"
     if (call?.members.has(best.id)) return;
-    toast(`Talk to ${best.name || 'Visitor'}?`, [['📞 Call', () => invite(best.id)]], 6000);
+    ring(best.id);
   }, true);
   const ambience = createAmbience({ ctx: voice.listener.context, surroundings });
 
   function render() {
     $('#mpname').textContent = '👤 ' + presence.name;
     $('#mpview').textContent = view?.eyes ? '🎥 From behind' : '👁️ My eyes';
-    $('#mpmic').textContent = voice.micOn ? '🎙️ Mute' : '🔇 Unmute';
-    $('#mpmic').classList.toggle('on', voice.micOn);
     $('#mpsound').textContent = ambience.on ? '🔊 Sounds' : '🔈 Sounds off';
     const ps = [...presence.peers.values()], near = ps.filter(p => p.dist <= MP.nearby).length;
     if (!$('#mplist').hidden) list();
     $('#mppeople').textContent = !ps.length ? '👥 Nobody around yet'
-      : `👥 ${near} nearby · ${ps.length} in this area` + (near && !call ? ' · tap someone to talk' : '');
+      : `👥 ${near} nearby · ${ps.length} in this area` ;
     renderCall();
   }
   // change name in place: the button turns into a text box; Enter or leaving it saves, Escape cancels
@@ -124,7 +148,7 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
       const row = document.createElement('div'), go = document.createElement('button');
       row.textContent = `${p.name || 'Visitor'}${p.mic ? '' : ' 🔇'} · ${p.dist < 1000 ? Math.round(p.dist) + ' m' : (p.dist / 1000).toFixed(1) + ' km'} `;
       go.textContent = 'Go'; go.onclick = () => { const s = p.track.sample(performance.now() / 1000); if (s && goToRD) goToRD(s.x + 2, s.y + 2); };
-      const talk = document.createElement('button'); talk.textContent = call?.members.has(p.id) ? 'In call' : '📞 Talk'; talk.disabled = !!call?.members.has(p.id); talk.onclick = () => invite(p.id);
+      const talk = document.createElement('button'); talk.textContent = call?.members.has(p.id) ? 'In call' : '📞 Talk'; talk.disabled = !!call?.members.has(p.id); talk.onclick = () => ring(p.id);
       row.append(go, talk); return row;
     }) : [Object.assign(document.createElement('div'), { textContent: 'Nobody in this area yet. Share the link with a friend!' })]));
   }
@@ -132,7 +156,6 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
   // who you are is not a choice (everyone gets a random person and outfit); how you see the world is
   $('#mpview').onclick = e => { if (view) view.eyes = !view.eyes; e.target.blur(); render(); };
   addEventListener('toycity:view', render);
-  $('#mpmic').onclick = async () => { try { presence.setMic(await voice.setMic(!voice.micOn)); } catch (e) { alert('Could not use the microphone: ' + (e.message || e)); } render(); };
   $('#mpsound').onclick = () => { ambience.toggle(); render(); };
   render();
 
@@ -146,7 +169,6 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
       presence.update(dt, speed);
       voice.update(dt);
       ambience.update(dt);
-      $('#mpmic').style.setProperty('--lvl', Math.min(1, voice.micLevel() * 4).toFixed(2));
       if ((hudT -= dt) <= 0) { hudT = 0.5; render(); }
     },
   };

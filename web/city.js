@@ -10,6 +10,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import * as BU from 'three/addons/utils/BufferGeometryUtils.js';
 import * as TX from './textures.js';
 import { loadAvatar, myLook } from './avatar.js';
+import { createSolids, footprintsOf, PERSON } from './solids.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 const params = new URLSearchParams(location.search);
@@ -243,7 +244,9 @@ function updateCars(tile) {
   finish(box, nb);
 }
 const tmpO = new THREE.Object3D();
+const solids = createSolids();   // cars, trees, lamps, furniture and other players (see solids.js)
 function instances(tile, name, data) {
+  solids.add(tile, footprintsOf(name, data, tile.group.position));
   if (name === 'tree') tile.trees = data;   // kept for the background sounds (more trees, more birds)
   if (name === 'car' && CAR_MODELS.length) return carInstances(tile, data);
   const shape = SHAPES[name]; if (!shape) return;
@@ -318,7 +321,7 @@ function requestSquare(key, level) {
 
 function disposeTile(t) {
   if (!t) return;
-  carTiles.delete(t);
+  carTiles.delete(t); solids.drop(t);
   t.group.traverse(o => { if (o.geometry && !o.isInstancedMesh) o.geometry.dispose(); if (o.isInstancedMesh) { o.dispose(); pools.delete(o); } });
   for (const tx of t.textures) tx.dispose();
   for (const m of t.materials) m.dispose();
@@ -663,7 +666,8 @@ const jump = { h: 0, v: 0, phase: null, t: 0 };   // phase: crouch -> air -> lan
 const GRAVITY = 14, JUMP_V = 6, CROUCH_T = 0.12, LAND_T = 0.16;
 const R0 = 0.3;
 let movedThisFrame = 0;
-const blocked = (x, z) => blockedAt(x, z) || blockedAt(x + R0, z) || blockedAt(x - R0, z) || blockedAt(x, z + R0) || blockedAt(x, z - R0);
+const blocked = (x, z) => blockedAt(x, z) || blockedAt(x + R0, z) || blockedAt(x - R0, z) || blockedAt(x, z + R0) || blockedAt(x, z - R0)
+  || (!fly && solids.hit(x, z, PERSON.r));
 let stuck = 0, needUnstick = true;
 // an address point sits inside its building: once that square is loaded, stand on the address's
 // own street at the closest point, facing the house; otherwise step to the nearest open spot
@@ -922,7 +926,7 @@ function bench(n = 30) {
   for (let k = 0; k < n; k++) { renderer.render(scene, camera); gl.finish(); }
   return +((performance.now() - t0) / n).toFixed(2);
 }
-window.__city = { ovTiles, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, bench, blocked, jump, toRD, ORX, ORY, get stats() { return window.__stats; } };
+window.__city = { ovTiles, solids, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, bench, blocked, jump, toRD, ORX, ORY, get stats() { return window.__stats; } };
 // ---------- social layer: other people, voice and background sounds (web/mp/, ?mp=0 turns it off) ----------
 // It only reads the player's position and the trees and parked cars around it; nothing here depends on it.
 let social = null;
@@ -937,7 +941,7 @@ function surroundings() {
   return { green: Math.min(1, trees / 25), street: Math.min(1, cars / 30) };
 }
 if (params.get('mp') !== '0') import('./mp/index.js').then(m => m.start({
-  scene, camera, player, toRD, fromRD: (X, Y) => [X - ORX, ORY - Y], slug, params, surroundings, useAvatar, goToRD: (X, Y) => { if (fly) toggleFly(); goal = null; marker.visible = false; player.position.set(X - ORX, 0.15, -(Y - ORY)); dist = Math.min(dist, 20); needUnstick = true; updateWanted(); }, view: { get eyes() { return firstPerson; }, set eyes(v) { setFirstPerson(v); } },
+  scene, camera, player, toRD, fromRD: (X, Y) => [X - ORX, ORY - Y], slug, params, surroundings, useAvatar, solids, goToRD: (X, Y) => { if (fly) toggleFly(); goal = null; marker.visible = false; player.position.set(X - ORX, 0.15, -(Y - ORY)); dist = Math.min(dist, 20); needUnstick = true; updateWanted(); }, view: { get eyes() { return firstPerson; }, set eyes(v) { setFirstPerson(v); } },
   hud: document.getElementById('mp'),
 })).then(s => { social = s; window.__city.social = s; }).catch(e => { console.warn('multiplayer unavailable', e); document.getElementById('mp').textContent = 'Multiplayer unavailable right now'; });
 

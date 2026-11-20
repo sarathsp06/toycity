@@ -11,7 +11,7 @@ R=${REGION:-rotterdam}
 rm -rf "$OUT" dist/toycity-site.zip
 mkdir -p "$OUT/models" "$OUT/regions/$R" "$OUT/mp"
 cp web/city.html "$OUT/index.html"
-cp web/city.html web/city.js web/loader.worker.js web/textures.js web/avatar.js "$OUT/"
+cp web/city.html web/city.js web/loader.worker.js web/textures.js web/avatar.js web/solids.js "$OUT/"
 cp web/mp/*.js "$OUT/mp/"
 cp web/models/cars.glb web/models/person.glb web/models/persona_*.glb web/models/CREDITS.txt "$OUT/models/"
 cp -R web/regions/$R/tiles.json web/regions/$R/search.json \

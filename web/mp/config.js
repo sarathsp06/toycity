@@ -16,7 +16,8 @@ export const MP = {
   // roughly 250-500 m); perspective makes them small far away, which is how a real street looks
   showWithin: 2000,
   hideBeyond: 2100,
-  nearby: 60,                     // 'nearby' in the people count
+  nearby: 60,
+  talkReach: 15,                  // people this close get a 'Talk to …' button                     // 'nearby' in the people count
   interpDelay: 0.15,              // remote players are drawn this far in the past, for smoothness
   peerTimeout: 5,                 // forget a player not heard from for this long
   // voice reaches as far as you can see someone: 3 m (the first version) was silent before you

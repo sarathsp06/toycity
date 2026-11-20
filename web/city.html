@@ -27,6 +27,11 @@
   #mpcall { position: fixed; left: 50%; bottom: 74px; transform: translateX(-50%); z-index: 30; background: rgba(20,30,40,.88); color: #fff; border-radius: 22px; padding: 8px 10px 8px 14px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; max-width: 92vw; font: 14px system-ui, sans-serif; }
   #mpcall .who { background: rgba(255,255,255,.14); border-radius: 999px; padding: 3px 10px; transition: box-shadow .15s; }
   #mpcall .who.talking { box-shadow: 0 0 0 2px #7CFC9A; }
+  #mpcall .who.ringing { opacity: .7; animation: ring 1.2s ease-in-out infinite; }
+  @keyframes ring { 50% { opacity: .35; } }
+  #mpcall .talk, #mpcall .mute { font: inherit; border: 0; border-radius: 999px; padding: 6px 14px; cursor: pointer; background: #2f9e5b; color: #fff; font-weight: 600; }
+  #mpcall .mute { background: rgba(255,255,255,.2); font-weight: 400; }
+  #mptoasts .ring { box-shadow: 0 0 0 3px #2f9e5b; font-size: 16px; }
   #mpcall small { opacity: .65; }
   #mpcall .end, #mptoasts button { font: inherit; border: 0; border-radius: 999px; padding: 5px 12px; cursor: pointer; }
   #mpcall .end { background: #e5484d; color: #fff; }
