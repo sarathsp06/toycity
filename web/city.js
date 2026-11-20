@@ -13,7 +13,7 @@ import { loadAvatar, myLook } from './avatar.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 const params = new URLSearchParams(location.search);
-const slug = params.get('region') || 'barendrecht';
+const slug = params.get('region') || 'rotterdam';   // Rotterdam city + Barendrecht, one walkable world
 const base = new URL(`./regions/${slug}/`, location.href);
 const progress = (f, t) => window.loadProgress?.(f, t);
 progress(0.05, 'Reading the map');
