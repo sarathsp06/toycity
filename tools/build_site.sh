@@ -23,6 +23,8 @@ cat > "$OUT/_headers" <<'H'
   Cache-Control: public, max-age=86400
 /regions/*/tiles.json
   Cache-Control: no-cache
+/
+  Cache-Control: no-cache
 /*.html
   Cache-Control: no-cache
 /*.js

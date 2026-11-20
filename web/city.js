@@ -14,6 +14,13 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 const params = new URLSearchParams(location.search);
 const slug = params.get('region') || 'rotterdam';   // Rotterdam city + Barendrecht, one walkable world
+// The page itself used to be cached for a day while the scripts were always fresh, so a browser could
+// run new scripts on an old page (missing buttons) and stop at the loading screen. Detect that and
+// fetch the page once more, bypassing the cache.
+if (!document.getElementById('eyesbtn') && !sessionStorage.getItem('toycity.refreshed')) {
+  sessionStorage.setItem('toycity.refreshed', '1');
+  location.replace(location.pathname + '?fresh=' + Date.now() + location.hash);
+}
 const base = new URL(`./regions/${slug}/`, location.href);
 const progress = (f, t) => window.loadProgress?.(f, t);
 progress(0.05, 'Reading the map');
@@ -604,7 +611,7 @@ function zoomBy(f) {
 }
 renderer.domElement.addEventListener('wheel', e => { e.preventDefault(); if (!fly) zoomBy(Math.exp(e.deltaY * (e.ctrlKey ? 0.01 : 0.0015))); }, { passive: false });
 document.getElementById('zin').onclick = () => { if (firstPerson) setFirstPerson(false); zoomBy(1 / 1.6); };
-document.getElementById('eyesbtn').onclick = () => setFirstPerson(!firstPerson);
+const eyesBtn = document.getElementById('eyesbtn'); if (eyesBtn) eyesBtn.onclick = () => setFirstPerson(!firstPerson);
 document.getElementById('zout').onclick = () => zoomBy(1.6);
 const keys = {};
 addEventListener('keydown', e => {
