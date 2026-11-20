@@ -237,6 +237,7 @@ function updateCars(tile) {
 }
 const tmpO = new THREE.Object3D();
 function instances(tile, name, data) {
+  if (name === 'tree') tile.trees = data;   // kept for the background sounds (more trees, more birds)
   if (name === 'car' && CAR_MODELS.length) return carInstances(tile, data);
   const shape = SHAPES[name]; if (!shape) return;
   const n = data.length / 6;
@@ -867,6 +868,7 @@ function frame(now) {
   }
   avatar.dip = 0;
   animateAvatar(dt, jump.phase === 'air' ? 0 : movedThisFrame); movedThisFrame = 0;
+  social?.update(dt, avatar.speed);
   player.position.y = 0.15 + jump.h - avatar.dip;
   // sharp shadows that follow the player
   const R = 40 + Math.min(dist, 150) * 0.9;
@@ -892,6 +894,24 @@ function bench(n = 30) {
   return +((performance.now() - t0) / n).toFixed(2);
 }
 window.__city = { ovTiles, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, bench, blocked, jump, toRD, ORX, ORY, get stats() { return window.__stats; } };
+// ---------- social layer: other people, voice and background sounds (web/mp/, ?mp=0 turns it off) ----------
+// It only reads the player's position and the trees and parked cars around it; nothing here depends on it.
+let social = null;
+function surroundings() {
+  const p = player.position; let trees = 0, cars = 0;
+  for (const t of tiles.values()) {
+    if (t.level !== 'near') continue;
+    const ox = t.group.position.x, oz = t.group.position.z;
+    if (t.trees) for (let k = 0; k < t.trees.length; k += 6) if (Math.hypot(t.trees[k] + ox - p.x, t.trees[k + 2] + oz - p.z) < 40) trees++;
+    if (t.cars) for (let k = 0; k < t.cars.data.length; k += 6) if (Math.hypot(t.cars.data[k] + ox - p.x, t.cars.data[k + 2] + oz - p.z) < 60) cars++;
+  }
+  return { green: Math.min(1, trees / 25), street: Math.min(1, cars / 30) };
+}
+if (params.get('mp') !== '0') import('./mp/index.js').then(m => m.start({
+  scene, camera, player, toRD, fromRD: (X, Y) => [X - ORX, ORY - Y], slug, params, surroundings,
+  hud: document.getElementById('mp'),
+})).then(s => { social = s; window.__city.social = s; }).catch(e => { console.warn('multiplayer unavailable', e); document.getElementById('mp').textContent = 'Multiplayer unavailable right now'; });
+
 updateWanted();
 requestAnimationFrame(frame);
 if (params.get('drive')) import('./drive.js').then(m => m.run(window.__city, +params.get('drive'), +(params.get('len') || 2400), +(params.get('angle') || 0)));

@@ -1,0 +1,99 @@
+// Multiplayer presence: who is around and where. Knows nothing about audio or map streaming.
+//
+// Discovery uses Nostr relays (through Trystero) only as a meeting point: a browser announces
+// itself in the room of its 500 m square and the relays pass along WebRTC connection details.
+// Positions and names then go directly between browsers over WebRTC data channels.
+//
+// Emits: peer(id) objects with { id, name, dist, shown, player } for the other systems to use, and
+// exposes `connections` (id -> room) so a peer-to-peer voice transport can reuse the same links.
+import * as THREE from 'three';
+import { MP } from './config.js';
+import { roomsFor, Track, visible, cleanName } from './logic.js';
+import { ready as avatarsReady, makePlayer, setName, animate, disposePlayer } from './players.js';
+
+const TRYSTERO = 'https://esm.run/trystero@0.21/nostr';
+
+export async function createPresence({ scene, player, toRD, fromRD, slug }) {
+  const { joinRoom, selfId } = await import(TRYSTERO);
+  await avatarsReady;
+
+  let myName = cleanName(localStorage.getItem('toycity.name')) || 'Visitor ' + (100 + Math.floor(Math.random() * 900));
+  let seq = 0, sendT = 0, lastSent = null, roomT = 0;
+  const rooms = new Map();          // key -> { room, send }
+  const peers = new Map();          // id -> peer
+  const listeners = { leave: [], room: [] };
+
+  function peer(id) {
+    let p = peers.get(id);
+    if (!p) peers.set(id, p = { id, rooms: new Set(), track: new Track(MP.interpDelay), last: 0, name: '', shown: false, player: null, dist: Infinity });
+    return p;
+  }
+  function join(key) {
+    const room = joinRoom({ appId: MP.appId, relayUrls: MP.relays, relayRedundancy: MP.relays.length }, `${slug}:${key}`);
+    const [send, receive] = room.makeAction('st');
+    receive((d, id) => {
+      if (!Array.isArray(d) || d.length < 6) return;
+      const [s, x, y, h, v, n] = d;
+      if (![s, x, y, h, v].every(Number.isFinite)) return;
+      const p = peer(id); p.rooms.add(key);
+      p.last = performance.now() / 1000;
+      p.track.push(s, p.last, { x, y, h, v });
+      const name = cleanName(n); if (name && name !== p.name) { p.name = name; if (p.player) setName(p.player, name); }
+    });
+    room.onPeerJoin(id => { peer(id).rooms.add(key); lastSent = null; });   // say hello right away
+    room.onPeerLeave(id => { const p = peers.get(id); if (p) { p.rooms.delete(key); if (!p.rooms.size) drop(p); } });
+    rooms.set(key, { room, send });
+    for (const f of listeners.room) f(key, room);
+  }
+  function leave(key) {
+    const r = rooms.get(key); if (!r) return;
+    r.room.leave(); rooms.delete(key);
+    for (const p of [...peers.values()]) { p.rooms.delete(key); if (!p.rooms.size) drop(p); }
+  }
+  function drop(p) {
+    for (const f of listeners.leave) f(p);
+    if (p.player) disposePlayer(p.player);
+    peers.delete(p.id);
+  }
+
+  function update(dt, speed) {
+    const now = performance.now() / 1000;
+    const [X, Y] = toRD(player.position.x, player.position.z);
+    if ((roomT -= dt) <= 0) {
+      roomT = 0.5;
+      const want = roomsFor(X, Y, MP.roomSize, MP.roomJoinEdge, MP.roomLeaveEdge, new Set(rooms.keys()));
+      for (const k of want) if (!rooms.has(k)) join(k);
+      for (const k of [...rooms.keys()]) if (!want.has(k)) leave(k);
+    }
+    // 10 updates a second while moving, one a second standing still, and at once after a change
+    sendT -= dt;
+    if (!lastSent || (sendT <= 0 && (speed > 0.05 || now - lastSent >= 1 / MP.idleHz))) {
+      const state = [++seq, +X.toFixed(2), +Y.toFixed(2), +player.rotation.y.toFixed(3), +speed.toFixed(2), myName];
+      for (const r of rooms.values()) r.send(state);
+      sendT = 1 / MP.sendHz; lastSent = now;
+    }
+    for (const p of [...peers.values()]) {
+      if (p.last && now - p.last > MP.peerTimeout) { drop(p); continue; }
+      const s = p.track.sample(now); if (!s) continue;
+      p.dist = Math.hypot(s.x - X, s.y - Y);
+      const show = visible(p.shown, p.dist, MP.showWithin, MP.hideBeyond);
+      if (show && !p.player) { p.player = makePlayer(p.id, p.name); scene.add(p.player.group); }
+      if (p.player) {
+        p.player.group.visible = show;
+        const [x, z] = fromRD(s.x, s.y); p.player.group.position.set(x, 0.15, z); p.player.group.rotation.y = s.h;
+        if (show) animate(p.player, s.v, dt);
+      }
+      p.shown = show;
+    }
+  }
+
+  return {
+    selfId, peers, update,
+    get name() { return myName; },
+    setName(n) { n = cleanName(n); if (!n) return; myName = n; localStorage.setItem('toycity.name', n); lastSent = null; },
+    // for a peer-to-peer voice transport: the same WebRTC connection, always through one room
+    roomFor(p) { const k = [...p.rooms].sort().find(k => rooms.has(k)); return k && rooms.get(k).room; },
+    onRoom(f) { listeners.room.push(f); for (const [k, r] of rooms) f(k, r.room); },
+    onLeave(f) { listeners.leave.push(f); },
+  };
+}

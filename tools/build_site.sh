@@ -7,9 +7,10 @@ set -e
 cd "$(dirname "$0")/.."
 OUT=dist/site
 rm -rf "$OUT" dist/toycity-site.zip
-mkdir -p "$OUT/models" "$OUT/regions/barendrecht"
+mkdir -p "$OUT/models" "$OUT/regions/barendrecht" "$OUT/mp"
 cp web/city.html "$OUT/index.html"
 cp web/city.html web/city.js web/loader.worker.js web/textures.js web/avatar.js "$OUT/"
+cp web/mp/*.js "$OUT/mp/"
 cp web/models/cars.glb web/models/person.glb web/models/CREDITS.txt "$OUT/models/"
 cp -R web/regions/barendrecht/tiles.json web/regions/barendrecht/search.json \
       web/regions/barendrecht/t web/regions/barendrecht/a web/regions/barendrecht/o "$OUT/regions/barendrecht/"

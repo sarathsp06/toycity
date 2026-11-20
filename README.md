@@ -42,6 +42,8 @@ noticing. Probably.
 - 🛩️ **Fly** (press `F`) high above the town and drop back in anywhere
 - 🌅 **Change the time of day**, from morning to golden hour to night
 - 📱 **Play on your phone** with a joystick, a jump button, drag to look and pinch to zoom
+- 👋 **Meet people**: other players show up within 10 m with their name above their head. Turn on your mic and anyone within a few metres hears you, from the direction you're standing in. It's all browser to browser, with no server of ours ([how](docs/multiplayer.md))
+- 🐦 **Hear the neighbourhood**: birds where it's green, traffic near busy streets, all made in the browser
 
 | Keyboard | |
 |---|---|
@@ -106,8 +108,7 @@ change re-uploads only the files that changed.
 
 ## Coming soon™
 
-- 🗣️ **Multiplayer with proximity voice**: walk past two people chatting and hear them, just like a
-  real street
+- 🗣️ **Crowds**: an SFU for when more than a handful of people meet in one place
 - 🏙️ **Rotterdam**: 688 more squares
 - 🚙 **More cars**: a Skoda Superb, a VW Passat and a BMW 5 GT are waiting in the garage
 - 🦆 Ducks in the canals (not promised, but strongly hoped for)

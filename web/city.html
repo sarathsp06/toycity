@@ -22,6 +22,10 @@
   #minibtn { position: fixed; right: 24px; top: 24px; z-index: 6; border: 0; border-radius: 6px; background: rgba(255,255,255,.9); cursor: pointer; font-size: 12px; padding: 3px 7px; }
   .me-arrow { width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-bottom: 18px solid #e24a3b; filter: drop-shadow(0 0 2px #fff); }
   canvas { touch-action: none; }
+  #mp { margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 12px; color: #4a5a66; }
+  #mp button { font: inherit; font-size: 13px; padding: 4px 8px; border: 1px solid #c5d2da; border-radius: 999px; background: #fff; cursor: pointer; }
+  #mpnameedit { font: inherit; font-size: 13px; padding: 4px 8px; border: 1px solid #2f6fde; border-radius: 999px; width: 130px; }
+  #mpmic.on { --lvl: 0; border-color: #2a9d5c; background: linear-gradient(90deg, #c9f2d9 calc(var(--lvl) * 100%), #fff 0); }
   #joy, #jumpbtn { display: none; }
   body.touch #joy { display: block; position: fixed; left: 22px; bottom: 26px; width: 120px; height: 120px; border-radius: 50%; background: rgba(255,255,255,.28); border: 2px solid rgba(255,255,255,.7); touch-action: none; z-index: 6; }
   body.touch #joy div { position: absolute; left: 35px; top: 35px; width: 50px; height: 50px; border-radius: 50%; background: rgba(255,255,255,.9); box-shadow: 0 2px 8px rgba(0,0,0,.25); }
@@ -75,6 +79,7 @@
     <select id="quality" aria-label="Quality"><option value="low">Fast</option><option value="mid" selected>Balanced</option><option value="high">Sharp</option></select>
   </div>
   <form id="goto" style="margin-top:6px;display:flex;gap:4px"><input id="q" placeholder="Address or place, e.g. Schaatsbaan 43" style="flex:1"/><button>Go</button></form>
+  <div id="mp"></div>
   <div id="perf"></div>
 </div>
 <div id="place">loading…</div>
