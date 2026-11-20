@@ -33,8 +33,8 @@ test('heading interpolates the short way round', () => {
   assert.ok(Math.abs(Math.abs(h) - Math.PI) < 0.05, 'goes through pi, not through 0: ' + h);
 });
 
-test('voice connects at 4 m and survives boundary wobble', () => {
-  const g = new VoiceGate(MP);
+test('voice gate connects inside range and survives boundary wobble', () => {
+  const g = new VoiceGate({ voiceConnect: 4, voiceDisconnect: 6, voiceLinger: 3 });
   assert.equal(g.update(5, 0.1), false);
   assert.equal(g.update(3.9, 0.1), true);
   for (let k = 0; k < 20; k++) assert.equal(g.update(k % 2 ? 6.5 : 5.5, 0.1), true, 'wobbling around 6 m keeps the line');

@@ -26,8 +26,8 @@ export function createVoice({ camera, presence, transport, params }) {
   const unlock = () => { if (ctx.state !== 'running') ctx.resume(); };
   addEventListener('pointerdown', unlock); addEventListener('keydown', unlock);
 
-  const state = new Map();          // peer id -> { sendGate, hearGate, sending, audio }
-  const st = id => state.get(id) || state.set(id, { sendGate: new VoiceGate(MP), hearGate: new VoiceGate(MP), sending: false, audio: null }).get(id);
+  const state = new Map();          // peer id -> { sendGate, sending, audio }
+  const st = id => state.get(id) || state.set(id, { sendGate: new VoiceGate(MP), sending: false, audio: null }).get(id);
   let mic = null, micLevel = null;
 
   transport.onStream(function onStream(id, stream) {
@@ -43,7 +43,10 @@ export function createVoice({ camera, presence, transport, params }) {
     pa.setDistanceModel('linear'); pa.setRefDistance(MP.voiceFull); pa.setMaxDistance(MP.voiceSilent); pa.setRolloffFactor(1);
     pa.position.y = 1.6;
     s.audio = { el, pa, level: levelMeter(ctx, stream), stream };
-    s.hearGate.on = true;
+    // keep playing until the sender stops sending; distance only turns the volume down. (Dropping it
+    // on my own distance check lost the voice for good when the two sides disagreed by a moment.)
+    const ended = () => { if (s.audio?.stream === stream) stopHearing(s); };
+    stream.addEventListener('removetrack', ended); stream.getAudioTracks()[0].addEventListener('ended', ended);
   });
   presence.onLeave(p => { const s = state.get(p.id); if (s) { stopHearing(s); state.delete(p.id); } });
 
@@ -68,7 +71,6 @@ export function createVoice({ camera, presence, transport, params }) {
       if (send && mic && !s.sending) s.sending = transport.send(p, mic);
       if ((!send || !mic) && s.sending) { transport.stop(p, mic); s.sending = false; }
       if (s.audio) {
-        if (!s.hearGate.update(p.dist, dt)) { stopHearing(s); continue; }
         if (p.player && s.audio.pa.parent !== p.player.group) p.player.group.add(s.audio.pa);
         if (p.player) p.player.speaking = s.audio.level();
       } else if (p.player) p.player.speaking = 0;

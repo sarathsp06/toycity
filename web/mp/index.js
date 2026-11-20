@@ -13,7 +13,7 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
   hud.innerHTML = `<button id="mpname" title="Change your name"></button>
     <select id="mplook" aria-label="Your character and view"><optgroup label="Character">${PERSONAS.map(p => `<option value="${p.id}">🧍 ${p.label}</option>`).join('')}</optgroup>
       <optgroup label="View"><option value="view:eyes">👁️ Through my eyes</option><option value="view:behind">🎥 From behind</option></optgroup></select>
-    <button id="mpmic" title="Microphone: people within a few metres hear you"></button>
+    <button id="mpmic" title="Microphone: people within about 10 metres hear you, louder when closer"></button>
     <button id="mpsound" title="Birds, wind and traffic"></button>
     <span id="mppeople">Looking for people nearby…</span>`;
   const $ = s => hud.querySelector(s);
@@ -27,7 +27,8 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
     $('#mpmic').classList.toggle('on', voice.micOn);
     $('#mpsound').textContent = ambience.on ? '🔊 Sounds' : '🔈 Sounds off';
     const ps = [...presence.peers.values()], near = ps.filter(p => p.shown).length;
-    $('#mppeople').textContent = ps.length ? `${near} nearby · ${ps.length} in this area` : 'Nobody around yet';
+    $('#mppeople').textContent = !ps.length ? 'Nobody around yet'
+      : `${near} nearby · ${ps.length} in this area` + (near && !voice.micOn ? ' · turn your mic on to talk' : '');
   }
   // change name in place: the button turns into a text box; Enter or leaving it saves, Escape cancels
   $('#mpname').onclick = () => {
@@ -47,7 +48,7 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
     else { presence.setPersona(v); useAvatar?.(v); }
     e.target.value = presence.persona; e.target.blur();
   };
-  $('#mpmic').onclick = async () => { try { await voice.setMic(!voice.micOn); } catch (e) { alert('Could not use the microphone: ' + (e.message || e)); } render(); };
+  $('#mpmic').onclick = async () => { try { presence.setMic(await voice.setMic(!voice.micOn)); } catch (e) { alert('Could not use the microphone: ' + (e.message || e)); } render(); };
   $('#mpsound').onclick = () => { ambience.toggle(); render(); };
   render();
 

@@ -35,7 +35,7 @@ All distances and rates are in `web/mp/config.js`.
 
 - **Off by default.** The microphone button asks for permission. Echo cancellation, noise suppression and automatic gain are all on.
 - **Seeing someone never sends audio.** I send my microphone to a player once they're within **4 m**. I stop when they've been beyond **6 m** for **3 s**, so walking back and forth across the boundary doesn't reconnect. Receiving uses the same rule.
-- **Volume:** a Three.js `PositionalAudio` attached to the speaker's avatar. Full volume up to 1 m, fading linearly to silent at 3 m, with HRTF panning so you can hear which side someone is on. The listener moves with the camera.
+- **Volume:** a Three.js `PositionalAudio` attached to the speaker's avatar. Full volume up to 2 m, fading linearly to silent at 10 m (about as far as you can see someone), with HRTF panning so you can hear which side someone is on. The listener moves with the camera.
 - There is **one connection per pair of players** and no separate voice link. The stream is added to the existing connection, always through the same room. Each microphone is sent raw, and mixing happens only in the listener's browser.
 - **Talking indicator:** a ring under the speaker's feet lights up with their loudness. My own microphone button fills with my level.
 - **Chrome quirk:** WebRTC audio only reaches Web Audio if the stream also feeds a muted `<audio>` element. A stream can also arrive a moment before its track does, so the code waits for the track.
@@ -45,9 +45,9 @@ All distances and rates are in `web/mp/config.js`.
 ```
 A and B in the same room (Nostr) ─► WebRTC offer/answer through the relays ─► data channel open
   ─► state messages both ways (10 per second / 1 per second)
-B comes within 4 m and A's mic is on ─► A: addStream(mic, B) ─► renegotiation on the same connection
+B comes within 10 m and A's mic is on ─► A: addStream(mic, B) ─► renegotiation on the same connection
   ─► B: onPeerStream ─► PositionalAudio on A's avatar
-B beyond 6 m for 3 s ─► A: removeStream ─► B: drops the audio
+B beyond 12 m for 3 s ─► A: removeStream ─► B: drops the audio when the track ends
 B leaves the room, closes the tab or is silent for 5 s ─► avatar and audio removed, connection closed
 ```
 
