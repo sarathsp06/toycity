@@ -12,8 +12,11 @@ export const MP = {
   roomLeaveEdge: 40,              // and leave it again only when this far away
   sendHz: 10,                     // position updates while moving
   idleHz: 1,                      // and while standing still
-  showWithin: 60,                 // other players appear inside this distance (10 m hid friends a street away)
-  hideBeyond: 70,                 // and disappear beyond this one (no flicker at the edge)
+  // other players are drawn as themselves at any distance we hear about them (the rooms around you,
+  // roughly 250-500 m); perspective makes them small far away, which is how a real street looks
+  showWithin: 2000,
+  hideBeyond: 2100,
+  nearby: 60,                     // 'nearby' in the people count
   interpDelay: 0.15,              // remote players are drawn this far in the past, for smoothness
   peerTimeout: 5,                 // forget a player not heard from for this long
   // voice reaches as far as you can see someone: 3 m (the first version) was silent before you

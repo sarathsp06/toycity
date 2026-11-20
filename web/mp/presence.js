@@ -65,22 +65,8 @@ export async function createPresence({ scene, player, toRD, fromRD, slug }) {
     r.room.leave(); rooms.delete(key);
     for (const p of [...peers.values()]) { p.rooms.delete(key); if (!p.rooms.size) drop(p); }
   }
-  // beyond the distance where people are drawn as people, they are a glowing dot with their name that
-  // stays the same size on screen, so you always know someone is out there and where they are going
-  function dot(p) {
-    const c = document.createElement('canvas'); c.width = 256; c.height = 64; const g = c.getContext('2d');
-    g.fillStyle = '#ff5a36'; g.strokeStyle = '#fff'; g.lineWidth = 5; g.beginPath(); g.arc(32, 32, 20, 0, 7); g.fill(); g.stroke();
-    g.font = 'bold 28px system-ui, sans-serif'; g.lineWidth = 6; g.strokeStyle = 'rgba(20,30,40,.8)'; g.fillStyle = '#fff'; g.textBaseline = 'middle';
-    g.strokeText(p.name || 'Visitor', 62, 34); g.fillText(p.name || 'Visitor', 62, 34);
-    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
-    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true, sizeAttenuation: false }));
-    sp.scale.set(0.2, 0.05, 1); sp.center.set(0.125, 0.5); sp.renderOrder = 30; sp.userData.name = p.name;
-    return sp;
-  }
-  function dropDot(p) { if (!p.dot) return; scene.remove(p.dot); p.dot.material.map.dispose(); p.dot.material.dispose(); p.dot = null; }
   function drop(p) {
     for (const f of listeners.leave) f(p);
-    dropDot(p);
     if (p.player) disposePlayer(p.player);
     peers.delete(p.id);
   }
@@ -110,14 +96,10 @@ export async function createPresence({ scene, player, toRD, fromRD, slug }) {
       if (p.player) {
         p.player.group.visible = show;
         const [x, z] = fromRD(s.x, s.y); p.player.group.position.set(x, 0.15, z); p.player.group.rotation.y = s.h;
-        if (show) animate(p.player, s.v, dt);
+        // far-away people still walk, but their animation only needs updating a few times a second
+        if (show && (p.dist < 80 || (p.animT = (p.animT || 0) + dt) > 0.2)) { animate(p.player, s.v, p.dist < 80 ? dt : p.animT); p.animT = 0; }
       }
       p.shown = show;
-      if (!show) {
-        if (p.dot && p.dot.userData.name !== p.name) dropDot(p);
-        if (!p.dot) { p.dot = dot(p); scene.add(p.dot); }
-        const [x, z] = fromRD(s.x, s.y); p.dot.position.set(x, 2.2, z); p.dot.visible = true;
-      } else if (p.dot) p.dot.visible = false;
     }
   }
 

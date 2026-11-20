@@ -6,6 +6,7 @@
 import { createPresence } from './presence.js';
 import { createVoice, p2pTransport } from './voice.js';
 import { createAmbience } from './ambience.js';
+import { MP } from './config.js';
 
 export async function start({ scene, camera, player, toRD, fromRD, slug, params, hud, surroundings, useAvatar, view, goToRD }) {
   hud.innerHTML = `<button id="mpname" title="Change your name"></button>
@@ -24,7 +25,7 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
     $('#mpmic').textContent = voice.micOn ? '🎙️ Mic on' : '🎙️ Mic off';
     $('#mpmic').classList.toggle('on', voice.micOn);
     $('#mpsound').textContent = ambience.on ? '🔊 Sounds' : '🔈 Sounds off';
-    const ps = [...presence.peers.values()], near = ps.filter(p => p.shown).length;
+    const ps = [...presence.peers.values()], near = ps.filter(p => p.dist <= MP.nearby).length;
     if (!$('#mplist').hidden) list();
     $('#mppeople').textContent = !ps.length ? '👥 Nobody around yet'
       : `👥 ${near} nearby · ${ps.length} in this area` + (near && !voice.micOn ? ' · turn your mic on to talk' : '');
