@@ -20,7 +20,7 @@ const slug = params.get('region') || 'rotterdam';   // Rotterdam city + Barendre
 // fetch the page once more, bypassing the cache.
 if (!document.getElementById('eyesbtn') && !sessionStorage.getItem('toycity.refreshed')) {
   sessionStorage.setItem('toycity.refreshed', '1');
-  location.replace(location.pathname + '?fresh=' + Date.now() + location.hash);
+  params.set('fresh', Date.now()); location.replace(location.pathname + '?' + params + location.hash);   // keeps ?meet= and friends
 }
 const base = new URL(`./regions/${slug}/`, location.href);
 const progress = (f, t) => window.loadProgress?.(f, t);
@@ -706,6 +706,20 @@ function unstick() {
   return true;
 }
 
+// Arrive near a spot (a meeting link, or Go next to someone): a few metres from it in a random
+// direction, looking at it, so people who come to the same place stand around it, not on each other.
+// If that spot is inside something solid, unstick() moves to the nearest free one once it has loaded.
+function arriveNear(X, Y, r = 2 + Math.random() * 2) {
+  const a = Math.random() * Math.PI * 2, cx = X - ORX, cz = -(Y - ORY);
+  if (fly) toggleFly();
+  goal = null; marker.visible = false; arriveStreet = null;
+  player.position.set(cx + Math.cos(a) * r, 0.15, cz + Math.sin(a) * r);
+  yaw = Math.atan2(player.position.x - cx, player.position.z - cz);   // camera behind me, the spot ahead
+  dist = Math.min(dist, 20); needUnstick = true; updateWanted();
+}
+// ?meet=X,Y (RD metres): the place a meeting link points at
+{ const m = (params.get('meet') || '').split(',').map(Number); if (m.length === 2 && m.every(Number.isFinite)) arriveNear(m[0], m[1]); }
+
 // ---------- place names: nearest address within 25 m, else street ----------
 function nearestPlace() {
   const [X, Y] = toRD(player.position.x, player.position.z);
@@ -941,7 +955,7 @@ function surroundings() {
   return { green: Math.min(1, trees / 25), street: Math.min(1, cars / 30) };
 }
 if (params.get('mp') !== '0') import('./mp/index.js').then(m => m.start({
-  scene, camera, player, toRD, fromRD: (X, Y) => [X - ORX, ORY - Y], slug, params, surroundings, useAvatar, solids, goToRD: (X, Y) => { if (fly) toggleFly(); goal = null; marker.visible = false; player.position.set(X - ORX, 0.15, -(Y - ORY)); dist = Math.min(dist, 20); needUnstick = true; updateWanted(); }, view: { get eyes() { return firstPerson; }, set eyes(v) { setFirstPerson(v); } },
+  scene, camera, player, toRD, fromRD: (X, Y) => [X - ORX, ORY - Y], slug, params, surroundings, useAvatar, solids, goToRD: arriveNear, view: { get eyes() { return firstPerson; }, set eyes(v) { setFirstPerson(v); } },
   hud: document.getElementById('mp'),
 })).then(s => { social = s; window.__city.social = s; }).catch(e => { console.warn('multiplayer unavailable', e); document.getElementById('mp').textContent = 'Multiplayer unavailable right now'; });
 

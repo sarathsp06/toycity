@@ -14,6 +14,7 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
   hud.innerHTML = `<button id="mpname" title="Change your name"></button>
     <button id="mpview" title="Switch between seeing through your eyes and from behind (V)"></button>
     <button id="mpsound" title="Birds, wind and traffic"></button>
+    <button id="mpmeet" title="Share a link to where you are standing; whoever opens it arrives here">📍 Meeting link</button>
     <button id="mppeople">Looking for people nearby…</button><div id="mplist" hidden></div>`;
   // the call panel and invitations sit at the bottom of the screen, where thumbs are
   const callBox = document.createElement('div'); callBox.id = 'mpcall'; callBox.hidden = true; document.body.append(callBox);
@@ -147,11 +148,20 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
     $('#mplist').replaceChildren(...(ps.length ? ps.map(p => {
       const row = document.createElement('div'), go = document.createElement('button');
       row.textContent = `${p.name || 'Visitor'}${p.mic ? '' : ' 🔇'} · ${p.dist < 1000 ? Math.round(p.dist) + ' m' : (p.dist / 1000).toFixed(1) + ' km'} `;
-      go.textContent = 'Go'; go.onclick = () => { const s = p.track.sample(performance.now() / 1000); if (s && goToRD) goToRD(s.x + 2, s.y + 2); };
+      go.textContent = 'Go'; go.onclick = () => { const s = p.track.sample(performance.now() / 1000); if (s && goToRD) goToRD(s.x, s.y); };
       const talk = document.createElement('button'); talk.textContent = call?.members.has(p.id) ? 'In call' : '📞 Talk'; talk.disabled = !!call?.members.has(p.id); talk.onclick = () => ring(p.id);
       row.append(go, talk); return row;
     }) : [Object.assign(document.createElement('div'), { textContent: 'Nobody in this area yet. Share the link with a friend!' })]));
   }
+  // a meeting link: this page, plus where I stand. Opening it puts you a few metres from that spot.
+  $('#mpmeet').onclick = async () => {
+    const [X, Y] = toRD(player.position.x, player.position.z);
+    const url = new URL(location.pathname, location.origin);
+    url.searchParams.set('meet', X.toFixed(1) + ',' + Y.toFixed(1));
+    if (navigator.share) { try { await navigator.share({ title: 'Meet me in Toy City', url: url.href }); return; } catch (e) { if (e.name === 'AbortError') return; } }
+    try { await navigator.clipboard.writeText(url.href); toast('📍 Meeting link copied. Send it to your friends.', [], 4000); }
+    catch { prompt('Copy this meeting link:', url.href); }
+  };
   $('#mppeople').onclick = () => { const l = $('#mplist'); l.hidden = !l.hidden; if (!l.hidden) list(); };
   // who you are is not a choice (everyone gets a random person and outfit); how you see the world is
   $('#mpview').onclick = e => { if (view) view.eyes = !view.eyes; e.target.blur(); render(); };
