@@ -5,7 +5,7 @@
 <title>Toy City</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>   <!-- defer: a slow map library never holds up the page -->
 <style>
   html, body { margin: 0; height: 100%; background: #9ccbe8; font-family: system-ui, sans-serif; overflow: hidden; }
   canvas { display: block; }
@@ -73,6 +73,16 @@
     if (text) document.getElementById('loadstep').textContent = `${text} · ${p}%`;
   };
   loadProgress(0.02, 'Starting the 3D engine');
+  // when something stops the start (no 3D graphics, a blocked download, an old cached file), say what
+  // on the loading screen instead of spinning forever
+  const GL = 'This browser has 3D graphics (WebGL) switched off. In Chrome: Settings, System, turn on "Use graphics acceleration", then restart Chrome.';
+  const why = msg => { if (/webgl/i.test(msg)) msg = GL; const el = document.getElementById('loadstep'); if (el && document.getElementById('loading')) el.textContent = msg; };
+  addEventListener('error', e => { const t = e.target; if (t && t !== window && !/^(SCRIPT|LINK)$/.test(t.tagName)) return;   // a missing picture is not fatal
+    why('Could not start: ' + (e.message || t.src || t.href || 'unknown error') + '. Try reloading.'); }, true);
+  addEventListener('unhandledrejection', e => why('Could not start: ' + (e.reason?.message || e.reason) + '. Try reloading.'));
+  try { if (!document.createElement('canvas').getContext('webgl2')) why(GL); } catch {}
+  setTimeout(() => { if (document.getElementById('loading') && +document.getElementById('loading').getAttribute('aria-valuenow') < 10)
+    why('Still waiting for the 3D engine to download. An ad or script blocker may be stopping cdn.jsdelivr.net; allow it for this site and reload.'); }, 20000);
 </script>
 <div id="hud">
   <b id="title">Toy City</b><br/>
