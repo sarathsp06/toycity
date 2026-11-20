@@ -19,6 +19,9 @@
   #hud[hidden] { display: none; }
   #hint { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); color: #fff; background: rgba(20,30,40,.6); padding: 6px 12px; border-radius: 999px; font-size: 13px; pointer-events: none; transition: opacity 1s; z-index: 3; white-space: nowrap; }
   #hint.gone { opacity: 0; }
+  #carbtn { position: fixed; left: 50%; bottom: 66px; transform: translateX(-50%); z-index: 6; font: 600 15px system-ui, sans-serif; padding: 9px 18px; border: 0; border-radius: 999px; background: #ffb547; color: #1b1206; box-shadow: 0 4px 16px rgba(0,0,0,.3); cursor: pointer; }
+  #carbtn[hidden] { display: none; }
+  body.touch #carbtn { bottom: 204px; }
   #hud select, #hud input, #hud button { font: inherit; padding: 4px 7px; border: 1px solid #c5d2da; border-radius: 6px; background: #fff; }
   kbd { background: #eef3f6; border: 1px solid #c5d2da; border-radius: 4px; padding: 0 5px; font-family: inherit; }
   #perf:empty { display: none; }
@@ -112,7 +115,7 @@
 </script>
 <div id="top"><a id="back" href="./" title="Choose another place" aria-label="Choose another place">←</a><span id="title">Toy City</span><button id="menubtn" aria-label="Menu" aria-expanded="false" aria-controls="hud" title="Menu">☰</button></div>
 <div id="hud" hidden>
-  <span class="keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · drag to look · click to go there · scroll or <kbd>+</kbd><kbd>−</kbd> zoom · <kbd>V</kbd> your eyes · <kbd>F</kbd> fly · <kbd>M</kbd> map</span>
+  <span class="keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · drag to look · click to go there · scroll or <kbd>+</kbd><kbd>−</kbd> zoom · <kbd>V</kbd> your eyes · <kbd>E</kbd> drive a parked car · <kbd>F</kbd> fly · <kbd>M</kbd> map</span>
   <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
     <select id="tod" aria-label="Time of day"><option value="morning">Morning</option><option value="noon" selected>Midday</option><option value="golden">Golden hour</option><option value="dusk">Dusk</option><option value="night">Night</option></select>
     <select id="quality" aria-label="Quality"><option value="low">Fast</option><option value="mid" selected>Balanced</option><option value="high">Sharp</option></select>
@@ -122,6 +125,7 @@
   <div id="perf"></div>
 </div>
 <div id="hint">WASD to walk · drag to look · ☰ for more</div>
+<button id="carbtn" hidden>🚗 Get in (E)</button>
 <div id="place">loading…</div>
 <div id="mini" hidden></div><button id="minibtn" title="Bigger or smaller map" hidden>⤢</button>
 <div id="joy" aria-label="Move"><div></div></div><button id="jumpbtn" aria-label="Jump">Jump</button>

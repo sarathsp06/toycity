@@ -21,6 +21,7 @@ and streamed into a tiny three.js world you can walk, run, jump and drive throug
 
 - 🚶 **Walk, run and jump** (yes, onto hedges; no, not through trees, cars or other people)
 - 🖱️ **Click anywhere** and walk there, or **search an address** like *Schaatsbaan 43*
+- 🚗 **Drive any parked car**: walk up to one and press `E` (or tap 🚗 Get in). Shift for 100 km/h, `E` again to get out; the car stays where you parked it, and friends see you drive by
 - 🛩️ **Fly** (press `F`) high above the town and drop back in anywhere
 - 🌅 **Change the time of day**, from morning to golden hour to night
 - 📱 **Play on your phone** with a joystick, a jump button, drag to look and pinch to zoom
@@ -32,6 +33,7 @@ and streamed into a tiny three.js world you can walk, run, jump and drive throug
 | `W` `A` `S` `D` / arrows | walk |
 | `Shift` | run |
 | `Space` | jump |
+| `E` | get in / out of a parked car |
 | `F` | fly |
 | drag / scroll | look / zoom |
 

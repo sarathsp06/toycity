@@ -217,6 +217,16 @@ There are two kinds of solid, and one question: "does a circle of radius r at (x
 **Lesson:** one list of shapes and one test. Making a new kind of thing solid is one line in
 `FOOTPRINTS`, not another special case in the movement code.
 
+### Driving
+
+Any parked car can be driven (`web/vehicle.js`). Getting in hides that parked instance and switches
+off its footprint in the solids registry; the car becomes a child of the player, so streaming, the
+camera and multiplayer keep following the player as before. Steering is a bicycle model (heading
+changes by speed × tan(steer) / wheelbase), with less steering at speed. Collision counts how many
+of eight points around the body touch the bitmap or a footprint: a move must touch nothing, or less
+than now, so a car parked bumper to bumper can always back out but never drive into a hedge. Other
+players receive `model:colour` in the state message and draw the car instead of the person.
+
 ## 10. Phones
 
 On a touch screen the page swaps keyboard hints for a joystick (push it to the edge to run), a

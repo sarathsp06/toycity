@@ -10,7 +10,7 @@ import { MP } from './config.js';
 import { PERSON } from '../solids.js';
 import * as THREE from 'three';
 
-export async function start({ scene, camera, player, toRD, fromRD, slug, params, hud, surroundings, useAvatar, view, goToRD, solids }) {
+export async function start({ scene, camera, player, toRD, fromRD, slug, params, hud, surroundings, useAvatar, view, goToRD, solids, vehicle }) {
   hud.innerHTML = `<button id="mpname" title="Change your name"></button>
     <button id="mpview" title="Switch between seeing through your eyes and from behind (V)"></button>
     <button id="mpsound" title="Birds, wind and traffic"></button>
@@ -20,7 +20,7 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
   const callBox = document.createElement('div'); callBox.id = 'mpcall'; callBox.hidden = true; document.body.append(callBox);
   const toasts = document.createElement('div'); toasts.id = 'mptoasts'; document.body.append(toasts);
   const $ = s => hud.querySelector(s);
-  const presence = await createPresence({ scene, player, toRD, fromRD, slug });
+  const presence = await createPresence({ scene, player, toRD, fromRD, slug, vehicle });
   // other people are solid: you walk around them, not through them
   solids?.live(() => [...presence.peers.values()].filter(p => p.player?.group.visible && p.dist < 20)
     .map(p => ({ x: p.player.group.position.x, z: p.player.group.position.z, r: PERSON.r })));

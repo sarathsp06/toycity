@@ -45,7 +45,7 @@ export function setLook(p, look) {
       if (o.isMesh && o.material.name === 'toy_shirt') { o.material = o.material.clone(); o.material.color.copy(shirt); o.userData.own = true; }
     });
     if (p.model) { p.mixer.stopAllAction(); disposeOwn(p.model); p.group.remove(p.model); }
-    p.model = model; p.group.add(model);
+    p.model = model; p.group.add(model); model.visible = !p.carMesh;
     p.mixer = new THREE.AnimationMixer(model);
     p.act = {}; for (const n of ['idle', 'walk', 'run']) { p.act[n] = p.mixer.clipAction(t.clips[n]); p.act[n].play(); p.act[n].setEffectiveWeight(n === 'idle' ? 1 : 0); }
   });
@@ -69,7 +69,17 @@ export function animate(p, speed, dt) {
   p.ring.material.opacity += ((p.speaking > 0.02 ? 0.9 : 0) - p.ring.material.opacity) * Math.min(1, dt * 10);
 }
 
+// someone driving: show their car instead of their person (make builds it from the game's car models)
+export function setVehicle(p, car, make) {
+  if (p.carMesh) { p.carMesh.removeFromParent(); p.carMesh.traverse(o => { if (o.isMesh && o.userData.own) o.material.dispose(); }); p.carMesh = null; }
+  const [name, col] = (car || '').split(':');
+  if (name && make) { p.carMesh = make(name, parseInt(col, 16)); if (p.carMesh) { p.carMesh.position.y = -0.15; p.group.add(p.carMesh); } }
+  if (p.model) p.model.visible = !p.carMesh;
+  p.ring.visible = !p.carMesh;
+}
+
 export function disposePlayer(p) {
+  setVehicle(p, '');
   p.group.removeFromParent();
   p.disposed = true;
   if (p.model) disposeOwn(p.model);

@@ -9,12 +9,12 @@
 import * as THREE from 'three';
 import { MP } from './config.js';
 import { roomsFor, Track, visible, cleanName } from './logic.js';
-import { ready as avatarsReady, makePlayer, setName, setLook, animate, disposePlayer } from './players.js';
+import { ready as avatarsReady, makePlayer, setName, setLook, setVehicle, animate, disposePlayer } from './players.js';
 
 import { parseLook, myLook } from '../avatar.js';
 const TRYSTERO = './trystero-nostr.js';   // patched local copy, see the file header
 
-export async function createPresence({ scene, player, toRD, fromRD, slug }) {
+export async function createPresence({ scene, player, toRD, fromRD, slug, vehicle }) {
   const { joinRoom, selfId } = await import(TRYSTERO);
   // Relay fallback (TURN): when two players' networks block a direct connection (mobile data, many
   // offices), the WebRTC traffic goes through Cloudflare's relay instead. Short-lived credentials come
@@ -28,7 +28,7 @@ export async function createPresence({ scene, player, toRD, fromRD, slug }) {
   const look = myLook();
   let myName = cleanName(localStorage.getItem('toycity.name')) || 'Visitor ' + (100 + Math.floor(Math.random() * 900));
   let myMic = false;
-  let seq = 0, sendT = 0, lastSent = null, roomT = 0;
+  let seq = 0, sendT = 0, lastSent = null, roomT = 0, lastCar = '';
   const rooms = new Map();          // key -> { room, send }
   const peers = new Map();          // id -> peer
   const listeners = { leave: [], room: [], call: [] };
@@ -45,7 +45,7 @@ export async function createPresence({ scene, player, toRD, fromRD, slug }) {
     const [send, receive] = room.makeAction('st');
     receive((d, id) => {
       if (!Array.isArray(d) || d.length < 6) return;
-      const [s, x, y, h, v, n, look, micOn] = d;
+      const [s, x, y, h, v, n, look, micOn, car] = d;
       if (![s, x, y, h, v].every(Number.isFinite)) return;
       const p = peer(id); p.rooms.add(key);
       p.last = performance.now() / 1000;
@@ -54,6 +54,8 @@ export async function createPresence({ scene, player, toRD, fromRD, slug }) {
       if ((name && name !== p.name) || mic !== p.mic) { p.name = name || p.name; p.mic = mic; if (p.player) setName(p.player, tag(p)); }
       const l = parseLook(look) ? look : 'classic';
       if (l !== p.look) { p.look = l; if (p.player) setLook(p.player, l); }
+      const c = typeof car === 'string' && /^[a-z0-9]{1,12}:[0-9a-f]{1,6}$/.test(car) ? car : '';   // "model:colour" while driving
+      if (c !== p.car) { p.car = c; if (p.player) setVehicle(p.player, c, vehicle?.make); }
     });
     // call invitations and answers go straight to one player (see index.js)
     const [sendCall, receiveCall] = room.makeAction('call');
@@ -85,8 +87,9 @@ export async function createPresence({ scene, player, toRD, fromRD, slug }) {
     }
     // 10 updates a second while moving, one a second standing still, and at once after a change
     sendT -= dt;
+    if ((vehicle?.shared || '') !== lastCar) { lastCar = vehicle?.shared || ''; lastSent = null; }
     if (!lastSent || (sendT <= 0 && (speed > 0.05 || now - lastSent >= 1 / MP.idleHz))) {
-      const state = [++seq, +X.toFixed(2), +Y.toFixed(2), +player.rotation.y.toFixed(3), +speed.toFixed(2), myName, look, myMic ? 1 : 0];
+      const state = [++seq, +X.toFixed(2), +Y.toFixed(2), +player.rotation.y.toFixed(3), +speed.toFixed(2), myName, look, myMic ? 1 : 0, vehicle?.shared || ''];
       for (const r of rooms.values()) r.send(state);
       sendT = 1 / MP.sendHz; lastSent = now;
     }
@@ -95,7 +98,7 @@ export async function createPresence({ scene, player, toRD, fromRD, slug }) {
       const s = p.track.sample(now); if (!s) continue;
       p.dist = Math.hypot(s.x - X, s.y - Y);
       const show = visible(p.shown, p.dist, MP.showWithin, MP.hideBeyond);
-      if (show && !p.player) { p.player = makePlayer(p.id, tag(p), p.look); scene.add(p.player.group); }
+      if (show && !p.player) { p.player = makePlayer(p.id, tag(p), p.look); scene.add(p.player.group); if (p.car) setVehicle(p.player, p.car, vehicle?.make); }
       if (p.player) {
         p.player.group.visible = show;
         const [x, z] = fromRD(s.x, s.y); p.player.group.position.set(x, 0.15, z); p.player.group.rotation.y = s.h;

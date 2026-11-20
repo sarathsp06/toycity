@@ -27,6 +27,7 @@ const CELL = 8;
 const cellOf = (x, z) => Math.floor(x / CELL) + ',' + Math.floor(z / CELL);
 
 export function hits(f, x, z, r) {
+  if (f.off) return false;   // switched off, e.g. a parked car someone is driving
   const dx = x - f.x, dz = z - f.z;
   if (f.r !== undefined) return dx * dx + dz * dz < (f.r + r) ** 2;
   const c = Math.cos(f.yaw), s = Math.sin(f.yaw);   // into the object's own frame (three.js y rotation)
