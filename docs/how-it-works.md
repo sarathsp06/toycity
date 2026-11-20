@@ -135,11 +135,17 @@ about priorities.
   connection a revisit loads in **about 1 second instead of about 9**.
 - On the local dev server this cache is **off** (unless `?cache=1`), and the dev server sends
   `no-cache`. Nobody ever has to type `?v=123` again.
-- On Cloudflare, `tiles.json`, HTML and JS are always revalidated, and everything else is cached
-  for a day.
+- On Cloudflare, `/`, `tiles.json`, HTML and JS (including `/mp/*`) are always revalidated, and
+  everything else is cached for a day.
+- `/` was missing from that list once. Chrome kept an old page and ran it against new scripts; the
+  game stopped at 45 % with "Cannot set properties of null (setting 'onclick')" while Brave and
+  phones worked. Now `city.js` notices an old page (a button it expects is missing) and reloads
+  once, keeping the URL's parameters, and every button handler checks that its button exists.
+- If loading stalls, the loading screen says why: WebGL is off, a script failed, or a CDN is
+  blocked. Leaflet (the minimap) loads after the game, so a blocked map CDN can't hold it up.
 
 **Lesson:** a cache that can go stale will go stale, during a demo. Tie the cache name to the data
-version and it can't.
+version and it can't. And revalidate the page itself, not just the files it loads.
 
 ## 8. Thousands of parked cars at 75 fps
 
@@ -177,13 +183,31 @@ Lessons, mostly painful:
   not a private garden.
 - **Bus stops are only where a bus actually stops.** OpenStreetMap had a stop on the Schaatsbaan
   that no line serves. Now only the 99 stops on a real route are kept.
-- **Hedges are 1.1 m tall and you can jump onto them.** Trees are solid, so you can no longer walk
-  through an oak.
+- **Hedges are 1.1 m tall and you can jump onto them.** Trees, cars, lamp posts, benches and other
+  people are solid (see below).
 - **Address search** goes through a pre-built index, so typing "Schaatsbaan 43" needs no server.
 
 ![Street level](img/street.jpg)
 
 *Yes, the camera is inside a hedge. In the Netherlands this is called "a normal Tuesday".*
+
+### Solid things
+
+There are two kinds of solid, and one question: "does a circle of radius r at (x, z) touch anything?"
+
+- **Baked:** buildings, walls, water and hedges are rasterised into each near square's collision
+  bitmap when the square is baked.
+- **Footprints:** everything else is a footprint in one registry, `web/solids.js`: a circle
+  `{x, z, r}` or a turned box `{x, z, hx, hz, yaw}`. The size of each kind of object (car, tree
+  trunk, lamp, bollard, bench, bin, postbox, bus stop) is written down once, in `FOOTPRINTS`, and
+  scaled by the instance. A square registers its footprints when it loads and drops them when it
+  unloads. Other players are a *live* source: a function asked on every test, because they move.
+  Footprints sit in an 8 m grid, so a test looks at a handful of cells, not thousands of cars.
+
+`blocked()` in `city.js` asks the bitmap, then the registry. Flying ignores both.
+
+**Lesson:** one list of shapes and one test. Making a new kind of thing solid is one line in
+`FOOTPRINTS`, not another special case in the movement code.
 
 ## 10. Phones
 
@@ -196,22 +220,35 @@ thumb while walking with the other doesn't make the view spin.
 
 ## 11. Shipping: just files
 
-The site is a folder. `tools/build_site.sh` collects the game page, scripts, models and the
-Barendrecht region (208 MB, 595 files). `tools/pages_upload.mjs` uploads it to Cloudflare Pages,
-skipping every file Cloudflare already has (it compares content hashes), so a code change uploads
-3 files instead of 595.
+The site is a folder. `tools/build_site.sh` collects the game page, scripts, models and one region:
+`REGION=…`, default `rotterdam`, which is Rotterdam and Barendrecht together (670 squares, about
+1.2 GB, 3,470 files). `ZIP=1` also makes a zip. `tools/pages_upload.mjs` uploads it to Cloudflare
+Pages, skipping every file Cloudflare already has (it compares content hashes), so a code change
+uploads 3 files instead of 3,470.
+
+A deployment is a manifest (path → hash) of *every* file. For a code change we take the previous
+deployment's manifest, replace the hashes of the files that changed, and post that as the new
+deployment. The first full Rotterdam manifest was too big to send in one go, so it went through a
+temporary KV namespace in chunks, deleted afterwards. Upload tokens are written to a private
+temporary file and removed after use; nothing secret lives in the repository.
 
 **Lesson:** when your files are named by content, deploys are cheap and rollbacks are free.
+
+## Multiplayer
+
+Players meet browser to browser, with calls by tapping someone. The whole design, and what broke
+on the way (relays, TURN, where the listener's ears are), is in [multiplayer.md](multiplayer.md).
 
 ## 12. What's next
 
 - **meshoptimizer compression** on top of the current quantisation, probably 30–50 % smaller
   geometry.
-- **An 8 km level and a lazy index** per 8 km, needed before baking beyond Barendrecht and
-  Rotterdam.
+- **An 8 km level and a lazy index** per 8 km, needed before baking beyond Rotterdam.
+- **Search that prefers the nearest match**: some street names (the Schaatsbaan) exist in both
+  Barendrecht and Rotterdam, and search can jump across the city.
 - **Look-ahead that adapts to the connection**: on a slower line, look further ahead.
-- **Multiplayer with proximity voice**: hear people talking as you walk past them. The design is
-  ready. It needs a small live relay next to the static site.
+- **An SFU for crowds** (see [multiplayer.md](multiplayer.md)), and more and better-looking
+  open-licence people.
 
 ## Credits
 

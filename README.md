@@ -37,12 +37,12 @@ noticing. Probably.
 
 ## What you can do
 
-- 🚶 **Walk, run and jump** (yes, onto hedges; no, not through trees)
+- 🚶 **Walk, run and jump** (yes, onto hedges; no, not through trees, cars or other people)
 - 🖱️ **Click anywhere** and walk there, or **search an address** like *Schaatsbaan 43*
 - 🛩️ **Fly** (press `F`) high above the town and drop back in anywhere
 - 🌅 **Change the time of day**, from morning to golden hour to night
 - 📱 **Play on your phone** with a joystick, a jump button, drag to look and pinch to zoom
-- 👋 **Meet people**: other players show up within 10 m with their name above their head. Turn on your mic and anyone within a few metres hears you, from the direction you're standing in. It's all browser to browser, with no server of ours ([how](docs/multiplayer.md))
+- 👋 **Meet people**: everyone nearby is drawn as themselves, with their name above their head, and each player gets their own random look. **Tap someone** (or 📞 *Talk to …*) to call them; invite more for a group call. You hear them from the direction they're standing in. Share a 📍 **meeting link** and everyone arrives at the same spot, a few steps apart. It's all browser to browser, with no server of ours ([how](docs/multiplayer.md))
 - 🐦 **Hear the neighbourhood**: birds where it's green, traffic near busy streets, all made in the browser
 
 | Keyboard | |
@@ -94,7 +94,10 @@ tools/.venv/bin/python tools/overview_aerial.py barendrecht
 python3 tools/serve.py 8765        # then open http://127.0.0.1:8765/city.html
 
 # 4. Make the static site
-sh tools/build_site.sh             # → dist/site, ready for any static host
+sh tools/build_site.sh             # → dist/site (REGION=rotterdam by default: Rotterdam + Barendrecht)
+
+# 5. Tests
+node --test tests/*.test.mjs
 ```
 
 Handy test switches: `city.html?drive=100&net=80,20` drives through town at 100 m/s on a
@@ -104,12 +107,12 @@ desktop.
 ## Hosting
 
 It's just files. The live version runs on **Cloudflare Pages**: no server and no database. A code
-change re-uploads only the files that changed.
+change re-uploads only the files that changed. The only moving part is a tiny Worker that hands out
+short-lived TURN credentials, so players on strict mobile networks can still reach each other.
 
 ## Coming soon™
 
 - 🗣️ **Crowds**: an SFU for when more than a handful of people meet in one place
-- 🏙️ **Rotterdam**: 688 more squares
 - 🚙 **More cars**: a Skoda Superb, a VW Passat and a BMW 5 GT are waiting in the garage
 - 🦆 Ducks in the canals (not promised, but strongly hoped for)
 

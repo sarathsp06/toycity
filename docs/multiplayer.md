@@ -1,16 +1,16 @@
 # Multiplayer: seeing and hearing each other
 
-Status 2026-11-20: built and tested with two browser tabs. There is no server of our own: the site is still only static files.
+Status 2026-11-20: live on toycity.pages.dev and tested between a phone on a mobile network and a computer. There is no server of our own: the site is still only static files.
 
 ## Three independent systems
 
 | System | Code | Knows about |
 |---|---|---|
 | Geographic streaming | `web/city.js` | buildings, roads and terrain. Nothing about other players. |
-| Multiplayer presence | `web/mp/presence.js`, `players.js` | who is around, positions, names and avatars. Nothing about audio or the map. |
+| Multiplayer presence | `web/mp/presence.js`, `players.js` | who is around, positions, names, personas and call messages. Nothing about audio or the map. |
 | Spatial audio | `web/mp/voice.js` (voice), `web/mp/ambience.js` (environment) | microphone, proximity and positioning. Peers come through presence, and audio goes through a swappable transport. |
 
-`web/mp/index.js` wires them together and draws the buttons. `city.js` only calls `start()` and `update()`, which is about 25 lines including the helper that reports surroundings. `city.html?mp=0` turns the whole layer off.
+`web/mp/index.js` wires them together and draws the panel, the people list, the call bar and the toasts. `city.js` only calls `start()` and `update()`, which is about 25 lines including the helper that reports surroundings. `city.html?mp=0` turns the whole layer off.
 
 All distances and rates are in `web/mp/config.js`.
 
@@ -24,31 +24,43 @@ All distances and rates are in `web/mp/config.js`.
 
 ## Presence
 
-- **State:** `[seq, RD x, RD y, heading, speed, name]`. It's sent 10 times a second while moving, once a second while standing still, and immediately after a name change or when someone joins.
+- **Rooms are the RD square only** (`nl:<square>`), never the region name. Someone playing the Barendrecht map and someone on the Rotterdam map at the same spot are in the same room. Including the region slug once split players who had different maps open, and a friend never saw the other person.
+- **State:** `[seq, RD x, RD y, heading, speed, name, look, mic]`. `look` is the persona and outfit, and `mic` says whether the microphone is on, so others see a 🔇 after a muted name. It's sent 10 times a second while moving, once a second while standing still, and immediately after a change or when someone joins.
 - **Smoothing:** other players are drawn 150 ms in the past, between the two samples on either side of that moment. Late or duplicate samples (an older sequence number) are dropped.
-- **Visibility:** players appear within 10 m and disappear beyond 12 m. The rule is one function in `logic.js`, so a camera-view test can replace it later.
-- **Leaving:** a player is removed when the room says they've gone, or after 5 seconds without an update. That cleans up their avatar and their voice.
-- **Avatars:** a copy of our own person, with a shirt colour taken from the player's id and their name above their head. Idle, walk and run animations are blended by speed.
+- **Visibility:** everyone you hear about (your room and the neighbouring ones, roughly 250–500 m) is drawn as themselves, at their real size. Perspective makes them small far away, which is how a real street looks. Far-away people update their animation 5 times a second instead of every frame. (A big coloured dot for distant people was tried and rejected: it didn't look like a person.)
+- **Leaving:** a player is removed when the room says they've gone, or after 5 seconds without an update. That cleans up their avatar, their voice and their collision footprint.
+- **Avatars (personas):** each browser picks a persona and an outfit at random the first time and keeps it (`localStorage` `toycity.look`, or `?look=` for testing). There is no picker in the UI. Zuri (a Rigify character converted to Mixamo bone names by `tools/personas.py`) is the default, with garment colours varied per player; the classic figure is the fallback. Stacey (twisted hands after retargeting) and Billy (looked like a mannequin) are parked in `data/personas_wip`. Idle, walk and run animations are blended by speed; retargeting aligns rest-pose bone directions and leaves finger bones alone.
 - **Names:** click your name in the panel to edit it in place. It's saved in the browser and sent with every update.
+- **People are solid.** Other players are registered as live footprints in the collision registry (see [How it works](how-it-works.md#solid-things)), so you can't walk through them.
 
-## Voice
+## Finding people
 
-- **Off by default.** The microphone button asks for permission. Echo cancellation, noise suppression and automatic gain are all on.
-- **Seeing someone never sends audio.** I send my microphone to a player once they're within **4 m**. I stop when they've been beyond **6 m** for **3 s**, so walking back and forth across the boundary doesn't reconnect. Receiving uses the same rule.
-- **Calls:** voice only flows inside a call. Tap a person (or 📞 Talk in the people list) to invite them; they Accept or decline; inviting more people makes a group call. Everyone in a call is heard at full volume from their direction (HRTF), wherever they stand. Invitations and answers travel on a `call` data-channel action straight to one player.
-- There is **one connection per pair of players** and no separate voice link. The stream is added to the existing connection, always through the same room. Each microphone is sent raw, and mixing happens only in the listener's browser.
+- **People list** (the people count in the panel): everyone in your rooms with their distance, a **Go** button that puts you a few metres from them, and a **Talk** button.
+- **📍 Meeting link:** makes `city.html?meet=X,Y` for where you stand and shares it (the phone share sheet, otherwise the clipboard, otherwise a box to copy from). Everyone who opens it arrives on a random spot 2–4 m from that place, facing it, so a group spreads out instead of stacking on one point. Go uses the same `arriveNear()`.
+
+## Voice: calls
+
+Voice is **call-only**. Seeing someone never sends audio. (The first version sent your microphone to anyone within a few metres, which people found confusing: you couldn't tell who heard you.)
+
+- **Starting a call:** `📞 Talk to <name>` buttons appear for people within 15 m. You can also tap the person, or use Talk in the people list. They get a toast with **Answer** / **Not now**. A ring gives up after 25 s.
+- **Group calls:** inviting someone while in a call adds them. Everyone in the call hears everyone else in it.
+- **In the call:** a bar shows who is in it and who is still ringing, with **Mute** and **Leave**. The microphone is opened only while a call is connected and released when it ends, so the browser's mic indicator matches reality.
+- **How it sounds:** in a call, refDistance is set very large, so callers are heard at full volume wherever they stand, but still from their direction (HRTF). The listener ("ears") sits on your own head, 1.6 m up, turned with the camera. It used to sit on the camera, about 14 m behind the player, which made everyone inaudible.
+- **Signalling:** invite, join, decline and leave travel on a `call` data-channel action sent straight to one player (`presence.sendTo`). `voice.js` asks `inCall(id)` to decide who gets my audio.
+- There is **one connection per pair of players** and no separate voice link. The stream is added to the existing connection. Each microphone is sent raw, and mixing happens only in the listener's browser.
 - **Talking indicator:** a ring under the speaker's feet lights up with their loudness. My own microphone button fills with my level.
 - **Chrome quirk:** WebRTC audio only reaches Web Audio if the stream also feeds a muted `<audio>` element. A stream can also arrive a moment before its track does, so the code waits for the track.
+- **Logs:** everything voice-related is logged with a `[voice]` prefix, with a summary every 5 s while anyone is near: mic level, who I'm sending to, who I hear and how loud. Leave these in: they found the listener bug.
 
 ### Connection lifecycle
 
 ```
-A and B in the same room (Nostr) ─► WebRTC offer/answer through the relays ─► data channel open
+A and B in the same room (Nostr) ─► WebRTC offer/answer through the relays (TURN if needed) ─► data channel open
   ─► state messages both ways (10 per second / 1 per second)
-B comes within 10 m and A's mic is on ─► A: addStream(mic, B) ─► renegotiation on the same connection
-  ─► B: onPeerStream ─► PositionalAudio on A's avatar
-B beyond 12 m for 3 s ─► A: removeStream ─► B: drops the audio when the track ends
-B leaves the room, closes the tab or is silent for 5 s ─► avatar and audio removed, connection closed
+A taps B ─► call:invite ─► B answers ─► call:join ─► both open the mic ─► addStream on the same connection
+  ─► onPeerStream ─► PositionalAudio on the caller's avatar
+someone leaves the call ─► call:leave ─► removeStream; the other side drops the audio when the track ends
+B leaves the room, closes the tab or is silent for 5 s ─► avatar, audio and footprint removed, connection closed
 ```
 
 ## Background sounds
@@ -75,11 +87,13 @@ Worth it once more than about 15–20 people gather in the same 500 m square, or
 
 - Everyone in a room connects to everyone else in it. That's fine for small groups, but it won't scale to crowds.
 - About 1 in 10 networks block direct connections. Those players connect through Cloudflare's TURN relay instead (credentials from the `toycity-turn` Worker), which is slower to set up, so meeting someone can take up to half a minute.
-- The public relays are run by other people and can be slow or go down. Six are used in parallel.
+- The public relays are run by other people and can be slow or go down. Five are used in parallel.
 - Positions aren't checked by anyone, and mute and block are local only. Players connected directly can see each other's IP addresses.
 - Jumps aren't shared yet. Other players stay on the ground.
 
 ## Testing
 
-- `node --test tests/*.test.mjs` runs 9 tests: rooms and their hysteresis, smoothing including late and duplicate updates, heading wrap-around, the voice range rules including someone walking back and forth across the boundary, visibility hysteresis, the volume curve, and name cleaning.
-- End to end: open `city.html?fakemic=1` in two tabs. `fakemic` uses a beeping tone instead of a real microphone. Each tab sees the other, hears its tone, and loses it again after walking 9 m away.
+- `node --test tests/*.test.mjs` runs 13 tests: rooms and their hysteresis, smoothing including late and duplicate updates, heading wrap-around, the (old) voice range gate, visibility hysteresis, the volume curve, name cleaning, and the collision registry (circles, turned boxes, squares unloading, moving people).
+- End to end: open `city.html?fakemic=1` in two tabs. `fakemic` uses a beeping tone instead of a real microphone. Tap the other player, answer in the other tab, and each tab hears the other's tone.
+- Relay-only: the Playwright scripts used during development override `RTCPeerConnection` with `iceTransportPolicy: 'relay'`, which forces the TURN path that phones on mobile networks take. Test this after any change to connection setup: it's the path that broke.
+- Headless Chrome has `navigator.share`, so a test of the meeting link has to override `Navigator.prototype.share` to read the link.

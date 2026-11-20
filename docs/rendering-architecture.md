@@ -1,6 +1,6 @@
 # Streaming the Netherlands: rendering architecture
 
-Status 2026-11-20. Barendrecht runs on this design today. Items marked **next** are not built yet.
+Status 2026-11-20. Rotterdam and Barendrecht (one region, 670 squares) run on this design today. Items marked **next** are not built yet.
 
 ## 1. High-level architecture
 
