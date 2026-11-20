@@ -25,6 +25,8 @@ cat > "$OUT/_headers" <<'H'
   Cache-Control: no-cache
 /*.js
   Cache-Control: no-cache
+/mp/*
+  Cache-Control: no-cache
 H
 (cd dist && zip -qr toycity-site.zip site)
 du -sh "$OUT" dist/toycity-site.zip

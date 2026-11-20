@@ -1,0 +1,26 @@
+# Apply to trystero@0.21.8 src/, then: npx esbuild src/nostr.js --bundle --format=esm --minify --outfile=web/mp/trystero-nostr.js
+--- a/src/strategy.js	2026-11-20 11:05:50
++++ b/src/strategy.js	2026-11-20 11:06:47
+@@ -13,7 +13,7 @@
+   topicPath
+ } from './utils.js'
+ 
+-const poolSize = 20
++const poolSize = 2
+ const announceIntervalMs = 5_333
+ const offerTtl = 57_333
+ 
+@@ -134,10 +134,9 @@
+         pendingOffers[peerId] ||= []
+         pendingOffers[peerId][relayId] = peer
+ 
+-        setTimeout(
+-          () => prunePendingOffer(peerId, relayId),
+-          announceIntervals[relayId] * 0.9
+-        )
++        // toycity patch: an answer that comes through a TURN relay can take longer than one
++        // announce interval (~5 s) to arrive; keep the offer alive long enough to accept it
++        setTimeout(() => prunePendingOffer(peerId, relayId), 20_000)
+ 
+         peer.setHandlers({
+           connect: () => connectPeer(peer, peerId, relayId),

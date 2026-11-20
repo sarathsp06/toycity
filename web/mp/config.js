@@ -3,8 +3,9 @@
 export const MP = {
   appId: 'toycity-nl',            // namespace on the Nostr relays
   // public Nostr relays used only to find each other; every player must use the same list.
-  // Picked for accepting anonymous short-lived events (two others refused us on 2026-11-20).
-  relays: ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net', 'wss://nostr.data.haus', 'wss://relay.oldenburg.cool', 'wss://yabu.me/v2'],
+  // Checked on 2026-11-20: these accept anonymous short-lived events; damus.io, oldenburg.cool and
+  // others were down or refused. Fewer relays also means fewer duplicate connection offers.
+  relays: ['wss://relay.primal.net', 'wss://nostr.data.haus', 'wss://nos.lol', 'wss://nostr.sathoarder.com', 'wss://yabu.me/v2'],
   iceUrl: 'https://toycity-turn.sarathsp.workers.dev/',   // STUN + TURN credentials (Cloudflare)
   roomSize: 500,                  // one room per 500 m square of the RD grid
   roomJoinEdge: 20,               // also join the neighbouring square when this close to its edge

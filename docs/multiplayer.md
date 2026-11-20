@@ -17,7 +17,9 @@ All distances and rates are in `web/mp/config.js`.
 ## How players find each other (no backend)
 
 1. The map is divided into **rooms** of 500 m squares on the Dutch RD grid. You join the square you're in. You also join a neighbouring square when you're within 20 m of its edge, and leave it again past 40 m. That way you can always see someone standing across the line.
-2. Joining a room means announcing yourself on **public Nostr relays**, through the Trystero library. The relays are a meeting point only. They pass along the WebRTC offer and answer between two browsers, then they're out of the picture. The relay list is fixed in `config.js`, because everyone has to use the same relays to find each other. Two relays from the library's default list refused anonymous visitors on 2026-11-20, so they're not on it.
+2. Joining a room means announcing yourself on **public Nostr relays**, through the Trystero library. The relays are a meeting point only. They pass along the WebRTC offer and answer between two browsers, then they're out of the picture. The relay list is fixed in `config.js`, because everyone has to use the same relays to find each other. On 2026-11-20 several relays from the library's default list were down or refused anonymous visitors, so the list holds five that worked.
+
+   Trystero is bundled locally (`web/mp/trystero-nostr.js`) with a small patch (`tools/trystero.patch`). Stock Trystero discards its connection offer about 4.8 s after making it. A connection that has to go through the TURN relay gathers its relay addresses for up to 5 s before answering, so the answer always arrived too late and phone-to-computer players never met. The patch keeps offers for 20 s and pre-builds 2 offers instead of 20.
 3. From then on, everything travels **directly between browsers** over a WebRTC connection: positions over a data channel, and voice as an audio track on the same connection.
 
 ## Presence
@@ -72,7 +74,7 @@ Worth it once more than about 15–20 people gather in the same 500 m square, or
 ## Limits of the current version
 
 - Everyone in a room connects to everyone else in it. That's fine for small groups, but it won't scale to crowds.
-- About 1 in 10 networks block direct connections, so those players won't see or hear others. Fixing that needs a relay server (TURN) or the SFU above.
+- About 1 in 10 networks block direct connections. Those players connect through Cloudflare's TURN relay instead (credentials from the `toycity-turn` Worker), which is slower to set up, so meeting someone can take up to half a minute.
 - The public relays are run by other people and can be slow or go down. Six are used in parallel.
 - Positions aren't checked by anyone, and mute and block are local only. Players connected directly can see each other's IP addresses.
 - Jumps aren't shared yet. Other players stay on the ground.

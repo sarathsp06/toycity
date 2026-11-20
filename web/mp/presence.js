@@ -13,14 +13,17 @@ import { ready as avatarsReady, makePlayer, setName, setPersona, animate, dispos
 
 import { PERSONAS } from '../avatar.js';
 const PERSONA_IDS = new Set(PERSONAS.map(p => p.id));
-const TRYSTERO = 'https://esm.run/trystero@0.21/nostr';
+const TRYSTERO = './trystero-nostr.js';   // patched local copy, see the file header
 
 export async function createPresence({ scene, player, toRD, fromRD, slug }) {
   const { joinRoom, selfId } = await import(TRYSTERO);
   // Relay fallback (TURN): when two players' networks block a direct connection (mobile data, many
   // offices), the WebRTC traffic goes through Cloudflare's relay instead. Short-lived credentials come
   // from a tiny Worker (toycity-turn); without them we fall back to direct connections only.
-  const iceServers = await fetch(MP.iceUrl).then(r => r.ok ? r.json() : null).then(d => d?.iceServers).catch(() => null);
+  // Only a few relay addresses: every one is gathered before an offer is sent, so a long list slows
+  // down connecting (UDP 3478 is quickest; TLS on 443 gets through strict firewalls).
+  const iceServers = await fetch(MP.iceUrl).then(r => r.ok ? r.json() : null).then(d => d?.iceServers?.map(s => ({
+    ...s, urls: [].concat(s.urls).filter(u => /^stun:.*:3478$|^turn:.*:3478\?transport=udp$|^turns:.*:443\?transport=tcp$/.test(u)) }))).catch(() => null);
   await avatarsReady;
 
   let myPersona = PERSONA_IDS.has(localStorage.getItem('toycity.persona')) ? localStorage.getItem('toycity.persona') : 'classic';
@@ -49,7 +52,7 @@ export async function createPresence({ scene, player, toRD, fromRD, slug }) {
       const persona = PERSONA_IDS.has(look) ? look : 'classic';
       if (persona !== p.persona) { p.persona = persona; if (p.player) setPersona(p.player, persona); }
     });
-    room.onPeerJoin(id => { peer(id).rooms.add(key); lastSent = null; });   // say hello right away
+    room.onPeerJoin(id => { const p = peer(id); p.rooms.add(key); p.last ||= performance.now() / 1000; lastSent = null; });   // say hello right away
     room.onPeerLeave(id => { const p = peers.get(id); if (p) { p.rooms.delete(key); if (!p.rooms.size) drop(p); } });
     rooms.set(key, { room, send });
     for (const f of listeners.room) f(key, room);
