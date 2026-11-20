@@ -1,0 +1,18 @@
+[
+  {
+    "id": "rotterdam",
+    "name": "Rotterdam",
+    "about": "The city centre: Coolsingel, the Markthal, Lijnbaan and the Erasmusbrug over the Maas.",
+    "region": "rotterdam",
+    "start": { "x": 92539.4, "y": 437527.9, "label": "Coolsingel 40, Rotterdam" },
+    "photo": "regions/rotterdam/a/185_875_s.jpg"
+  },
+  {
+    "id": "barendrecht",
+    "name": "Barendrecht",
+    "about": "A village of hedges, canals and parked cars, just south of Rotterdam.",
+    "region": "rotterdam",
+    "start": { "x": 96008.364, "y": 430133.397, "label": "Schaatsbaan 43, Barendrecht" },
+    "photo": "regions/rotterdam/a/192_860_s.jpg"
+  }
+]

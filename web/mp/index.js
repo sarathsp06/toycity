@@ -157,6 +157,7 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
   $('#mpmeet').onclick = async () => {
     const [X, Y] = toRD(player.position.x, player.position.z);
     const url = new URL(location.pathname, location.origin);
+    for (const k of ['place', 'region']) if (params.get(k)) url.searchParams.set(k, params.get(k));   // same place, same map
     url.searchParams.set('meet', X.toFixed(1) + ',' + Y.toFixed(1));
     if (navigator.share) { try { await navigator.share({ title: 'Meet me in Toy City', url: url.href }); return; } catch (e) { if (e.name === 'AbortError') return; } }
     try { await navigator.clipboard.writeText(url.href); toast('📍 Meeting link copied. Send it to your friends.', [], 4000); }

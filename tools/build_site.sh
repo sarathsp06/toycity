@@ -1,6 +1,6 @@
 #!/bin/sh
 # Builds the static website: dist/site (upload this folder to any static host) and dist/toycity-site.zip.
-# Only the game page, its scripts, the models and one region (REGION, default rotterdam: Rotterdam
+# Only the front page (places), the game page, its scripts, the models and one region (REGION, default rotterdam: Rotterdam
 # city plus Barendrecht) go in; development pages,
 # test regions and the old prototype stay out. three.js and Leaflet still load from their public CDNs.
 # Usage: sh tools/build_site.sh          REGION=barendrecht sh tools/build_site.sh          ZIP=1 for the zip
@@ -10,7 +10,7 @@ OUT=dist/site
 R=${REGION:-rotterdam}
 rm -rf "$OUT" dist/toycity-site.zip
 mkdir -p "$OUT/models" "$OUT/regions/$R" "$OUT/mp"
-cp web/city.html "$OUT/index.html"
+cp web/index.html web/places.json "$OUT/"   # the front page: choose a place
 cp web/city.html web/city.js web/loader.worker.js web/textures.js web/avatar.js web/solids.js "$OUT/"
 cp web/mp/*.js "$OUT/mp/"
 cp web/models/cars.glb web/models/person.glb web/models/persona_*.glb web/models/CREDITS.txt "$OUT/models/"
@@ -22,6 +22,8 @@ cat > "$OUT/_headers" <<'H'
 /*
   Cache-Control: public, max-age=86400
 /regions/*/tiles.json
+  Cache-Control: no-cache
+/places.json
   Cache-Control: no-cache
 /
   Cache-Control: no-cache

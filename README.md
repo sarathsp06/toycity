@@ -80,6 +80,17 @@ sh tools/build_site.sh             # → dist/site (REGION=rotterdam by default:
 node --test tests/*.test.mjs
 ```
 
+The site has two pages. The front page (`web/index.html`) lists the places to start from, and the
+game page (`web/city.html?place=<id>`) shows only a small bar (back, place name, ☰ menu) plus the
+controls you touch; time of day, quality, search, people and the meeting link are in the menu, and
+the map (🗺️ or `M`) is off until you open it.
+
+**Adding a place** is one entry in [`web/places.json`](web/places.json): an id, a name, a line about
+it, the region that holds it, a start point in RD metres and a photo (any aerial square of the
+region). Several places can share a region: Rotterdam and Barendrecht are both in the `rotterdam`
+region, so you can walk from one to the other. A place in a new town needs that town baked first
+(steps 1–2) and the region added to `build_site.sh`.
+
 Handy test switches: `city.html?drive=100&net=80,20` drives through town at 100 m/s on a
 simulated slow connection and reports the gaps, and `?touch=1` shows the phone controls on a
 desktop.

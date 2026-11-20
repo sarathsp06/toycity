@@ -14,11 +14,16 @@ import { createSolids, footprintsOf, PERSON } from './solids.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 const params = new URLSearchParams(location.search);
-const slug = params.get('region') || 'rotterdam';   // Rotterdam city + Barendrecht, one walkable world
+// ?place=<id> picks a place from places.json (the front page lists them): which region to stream and
+// where to stand. Several places can share one region; Rotterdam and Barendrecht are one walkable world.
+// ?region= still works on its own for development regions.
+const places = await fetch('./places.json').then(r => r.json()).catch(() => []);
+const spot = places.find(p => p.id === params.get('place')) || (!params.get('region') && places[0]) || null;
+const slug = params.get('region') || spot?.region || 'rotterdam';
 // The page itself used to be cached for a day while the scripts were always fresh, so a browser could
 // run new scripts on an old page (missing buttons) and stop at the loading screen. Detect that and
 // fetch the page once more, bypassing the cache.
-if (!document.getElementById('eyesbtn') && !sessionStorage.getItem('toycity.refreshed')) {
+if (!document.getElementById('menubtn') && !sessionStorage.getItem('toycity.refreshed')) {
   sessionStorage.setItem('toycity.refreshed', '1');
   params.set('fresh', Date.now()); location.replace(location.pathname + '?' + params + location.hash);   // keeps ?meet= and friends
 }
@@ -26,6 +31,7 @@ const base = new URL(`./regions/${slug}/`, location.href);
 const progress = (f, t) => window.loadProgress?.(f, t);
 progress(0.05, 'Reading the map');
 const info = await (await fetch(new URL('tiles.json', base))).json();
+if (spot) { info.title = spot.name; if (spot.start) info.start = spot.start; }
 const T = info.tile, QQ = info.quant;
 const HAVE = new Set(info.squares.map(([i, j]) => i + '_' + j));
 const CHARS = '0123456789abcdefghijklmnopqrstuvwxyz-/ ';
@@ -622,6 +628,7 @@ addEventListener('keydown', e => {
   keys[e.key.toLowerCase()] = true;
   if (e.key.toLowerCase() === 'f') toggleFly();
   if (e.key.toLowerCase() === 'v') setFirstPerson(!firstPerson);
+  if (e.key.toLowerCase() === 'm') toggleMap();
   if (e.key === '-' || e.key === '_') zoomBy(1.6); if (e.key === '=' || e.key === '+') zoomBy(1 / 1.6);
   if (e.key.startsWith('Arrow')) e.preventDefault();
   if (e.key === ' ') { e.preventDefault(); if (!jump.phase && !fly) { jump.phase = 'crouch'; jump.t = 0; } }
@@ -793,8 +800,10 @@ function wgsToRd(lat, lon) {
   const y = 309056.544 * p + 3638.893 * l * l + 73.077 * p * p - 157.984 * p * l * l + 59.788 * p ** 3 + 0.433 * l - 6.439 * p * p * l * l - 0.032 * p * l + 0.092 * l ** 4 - 0.054 * p * l ** 4;
   return [155000 + x, 463000 + y];
 }
+// The map is off until asked for (🗺️ or M), so the game page stays quiet; the choice is remembered.
 let mini = null, meMarker = null, followMini = true;
-if (window.L && !document.body.classList.contains('touch')) {
+function initMap() {
+  if (mini || !window.L) return;
   mini = L.map('mini', { zoomControl: false }).setView(rdToWgs(...toRD(player.position.x, player.position.z)), 17);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(mini);
   mini.attributionControl.setPrefix(false);
@@ -816,9 +825,21 @@ if (window.L && !document.body.classList.contains('touch')) {
     if (followMini) mini.panTo(ll, { animate: false });
   }, 150);
 }
+function toggleMap(on = document.getElementById('mini').hidden) {
+  document.getElementById('mini').hidden = !on; document.getElementById('minibtn').hidden = !on;
+  document.getElementById('mapbtn')?.setAttribute('aria-pressed', on);
+  localStorage.setItem('toycity.map', on ? '1' : '0');
+  if (on) { initMap(); mini?.invalidateSize(); }
+}
+document.getElementById('mapbtn')?.addEventListener('click', () => toggleMap());
+if (localStorage.getItem('toycity.map') === '1') document.readyState === 'complete' ? toggleMap(true) : addEventListener('load', () => toggleMap(true));   // Leaflet loads deferred
+// the menu (☰) holds everything that isn't needed while walking; a hint says so for a few seconds
+{ const btn = document.getElementById('menubtn'), hud = document.getElementById('hud');
+  btn?.addEventListener('click', () => { hud.hidden = !hud.hidden; btn.setAttribute('aria-expanded', !hud.hidden); });
+  setTimeout(() => document.getElementById('hint')?.classList.add('gone'), 7000); }
 
 // ---------- frame loop ----------
-const place = document.getElementById('place'), perf = document.getElementById('perf');
+const place = document.getElementById('place'), perf = params.get('perf') ? document.getElementById('perf') : {};   // numbers only with ?perf=1
 let last = performance.now(), placeT = 0, wantT = 0, signT = 0, frames = 0, fpsT = performance.now(), loaded = false;
 // first-person view (V or the eye button): the camera sits at the eyes and looks where you face;
 // dragging still turns and tilts the head, and your own body is hidden
