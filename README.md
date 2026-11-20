@@ -9,7 +9,9 @@ and streamed into a tiny three.js world you can walk, run, jump and drive throug
 
 ### ▶ [Play it at toycity.pages.dev](https://toycity.pages.dev)
 
-![Barendrecht from above](docs/img/town.jpg)
+![Two players meeting on a street in Barendrecht and talking in a call](docs/img/talk.gif)
+
+<sub>Two players in a call: the green ring under Joost lights up while he talks.</sub>
 
 </div>
 
