@@ -5,3 +5,6 @@ Car models from BlendSwap (licence as declared by the uploader):
 - Jeep Cherokee with rig by koumis, CC0, https://blendswap.com/blend/25471
 - BEAMNG VAN by BlenderBach, CC-BY, https://blendswap.com/blend/19228
 Person: Xbot from the three.js examples, dressed with tools/dress_person.py.
+
+Personas (BlenderKit, https://www.blenderkit.com)
+- Zuri, by Richie Kirui: CC0 (public domain). Converted by tools/personas.py.

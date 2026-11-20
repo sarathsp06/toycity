@@ -493,7 +493,10 @@ const player = new THREE.Group();
 // rigged person (models/person.glb, dressed in Blender by tools/dress_person.py) with idle / walk / run
 // blended by actual speed; the capsule above stays until it has loaded
 const avatar = { mixer: null, actions: null, speed: 0 };
-loadAvatar(new URL('./', import.meta.url)).then(({ model, clips }) => {
+// the player's own look, chosen in the people panel and remembered on this device
+async function useAvatar(persona) {
+  const { model, clips } = await loadAvatar(new URL('./', import.meta.url), { persona });
+  if (avatar.mixer) avatar.mixer.stopAllAction();
   for (const c of [...player.children]) player.remove(c);
   player.add(model);
   const mixer = new THREE.AnimationMixer(model);
@@ -505,7 +508,8 @@ loadAvatar(new URL('./', import.meta.url)).then(({ model, clips }) => {
   for (const n of ['Hips', 'Spine', 'Spine1', 'LeftUpLeg', 'RightUpLeg', 'LeftLeg', 'RightLeg', 'LeftFoot', 'RightFoot',
     'LeftArm', 'RightArm', 'LeftForeArm', 'RightForeArm']) bones[n] = bone(n);
   Object.assign(avatar, { mixer, actions, bones });
-}).catch(e => console.warn('avatar', e));
+}
+useAvatar(localStorage.getItem('toycity.persona') || 'classic').catch(e => console.warn('avatar', e));
 // natural speeds of the clips in m/s at this scale, used to keep the feet from sliding
 const WALK_MS = 1.5, RUN_MS = 4.2;
 function animateAvatar(dt, moved) {
@@ -555,6 +559,7 @@ player.position.set(info.start ? info.start.x - ORX : 0, 0.15, info.start ? -(in
 scene.add(player);
 
 let fly = false, yaw = Math.PI, pitch = 0.5, dist = 14;
+let firstPerson = false;   // set from the saved choice once the page is up (see setFirstPerson)
 const orbit = new OrbitControls(camera, renderer.domElement); orbit.enabled = false; orbit.enableDamping = true; orbit.maxDistance = 2500; orbit.maxPolarAngle = Math.PI / 2 - 0.02;
 let dragging = false, lx = 0, ly = 0, downAt = null;
 // look around by dragging with one pointer (mouse or one finger); two fingers on the view pinch-zoom.
@@ -598,13 +603,15 @@ function zoomBy(f) {
   else dist = THREE.MathUtils.clamp(dist * f, 4, 600);
 }
 renderer.domElement.addEventListener('wheel', e => { e.preventDefault(); if (!fly) zoomBy(Math.exp(e.deltaY * (e.ctrlKey ? 0.01 : 0.0015))); }, { passive: false });
-document.getElementById('zin').onclick = () => zoomBy(1 / 1.6);
+document.getElementById('zin').onclick = () => { if (firstPerson) setFirstPerson(false); zoomBy(1 / 1.6); };
+document.getElementById('eyesbtn').onclick = () => setFirstPerson(!firstPerson);
 document.getElementById('zout').onclick = () => zoomBy(1.6);
 const keys = {};
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
   keys[e.key.toLowerCase()] = true;
   if (e.key.toLowerCase() === 'f') toggleFly();
+  if (e.key.toLowerCase() === 'v') setFirstPerson(!firstPerson);
   if (e.key === '-' || e.key === '_') zoomBy(1.6); if (e.key === '=' || e.key === '+') zoomBy(1 / 1.6);
   if (e.key.startsWith('Arrow')) e.preventDefault();
   if (e.key === ' ') { e.preventDefault(); if (!jump.phase && !fly) { jump.phase = 'crouch'; jump.t = 0; } }
@@ -788,7 +795,22 @@ if (window.L && !document.body.classList.contains('touch')) {
 // ---------- frame loop ----------
 const place = document.getElementById('place'), perf = document.getElementById('perf');
 let last = performance.now(), placeT = 0, wantT = 0, signT = 0, frames = 0, fpsT = performance.now(), loaded = false;
+// first-person view (V or the eye button): the camera sits at the eyes and looks where you face;
+// dragging still turns and tilts the head, and your own body is hidden
+function setFirstPerson(on) {
+  firstPerson = on; localStorage.setItem('toycity.view', on ? 'eyes' : 'chase');
+  const b = document.getElementById('eyesbtn'); if (b) b.setAttribute('aria-pressed', on);
+  dispatchEvent(new Event('toycity:view'));
+}
 function chaseCam() {
+  if (firstPerson) {
+    const look = 0.42 - pitch;                     // drag up and down to look up and down
+    camera.position.set(player.position.x - Math.sin(yaw) * 0.12, player.position.y + 1.62, player.position.z - Math.cos(yaw) * 0.12);
+    camera.lookAt(camera.position.x - Math.sin(yaw) * Math.cos(look), camera.position.y + Math.sin(look), camera.position.z - Math.cos(yaw) * Math.cos(look));
+    for (const c of player.children) c.visible = false;
+    return;
+  }
+  for (const c of player.children) c.visible = true;
   const pe = pitch + Math.max(0, 1.2 - pitch) * THREE.MathUtils.smoothstep(dist, 30, 300);
   const off = new THREE.Vector3(Math.sin(yaw) * Math.cos(pe), Math.sin(pe), Math.cos(yaw) * Math.cos(pe)).multiplyScalar(dist);
   camera.position.lerp(player.position.clone().add(off), 0.18);
@@ -908,10 +930,11 @@ function surroundings() {
   return { green: Math.min(1, trees / 25), street: Math.min(1, cars / 30) };
 }
 if (params.get('mp') !== '0') import('./mp/index.js').then(m => m.start({
-  scene, camera, player, toRD, fromRD: (X, Y) => [X - ORX, ORY - Y], slug, params, surroundings,
+  scene, camera, player, toRD, fromRD: (X, Y) => [X - ORX, ORY - Y], slug, params, surroundings, useAvatar, view: { get eyes() { return firstPerson; }, set eyes(v) { setFirstPerson(v); } },
   hud: document.getElementById('mp'),
 })).then(s => { social = s; window.__city.social = s; }).catch(e => { console.warn('multiplayer unavailable', e); document.getElementById('mp').textContent = 'Multiplayer unavailable right now'; });
 
+setFirstPerson(localStorage.getItem('toycity.view') === 'eyes');
 updateWanted();
 requestAnimationFrame(frame);
 if (params.get('drive')) import('./drive.js').then(m => m.run(window.__city, +params.get('drive'), +(params.get('len') || 2400), +(params.get('angle') || 0)));

@@ -16,6 +16,7 @@
   #perf { font-variant-numeric: tabular-nums; color: #4a5a66; font-size: 12px; }
   #place { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); color: #fff; background: rgba(20,30,40,.75); padding: 8px 14px; border-radius: 999px; font-size: 14px; pointer-events: none; white-space: nowrap; }
   #zoom { position: fixed; right: 18px; bottom: 22px; display: flex; flex-direction: column; gap: 6px; }
+  #eyesbtn[aria-pressed=true] { background: #2f6fde; color: #fff; }
   #zoom button { width: 40px; height: 40px; border-radius: 10px; border: 1px solid #c5d2da; background: rgba(255,255,255,.9); font-size: 22px; cursor: pointer; color: #1d2b3a; }
   #mini { position: fixed; right: 18px; top: 18px; width: 200px; height: 150px; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,.3); border: 2px solid #fff; z-index: 5; transition: width .2s, height .2s; }
   #mini.big { width: 460px; height: 360px; }
@@ -24,6 +25,7 @@
   canvas { touch-action: none; }
   #mp { margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 12px; color: #4a5a66; }
   #mp button { font: inherit; font-size: 13px; padding: 4px 8px; border: 1px solid #c5d2da; border-radius: 999px; background: #fff; cursor: pointer; }
+  #mplook { font: inherit; font-size: 13px; padding: 4px 6px; border: 1px solid #c5d2da; border-radius: 999px; background: #fff; }
   #mpnameedit { font: inherit; font-size: 13px; padding: 4px 8px; border: 1px solid #2f6fde; border-radius: 999px; width: 130px; }
   #mpmic.on { --lvl: 0; border-color: #2a9d5c; background: linear-gradient(90deg, #c9f2d9 calc(var(--lvl) * 100%), #fff 0); }
   #joy, #jumpbtn { display: none; }
@@ -73,7 +75,7 @@
 </script>
 <div id="hud">
   <b id="title">Toy City</b><br/>
-  <span class="keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · drag to look · click to go there · scroll or <kbd>+</kbd><kbd>−</kbd> zoom · <kbd>F</kbd> fly</span>
+  <span class="keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · drag to look · click to go there · scroll or <kbd>+</kbd><kbd>−</kbd> zoom · <kbd>V</kbd> your eyes · <kbd>F</kbd> fly</span>
   <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
     <select id="tod" aria-label="Time of day"><option value="morning">Morning</option><option value="noon" selected>Midday</option><option value="golden">Golden hour</option><option value="dusk">Dusk</option><option value="night">Night</option></select>
     <select id="quality" aria-label="Quality"><option value="low">Fast</option><option value="mid" selected>Balanced</option><option value="high">Sharp</option></select>
@@ -85,7 +87,7 @@
 <div id="place">loading…</div>
 <div id="mini"></div><button id="minibtn" title="Bigger or smaller map">⤢</button>
 <div id="joy" aria-label="Move"><div></div></div><button id="jumpbtn" aria-label="Jump">Jump</button>
-<div id="zoom"><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button></div>
+<div id="zoom"><button id="eyesbtn" aria-label="View through your own eyes" aria-pressed="false" title="Through your own eyes (V)">👁️</button><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button></div>
 <script type="module" src="./city.js"></script>
 </body>
 </html>

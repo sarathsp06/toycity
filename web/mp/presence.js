@@ -9,14 +9,21 @@
 import * as THREE from 'three';
 import { MP } from './config.js';
 import { roomsFor, Track, visible, cleanName } from './logic.js';
-import { ready as avatarsReady, makePlayer, setName, animate, disposePlayer } from './players.js';
+import { ready as avatarsReady, makePlayer, setName, setPersona, animate, disposePlayer } from './players.js';
 
+import { PERSONAS } from '../avatar.js';
+const PERSONA_IDS = new Set(PERSONAS.map(p => p.id));
 const TRYSTERO = 'https://esm.run/trystero@0.21/nostr';
 
 export async function createPresence({ scene, player, toRD, fromRD, slug }) {
   const { joinRoom, selfId } = await import(TRYSTERO);
+  // Relay fallback (TURN): when two players' networks block a direct connection (mobile data, many
+  // offices), the WebRTC traffic goes through Cloudflare's relay instead. Short-lived credentials come
+  // from a tiny Worker (toycity-turn); without them we fall back to direct connections only.
+  const iceServers = await fetch(MP.iceUrl).then(r => r.ok ? r.json() : null).then(d => d?.iceServers).catch(() => null);
   await avatarsReady;
 
+  let myPersona = PERSONA_IDS.has(localStorage.getItem('toycity.persona')) ? localStorage.getItem('toycity.persona') : 'classic';
   let myName = cleanName(localStorage.getItem('toycity.name')) || 'Visitor ' + (100 + Math.floor(Math.random() * 900));
   let seq = 0, sendT = 0, lastSent = null, roomT = 0;
   const rooms = new Map();          // key -> { room, send }
@@ -29,16 +36,18 @@ export async function createPresence({ scene, player, toRD, fromRD, slug }) {
     return p;
   }
   function join(key) {
-    const room = joinRoom({ appId: MP.appId, relayUrls: MP.relays, relayRedundancy: MP.relays.length }, `${slug}:${key}`);
+    const room = joinRoom({ appId: MP.appId, relayUrls: MP.relays, relayRedundancy: MP.relays.length, ...(iceServers ? { rtcConfig: { iceServers } } : {}) }, `${slug}:${key}`);
     const [send, receive] = room.makeAction('st');
     receive((d, id) => {
       if (!Array.isArray(d) || d.length < 6) return;
-      const [s, x, y, h, v, n] = d;
+      const [s, x, y, h, v, n, look] = d;
       if (![s, x, y, h, v].every(Number.isFinite)) return;
       const p = peer(id); p.rooms.add(key);
       p.last = performance.now() / 1000;
       p.track.push(s, p.last, { x, y, h, v });
       const name = cleanName(n); if (name && name !== p.name) { p.name = name; if (p.player) setName(p.player, name); }
+      const persona = PERSONA_IDS.has(look) ? look : 'classic';
+      if (persona !== p.persona) { p.persona = persona; if (p.player) setPersona(p.player, persona); }
     });
     room.onPeerJoin(id => { peer(id).rooms.add(key); lastSent = null; });   // say hello right away
     room.onPeerLeave(id => { const p = peers.get(id); if (p) { p.rooms.delete(key); if (!p.rooms.size) drop(p); } });
@@ -68,7 +77,7 @@ export async function createPresence({ scene, player, toRD, fromRD, slug }) {
     // 10 updates a second while moving, one a second standing still, and at once after a change
     sendT -= dt;
     if (!lastSent || (sendT <= 0 && (speed > 0.05 || now - lastSent >= 1 / MP.idleHz))) {
-      const state = [++seq, +X.toFixed(2), +Y.toFixed(2), +player.rotation.y.toFixed(3), +speed.toFixed(2), myName];
+      const state = [++seq, +X.toFixed(2), +Y.toFixed(2), +player.rotation.y.toFixed(3), +speed.toFixed(2), myName, myPersona];
       for (const r of rooms.values()) r.send(state);
       sendT = 1 / MP.sendHz; lastSent = now;
     }
@@ -77,7 +86,7 @@ export async function createPresence({ scene, player, toRD, fromRD, slug }) {
       const s = p.track.sample(now); if (!s) continue;
       p.dist = Math.hypot(s.x - X, s.y - Y);
       const show = visible(p.shown, p.dist, MP.showWithin, MP.hideBeyond);
-      if (show && !p.player) { p.player = makePlayer(p.id, p.name); scene.add(p.player.group); }
+      if (show && !p.player) { p.player = makePlayer(p.id, p.name, p.persona); scene.add(p.player.group); }
       if (p.player) {
         p.player.group.visible = show;
         const [x, z] = fromRD(s.x, s.y); p.player.group.position.set(x, 0.15, z); p.player.group.rotation.y = s.h;
@@ -90,6 +99,8 @@ export async function createPresence({ scene, player, toRD, fromRD, slug }) {
   return {
     selfId, peers, update,
     get name() { return myName; },
+    get persona() { return myPersona; },
+    setPersona(id) { if (!PERSONA_IDS.has(id)) return; myPersona = id; localStorage.setItem('toycity.persona', id); lastSent = null; },
     setName(n) { n = cleanName(n); if (!n) return; myName = n; localStorage.setItem('toycity.name', n); lastSent = null; },
     // for a peer-to-peer voice transport: the same WebRTC connection, always through one room
     roomFor(p) { const k = [...p.rooms].sort().find(k => rooms.has(k)); return k && rooms.get(k).room; },

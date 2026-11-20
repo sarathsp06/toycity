@@ -1,15 +1,74 @@
-// The walking person: models/person.glb, made by tools/dress_person.py in Blender from the Xbot
-// mannequin (clothes, hair, face) with Xbot's own idle / walk / run animations untouched.
+// People: our own dressed Xbot (models/person.glb, made by tools/dress_person.py) plus personas from
+// tools/personas.py. Every persona has a Mixamo-named skeleton, so all of them share person.glb's idle /
+// walk / run clips. Bone orientations differ between rigs, so the clips are retargeted once per
+// persona (world-space, by bone name), with the hip height scaled to the persona's proportions.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-export async function loadAvatar(base, { height = 1.78 } = {}) {
-  const gltf = await new GLTFLoader().loadAsync(new URL('models/person.glb', base).href);
-  const model = gltf.scene;
+export const PERSONAS = [
+  { id: 'classic', label: 'Classic', file: 'person.glb' },
+  { id: 'zuri', label: 'Zuri', file: 'persona_zuri.glb' },
+];
+const loader = new GLTFLoader(), cache = new Map();
+const load = (base, file) => cache.get(file) || cache.set(file, loader.loadAsync(new URL('models/' + file, base).href)).get(file);
+// Retarget a clip from the Xbot (source) onto another Mixamo-named skeleton (target), in world space:
+// every frame, each bone gets the source bone's rotation relative to its rest pose, applied on top
+// of the target bone's own rest pose. The hips also carry the source's height change, scaled.
+const _q = new THREE.Quaternion(), _p = new THREE.Quaternion(), _v = new THREE.Vector3();
+function retarget(src, target, clip, fps = 30) {
+  const S = SkeletonUtils.clone(src.scene); S.updateMatrixWorld(true);
+  const tBones = {}; target.traverse(o => { if (o.isBone) tBones[o.name] = o; });
+  const pairs = [];
+  S.traverse(o => { if (o.isBone && tBones[o.name]) pairs.push({ s: o, t: tBones[o.name] }); });
+  target.updateMatrixWorld(true);
+  for (const pr of pairs) {
+    pr.sRest = pr.s.getWorldQuaternion(new THREE.Quaternion());
+    pr.tRest = pr.t.getWorldQuaternion(new THREE.Quaternion());
+    pr.rest = pr.t.quaternion.clone(); pr.q = [];
+  }
+  const hipS = S.getObjectByName('mixamorigHips'), hipT = tBones.mixamorigHips;
+  const sHip0 = hipS.getWorldPosition(new THREE.Vector3()), tHip0 = hipT.getWorldPosition(new THREE.Vector3());
+  const k = tHip0.y / (sHip0.y || 1);
+  const mixer = new THREE.AnimationMixer(S); mixer.clipAction(clip).play();
+  const times = [], hipVals = [], hipRest = hipT.position.clone();
+  for (let f = 0, n = Math.max(2, Math.round(clip.duration * fps) + 1); f < n; f++) {
+    const t = Math.min(clip.duration, f / fps); times.push(t);
+    mixer.setTime(t); S.updateMatrixWorld(true);
+    for (const pr of pairs) {
+      // world target = (source now * source rest^-1) * target rest, then back into the parent's frame
+      _q.copy(pr.s.getWorldQuaternion(_q)).multiply(_p.copy(pr.sRest).invert()).multiply(pr.tRest);
+      pr.t.parent.getWorldQuaternion(_p).invert();
+      const local = _p.multiply(_q);
+      pr.q.push(local.x, local.y, local.z, local.w);
+      pr.t.quaternion.copy(local);
+    }
+    target.updateMatrixWorld(true);
+    // hips: rest position plus the source's world offset, scaled, expressed in the hips' parent frame
+    const off = hipS.getWorldPosition(_v).sub(sHip0).multiplyScalar(k);
+    const w = tHip0.clone().add(off); hipT.parent.worldToLocal(w);
+    hipVals.push(w.x, w.y, w.z);
+  }
+  for (const pr of pairs) pr.t.quaternion.copy(pr.rest);
+  hipT.position.copy(hipRest);
+  const tracks = pairs.map(pr => new THREE.QuaternionKeyframeTrack(pr.t.name + '.quaternion', times, pr.q));
+  tracks.push(new THREE.VectorKeyframeTrack('mixamorigHips.position', times, hipVals));
+  return new THREE.AnimationClip(clip.name, clip.duration, tracks);
+}
+const firstSkinned = o => { let m = null; o.traverse(x => { if (!m && x.isSkinnedMesh) m = x; }); return m; };
+const worldY = b => { b.updateWorldMatrix(true, false); return b.getWorldPosition(new THREE.Vector3()).y || 1; };
+const hipsY = m => { m.updateMatrixWorld(true); const h = m.getObjectByName('mixamorigHips'); return h ? h.getWorldPosition(new THREE.Vector3()).y : 1; };
+
+export async function loadAvatar(base, { height = 1.78, persona = 'classic' } = {}) {
+  const p = PERSONAS.find(x => x.id === persona) || PERSONAS[0];
+  const [src, own] = await Promise.all([load(base, 'person.glb'), load(base, p.file)]);
+  const model = own.scene;
+  model.scale.setScalar(1);
   const box = new THREE.Box3().setFromObject(model);
   model.scale.multiplyScalar(height / (box.max.y - box.min.y));
   model.traverse(o => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
   const clips = {};
-  for (const n of ['idle', 'walk', 'run']) clips[n] = gltf.animations.find(a => a.name === n);
-  return { model, clips };
+  if (p.id === 'classic') for (const n of ['idle', 'walk', 'run']) clips[n] = own.animations.find(a => a.name === n);
+  else for (const n of ['idle', 'walk', 'run']) clips[n] = retarget(src, model, src.animations.find(a => a.name === n));
+  return { model, clips, persona: p.id };
 }

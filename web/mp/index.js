@@ -7,8 +7,12 @@ import { createPresence } from './presence.js';
 import { createVoice, p2pTransport } from './voice.js';
 import { createAmbience } from './ambience.js';
 
-export async function start({ scene, camera, player, toRD, fromRD, slug, params, hud, surroundings }) {
+import { PERSONAS } from '../avatar.js';
+
+export async function start({ scene, camera, player, toRD, fromRD, slug, params, hud, surroundings, useAvatar, view }) {
   hud.innerHTML = `<button id="mpname" title="Change your name"></button>
+    <select id="mplook" aria-label="Your character and view"><optgroup label="Character">${PERSONAS.map(p => `<option value="${p.id}">🧍 ${p.label}</option>`).join('')}</optgroup>
+      <optgroup label="View"><option value="view:eyes">👁️ Through my eyes</option><option value="view:behind">🎥 From behind</option></optgroup></select>
     <button id="mpmic" title="Microphone: people within a few metres hear you"></button>
     <button id="mpsound" title="Birds, wind and traffic"></button>
     <span id="mppeople">Looking for people nearby…</span>`;
@@ -34,6 +38,14 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
     const finish = save => { if (done) return; done = true; if (save) presence.setName(inp.value); inp.replaceWith(b); render(); };
     inp.onkeydown = e => { e.stopPropagation(); if (e.key === 'Enter') finish(true); if (e.key === 'Escape') finish(false); };
     inp.onblur = () => finish(true);
+  };
+  // the menu holds both who you are and how you look at the world; it always shows the character
+  $('#mplook').value = presence.persona;
+  $('#mplook').onchange = e => {
+    const v = e.target.value;
+    if (v.startsWith('view:')) { if (view) view.eyes = v === 'view:eyes'; }
+    else { presence.setPersona(v); useAvatar?.(v); }
+    e.target.value = presence.persona; e.target.blur();
   };
   $('#mpmic').onclick = async () => { try { await voice.setMic(!voice.micOn); } catch (e) { alert('Could not use the microphone: ' + (e.message || e)); } render(); };
   $('#mpsound').onclick = () => { ambience.toggle(); render(); };
