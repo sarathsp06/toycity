@@ -930,7 +930,7 @@ function surroundings() {
   return { green: Math.min(1, trees / 25), street: Math.min(1, cars / 30) };
 }
 if (params.get('mp') !== '0') import('./mp/index.js').then(m => m.start({
-  scene, camera, player, toRD, fromRD: (X, Y) => [X - ORX, ORY - Y], slug, params, surroundings, useAvatar, view: { get eyes() { return firstPerson; }, set eyes(v) { setFirstPerson(v); } },
+  scene, camera, player, toRD, fromRD: (X, Y) => [X - ORX, ORY - Y], slug, params, surroundings, useAvatar, goToRD: (X, Y) => { if (fly) toggleFly(); goal = null; marker.visible = false; player.position.set(X - ORX, 0.15, -(Y - ORY)); dist = Math.min(dist, 20); needUnstick = true; updateWanted(); }, view: { get eyes() { return firstPerson; }, set eyes(v) { setFirstPerson(v); } },
   hud: document.getElementById('mp'),
 })).then(s => { social = s; window.__city.social = s; }).catch(e => { console.warn('multiplayer unavailable', e); document.getElementById('mp').textContent = 'Multiplayer unavailable right now'; });
 

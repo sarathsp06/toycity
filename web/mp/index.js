@@ -7,12 +7,12 @@ import { createPresence } from './presence.js';
 import { createVoice, p2pTransport } from './voice.js';
 import { createAmbience } from './ambience.js';
 
-export async function start({ scene, camera, player, toRD, fromRD, slug, params, hud, surroundings, useAvatar, view }) {
+export async function start({ scene, camera, player, toRD, fromRD, slug, params, hud, surroundings, useAvatar, view, goToRD }) {
   hud.innerHTML = `<button id="mpname" title="Change your name"></button>
     <button id="mpview" title="Switch between seeing through your eyes and from behind (V)"></button>
     <button id="mpmic" title="Microphone: people within about 10 metres hear you, louder when closer"></button>
     <button id="mpsound" title="Birds, wind and traffic"></button>
-    <span id="mppeople">Looking for people nearby…</span>`;
+    <button id="mppeople">Looking for people nearby…</button><div id="mplist" hidden></div>`;
   const $ = s => hud.querySelector(s);
   const presence = await createPresence({ scene, player, toRD, fromRD, slug });
   const voice = createVoice({ camera, player, presence, transport: p2pTransport(presence), params });
@@ -25,8 +25,9 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
     $('#mpmic').classList.toggle('on', voice.micOn);
     $('#mpsound').textContent = ambience.on ? '🔊 Sounds' : '🔈 Sounds off';
     const ps = [...presence.peers.values()], near = ps.filter(p => p.shown).length;
-    $('#mppeople').textContent = !ps.length ? 'Nobody around yet'
-      : `${near} nearby · ${ps.length} in this area` + (near && !voice.micOn ? ' · turn your mic on to talk' : '');
+    if (!$('#mplist').hidden) list();
+    $('#mppeople').textContent = !ps.length ? '👥 Nobody around yet'
+      : `👥 ${near} nearby · ${ps.length} in this area` + (near && !voice.micOn ? ' · turn your mic on to talk' : '');
   }
   // change name in place: the button turns into a text box; Enter or leaving it saves, Escape cancels
   $('#mpname').onclick = () => {
@@ -38,6 +39,17 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
     inp.onkeydown = e => { e.stopPropagation(); if (e.key === 'Enter') finish(true); if (e.key === 'Escape') finish(false); };
     inp.onblur = () => finish(true);
   };
+  // tap the people count for everyone in this area, with a button to go and stand next to them
+  function list() {
+    const ps = [...presence.peers.values()].filter(p => Number.isFinite(p.dist)).sort((a, b) => a.dist - b.dist);
+    $('#mplist').replaceChildren(...(ps.length ? ps.map(p => {
+      const row = document.createElement('div'), go = document.createElement('button');
+      row.textContent = `${p.name || 'Visitor'}${p.mic ? '' : ' 🔇'} · ${p.dist < 1000 ? Math.round(p.dist) + ' m' : (p.dist / 1000).toFixed(1) + ' km'} `;
+      go.textContent = 'Go'; go.onclick = () => { const s = p.track.sample(performance.now() / 1000); if (s && goToRD) goToRD(s.x + 2, s.y + 2); };
+      row.append(go); return row;
+    }) : [Object.assign(document.createElement('div'), { textContent: 'Nobody in this area yet. Share the link with a friend!' })]));
+  }
+  $('#mppeople').onclick = () => { const l = $('#mplist'); l.hidden = !l.hidden; if (!l.hidden) list(); };
   // who you are is not a choice (everyone gets a random person and outfit); how you see the world is
   $('#mpview').onclick = e => { if (view) view.eyes = !view.eyes; e.target.blur(); render(); };
   addEventListener('toycity:view', render);

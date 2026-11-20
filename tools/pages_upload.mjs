@@ -1,6 +1,8 @@
 // Uploads dist/site to a Cloudflare Pages project the same way wrangler does (direct upload).
 // Needs the project's short-lived upload token in the file named by $CF_PAGES_JWT_FILE.
-// Writes dist/manifest.json ({ "/path": hash }); the deployment itself is then created with that manifest.
+// Writes dist/manifest.json ({ "/path": hash }). The deployment is then created with that manifest; for
+// small updates, merge only the changed entries into the previous deployment's `files` map (GET
+// .../deployments/<id>) instead of sending the whole manifest again.
 // Usage: CF_PAGES_JWT_FILE=/tmp/jwt node tools/pages_upload.mjs
 import fs from 'node:fs';
 import path from 'node:path';

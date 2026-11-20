@@ -41,7 +41,7 @@ export async function createPresence({ scene, player, toRD, fromRD, slug }) {
   // the name tag over someone's head says when their microphone is off, so silence is explained
   const tag = p => (p.name || 'Visitor') + (p.mic ? '' : ' 🔇');
   function join(key) {
-    const room = joinRoom({ appId: MP.appId, relayUrls: MP.relays, relayRedundancy: MP.relays.length, ...(iceServers ? { rtcConfig: { iceServers } } : {}) }, `${slug}:${key}`);
+    const room = joinRoom({ appId: MP.appId, relayUrls: MP.relays, relayRedundancy: MP.relays.length, ...(iceServers ? { rtcConfig: { iceServers } } : {}) }, `nl:${key}`);   // one world for every region: the room is the RD square, never the map name
     const [send, receive] = room.makeAction('st');
     receive((d, id) => {
       if (!Array.isArray(d) || d.length < 6) return;

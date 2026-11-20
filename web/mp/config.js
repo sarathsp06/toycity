@@ -12,8 +12,8 @@ export const MP = {
   roomLeaveEdge: 40,              // and leave it again only when this far away
   sendHz: 10,                     // position updates while moving
   idleHz: 1,                      // and while standing still
-  showWithin: 10,                 // other players appear inside this distance
-  hideBeyond: 12,                 // and disappear beyond this one (no flicker at the edge)
+  showWithin: 60,                 // other players appear inside this distance (10 m hid friends a street away)
+  hideBeyond: 70,                 // and disappear beyond this one (no flicker at the edge)
   interpDelay: 0.15,              // remote players are drawn this far in the past, for smoothness
   peerTimeout: 5,                 // forget a player not heard from for this long
   // voice reaches as far as you can see someone: 3 m (the first version) was silent before you
