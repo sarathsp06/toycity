@@ -38,7 +38,7 @@ export function createAmbience({ ctx, surroundings }) {
     for (let k = 0; k < n; k++) {
       const s = t + k * 0.12;
       o.frequency.setValueAtTime(base, s); o.frequency.exponentialRampToValueAtTime(base * (1.3 + Math.random() * 0.4), s + 0.07);
-      g.gain.setValueAtTime(0, s); g.gain.linearRampToValueAtTime(0.05, s + 0.01); g.gain.linearRampToValueAtTime(0, s + 0.08);
+      g.gain.setValueAtTime(0, s); g.gain.linearRampToValueAtTime(0.01, s + 0.01);   // birds: a fifth of the first version (0.05), they were too loud g.gain.linearRampToValueAtTime(0, s + 0.08);
     }
     o.start(t); o.stop(t + n * 0.12 + 0.1);
   }
