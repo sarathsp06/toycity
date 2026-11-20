@@ -1,0 +1,10 @@
+# downloaded source data and baked output: rebuild with tilebake.py, tools/buildtiles.mjs and tools/overview.mjs
+data/
+web/regions/
+dist/
+# local tooling
+tools/node_modules/
+tools/.venv/
+__pycache__/
+*.pyc
+.DS_Store

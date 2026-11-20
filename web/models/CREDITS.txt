@@ -1,0 +1,7 @@
+Car models from BlendSwap (licence as declared by the uploader):
+- Volkswagen VW Golf MK4 by Jay-Artist, CC-BY, https://blendswap.com/blend/3976
+- Toyota Camry 2001 by abdulsalamnaqeeb, CC-BY, https://blendswap.com/blend/23001
+- Fiat500Abarth by Pierallard, CC-BY, https://blendswap.com/blend/13817
+- Jeep Cherokee with rig by koumis, CC0, https://blendswap.com/blend/25471
+- BEAMNG VAN by BlenderBach, CC-BY, https://blendswap.com/blend/19228
+Person: Xbot from the three.js examples, dressed with tools/dress_person.py.

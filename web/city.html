@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Toy City</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; background: #9ccbe8; font-family: system-ui, sans-serif; overflow: hidden; }
+  canvas { display: block; }
+  #hud { position: fixed; left: 12px; top: 12px; color: #1b2a33; background: rgba(255,255,255,.85); padding: 10px 12px; border-radius: 10px; font-size: 13px; line-height: 1.5; max-width: 330px; box-shadow: 0 2px 10px rgba(0,0,0,.15); z-index: 4; }
+  #hud b { font-size: 15px; }
+  #hud select, #hud input, #hud button { font: inherit; padding: 4px 7px; border: 1px solid #c5d2da; border-radius: 6px; background: #fff; }
+  kbd { background: #eef3f6; border: 1px solid #c5d2da; border-radius: 4px; padding: 0 5px; font-family: inherit; }
+  #perf { font-variant-numeric: tabular-nums; color: #4a5a66; font-size: 12px; }
+  #place { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); color: #fff; background: rgba(20,30,40,.75); padding: 8px 14px; border-radius: 999px; font-size: 14px; pointer-events: none; white-space: nowrap; }
+  #zoom { position: fixed; right: 18px; bottom: 22px; display: flex; flex-direction: column; gap: 6px; }
+  #zoom button { width: 40px; height: 40px; border-radius: 10px; border: 1px solid #c5d2da; background: rgba(255,255,255,.9); font-size: 22px; cursor: pointer; color: #1d2b3a; }
+  #mini { position: fixed; right: 18px; top: 18px; width: 200px; height: 150px; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,.3); border: 2px solid #fff; z-index: 5; transition: width .2s, height .2s; }
+  #mini.big { width: 460px; height: 360px; }
+  #minibtn { position: fixed; right: 24px; top: 24px; z-index: 6; border: 0; border-radius: 6px; background: rgba(255,255,255,.9); cursor: pointer; font-size: 12px; padding: 3px 7px; }
+  .me-arrow { width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-bottom: 18px solid #e24a3b; filter: drop-shadow(0 0 2px #fff); }
+  canvas { touch-action: none; }
+  #joy, #jumpbtn { display: none; }
+  body.touch #joy { display: block; position: fixed; left: 22px; bottom: 26px; width: 120px; height: 120px; border-radius: 50%; background: rgba(255,255,255,.28); border: 2px solid rgba(255,255,255,.7); touch-action: none; z-index: 6; }
+  body.touch #joy div { position: absolute; left: 35px; top: 35px; width: 50px; height: 50px; border-radius: 50%; background: rgba(255,255,255,.9); box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+  body.touch #jumpbtn { display: block; position: fixed; right: 24px; bottom: 34px; width: 78px; height: 78px; border-radius: 50%; border: 2px solid rgba(255,255,255,.8); background: rgba(27,42,51,.55); color: #fff; font: 600 15px system-ui, sans-serif; touch-action: none; z-index: 6; }
+  body.touch #jumpbtn:active { background: rgba(27,42,51,.8); }
+  body.touch #mini, body.touch #minibtn, body.touch #hud .keys, body.touch #perf { display: none; }
+  body.touch #hud { top: 8px; left: 8px; right: 8px; max-width: none; padding: 7px 9px; font-size: 13px; }
+  body.touch #hud b { font-size: 14px; }
+  body.touch #zoom { bottom: auto; top: 50%; transform: translateY(-50%); right: 12px; }
+  body.touch #place { bottom: 160px; font-size: 13px; }
+  #loading { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: #9ccbe8; color: #1b2a33; z-index: 10; transition: opacity .4s; }
+  #loading.done { opacity: 0; pointer-events: none; }
+  #loading .ring { width: 42px; height: 42px; border-radius: 50%; border: 4px solid rgba(255,255,255,.5); border-top-color: #1b2a33; animation: spin .9s linear infinite; }
+  #loading .name { font-size: 22px; font-weight: 700; }
+  #loading .bar { width: min(320px, 70vw); height: 8px; border-radius: 4px; background: rgba(255,255,255,.55); overflow: hidden; }
+  #loading .fill { height: 100%; width: 0; background: #1b2a33; border-radius: 4px; transition: width .25s; }
+  #loading .step { font-size: 14px; color: #3a4c58; font-variant-numeric: tabular-nums; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { #loading .ring { animation-duration: 3s; } }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="loading" role="progressbar" aria-label="Loading the town" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+  <div class="ring"></div>
+  <div class="name">Toy City</div>
+  <div class="bar"><div class="fill" id="loadfill"></div></div>
+  <div class="step" id="loadstep">Starting…</div>
+</div>
+<script>
+  // loading screen: city.js reports progress (0..1) and what it is doing; it only ever moves forward
+  window.loadProgress = (f, text) => {
+    const el = document.getElementById('loading'); if (!el) return;
+    const p = Math.max(+el.getAttribute('aria-valuenow'), Math.round(Math.min(1, f) * 100));
+    el.setAttribute('aria-valuenow', p);
+    document.getElementById('loadfill').style.width = p + '%';
+    if (text) document.getElementById('loadstep').textContent = `${text} · ${p}%`;
+  };
+  loadProgress(0.02, 'Starting the 3D engine');
+</script>
+<div id="hud">
+  <b id="title">Toy City</b><br/>
+  <span class="keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · drag to look · click to go there · scroll or <kbd>+</kbd><kbd>−</kbd> zoom · <kbd>F</kbd> fly</span>
+  <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
+    <select id="tod" aria-label="Time of day"><option value="morning">Morning</option><option value="noon" selected>Midday</option><option value="golden">Golden hour</option><option value="dusk">Dusk</option><option value="night">Night</option></select>
+    <select id="quality" aria-label="Quality"><option value="low">Fast</option><option value="mid" selected>Balanced</option><option value="high">Sharp</option></select>
+  </div>
+  <form id="goto" style="margin-top:6px;display:flex;gap:4px"><input id="q" placeholder="Address or place, e.g. Schaatsbaan 43" style="flex:1"/><button>Go</button></form>
+  <div id="perf"></div>
+</div>
+<div id="place">loading…</div>
+<div id="mini"></div><button id="minibtn" title="Bigger or smaller map">⤢</button>
+<div id="joy" aria-label="Move"><div></div></div><button id="jumpbtn" aria-label="Jump">Jump</button>
+<div id="zoom"><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button></div>
+<script type="module" src="./city.js"></script>
+</body>
+</html>
