@@ -1,14 +1,12 @@
-// Other players in the scene: their chosen persona (the classic person gets a shirt colour of its own), a name label
+// Other players in the scene: their person and outfit, a name label
 // and a ring that lights up while they talk. Each one blends idle / walk / run by its speed.
 import * as THREE from 'three';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
-import { loadAvatar } from '../avatar.js';
+import { loadAvatar, myLook } from '../avatar.js';
 
 const SHIRTS = [0x2f6fde, 0x2a9d5c, 0xe0a020, 0x8e44ad, 0x16a3b8, 0xd35400, 0xc0392b, 0x34495e];
-// one loaded template per persona, cloned for every player who picked it
-const templates = new Map();
-const template = id => templates.get(id) || templates.set(id, loadAvatar(new URL('../', import.meta.url), { persona: id })).get(id);
-export const ready = template('classic');
+const base = new URL('../', import.meta.url);
+export const ready = loadAvatar(base, { look: myLook() });
 
 function label(text) {
   const c = document.createElement('canvas'), ctx = c.getContext('2d');
@@ -25,27 +23,26 @@ function label(text) {
 
 export function shirtFor(id) { let h = 0; for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return SHIRTS[h % SHIRTS.length]; }
 
-export function makePlayer(id, name, persona = 'classic') {
+export function makePlayer(id, name, look) {
   const group = new THREE.Group();
   const ring = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.52, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x7CFC9A, transparent: true, opacity: 0, depthWrite: false }));
   ring.position.y = 0.05; group.add(ring);
-  const p = { id, group, model: null, mixer: null, act: null, ring, name: null, tag: null, speaking: 0, persona: null };
+  const p = { id, group, model: null, mixer: null, act: null, ring, name: null, tag: null, speaking: 0, look: null };
   setName(p, name);
-  setPersona(p, persona);
+  setLook(p, look);
   return p;
 }
 
-// swap the body; the old one stays until the new persona has loaded
-export function setPersona(p, persona) {
-  if (p.persona === persona) return;
-  p.persona = persona;
-  template(persona).catch(() => template('classic')).then(t => {
-    if (p.persona !== persona || p.disposed) return;
-    const model = SkeletonUtils.clone(t.model), shirt = new THREE.Color(shirtFor(p.id));
+// swap the body (a random person and outfit each player got on their first visit); the old one
+// stays until the new one has loaded
+export function setLook(p, look) {
+  if (p.look === look) return;
+  p.look = look;
+  loadAvatar(base, { look }).catch(() => loadAvatar(base)).then(t => {
+    if (p.look !== look || p.disposed) { disposeOwn(t.model); return; }
+    const model = t.model, shirt = new THREE.Color(shirtFor(p.id));
     model.traverse(o => {
-      if (!o.isMesh) return;
-      o.frustumCulled = false; o.castShadow = true;
-      if (o.material.name === 'toy_shirt') { o.material = o.material.clone(); o.material.color.copy(shirt); o.userData.own = true; }
+      if (o.isMesh && o.material.name === 'toy_shirt') { o.material = o.material.clone(); o.material.color.copy(shirt); o.userData.own = true; }
     });
     if (p.model) { p.mixer.stopAllAction(); disposeOwn(p.model); p.group.remove(p.model); }
     p.model = model; p.group.add(model);

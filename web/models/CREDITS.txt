@@ -8,3 +8,4 @@ Person: Xbot from the three.js examples, dressed with tools/dress_person.py.
 
 Personas (BlenderKit, https://www.blenderkit.com)
 - Zuri, by Richie Kirui: CC0 (public domain). Converted by tools/personas.py.
+- Billy, by vyko Indra: CC0 (public domain). Converted by tools/personas.py (Rigify bones renamed to Mixamo).

@@ -9,7 +9,7 @@ import { Sky } from 'three/addons/objects/Sky.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import * as BU from 'three/addons/utils/BufferGeometryUtils.js';
 import * as TX from './textures.js';
-import { loadAvatar } from './avatar.js';
+import { loadAvatar, myLook } from './avatar.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 const params = new URLSearchParams(location.search);
@@ -493,11 +493,11 @@ const player = new THREE.Group();
 // rigged person (models/person.glb, dressed in Blender by tools/dress_person.py) with idle / walk / run
 // blended by actual speed; the capsule above stays until it has loaded
 const avatar = { mixer: null, actions: null, speed: 0 };
-// the player's own look, chosen in the people panel and remembered on this device
-async function useAvatar(persona) {
-  const { model, clips } = await loadAvatar(new URL('./', import.meta.url), { persona });
+// the player's own look: a random person and outfit given on the first visit, kept on this device
+async function useAvatar(look) {
+  const { model, clips } = await loadAvatar(new URL('./', import.meta.url), { look });
   if (avatar.mixer) avatar.mixer.stopAllAction();
-  for (const c of [...player.children]) player.remove(c);
+  for (const c of [...player.children]) if (!c.userData.keep) player.remove(c);   // keep the ears (voice.js)
   player.add(model);
   const mixer = new THREE.AnimationMixer(model);
   const actions = { idle: mixer.clipAction(clips.idle), walk: mixer.clipAction(clips.walk), run: mixer.clipAction(clips.run) };
@@ -509,7 +509,7 @@ async function useAvatar(persona) {
     'LeftArm', 'RightArm', 'LeftForeArm', 'RightForeArm']) bones[n] = bone(n);
   Object.assign(avatar, { mixer, actions, bones });
 }
-useAvatar(localStorage.getItem('toycity.persona') || 'classic').catch(e => console.warn('avatar', e));
+useAvatar(myLook()).catch(e => console.warn('avatar', e));
 // natural speeds of the clips in m/s at this scale, used to keep the feet from sliding
 const WALK_MS = 1.5, RUN_MS = 4.2;
 function animateAvatar(dt, moved) {

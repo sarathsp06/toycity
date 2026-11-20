@@ -7,22 +7,20 @@ import { createPresence } from './presence.js';
 import { createVoice, p2pTransport } from './voice.js';
 import { createAmbience } from './ambience.js';
 
-import { PERSONAS } from '../avatar.js';
-
 export async function start({ scene, camera, player, toRD, fromRD, slug, params, hud, surroundings, useAvatar, view }) {
   hud.innerHTML = `<button id="mpname" title="Change your name"></button>
-    <select id="mplook" aria-label="Your character and view"><optgroup label="Character">${PERSONAS.map(p => `<option value="${p.id}">🧍 ${p.label}</option>`).join('')}</optgroup>
-      <optgroup label="View"><option value="view:eyes">👁️ Through my eyes</option><option value="view:behind">🎥 From behind</option></optgroup></select>
+    <button id="mpview" title="Switch between seeing through your eyes and from behind (V)"></button>
     <button id="mpmic" title="Microphone: people within about 10 metres hear you, louder when closer"></button>
     <button id="mpsound" title="Birds, wind and traffic"></button>
     <span id="mppeople">Looking for people nearby…</span>`;
   const $ = s => hud.querySelector(s);
   const presence = await createPresence({ scene, player, toRD, fromRD, slug });
-  const voice = createVoice({ camera, presence, transport: p2pTransport(presence), params });
+  const voice = createVoice({ camera, player, presence, transport: p2pTransport(presence), params });
   const ambience = createAmbience({ ctx: voice.listener.context, surroundings });
 
   function render() {
     $('#mpname').textContent = '👤 ' + presence.name;
+    $('#mpview').textContent = view?.eyes ? '🎥 From behind' : '👁️ My eyes';
     $('#mpmic').textContent = voice.micOn ? '🎙️ Mic on' : '🎙️ Mic off';
     $('#mpmic').classList.toggle('on', voice.micOn);
     $('#mpsound').textContent = ambience.on ? '🔊 Sounds' : '🔈 Sounds off';
@@ -40,14 +38,9 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
     inp.onkeydown = e => { e.stopPropagation(); if (e.key === 'Enter') finish(true); if (e.key === 'Escape') finish(false); };
     inp.onblur = () => finish(true);
   };
-  // the menu holds both who you are and how you look at the world; it always shows the character
-  $('#mplook').value = presence.persona;
-  $('#mplook').onchange = e => {
-    const v = e.target.value;
-    if (v.startsWith('view:')) { if (view) view.eyes = v === 'view:eyes'; }
-    else { presence.setPersona(v); useAvatar?.(v); }
-    e.target.value = presence.persona; e.target.blur();
-  };
+  // who you are is not a choice (everyone gets a random person and outfit); how you see the world is
+  $('#mpview').onclick = e => { if (view) view.eyes = !view.eyes; e.target.blur(); render(); };
+  addEventListener('toycity:view', render);
   $('#mpmic').onclick = async () => { try { presence.setMic(await voice.setMic(!voice.micOn)); } catch (e) { alert('Could not use the microphone: ' + (e.message || e)); } render(); };
   $('#mpsound').onclick = () => { ambience.toggle(); render(); };
   render();

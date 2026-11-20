@@ -9,10 +9,9 @@
 import * as THREE from 'three';
 import { MP } from './config.js';
 import { roomsFor, Track, visible, cleanName } from './logic.js';
-import { ready as avatarsReady, makePlayer, setName, setPersona, animate, disposePlayer } from './players.js';
+import { ready as avatarsReady, makePlayer, setName, setLook, animate, disposePlayer } from './players.js';
 
-import { PERSONAS } from '../avatar.js';
-const PERSONA_IDS = new Set(PERSONAS.map(p => p.id));
+import { parseLook, myLook } from '../avatar.js';
 const TRYSTERO = './trystero-nostr.js';   // patched local copy, see the file header
 
 export async function createPresence({ scene, player, toRD, fromRD, slug }) {
@@ -26,7 +25,7 @@ export async function createPresence({ scene, player, toRD, fromRD, slug }) {
     ...s, urls: [].concat(s.urls).filter(u => /^stun:.*:3478$|^turn:.*:3478\?transport=udp$|^turns:.*:443\?transport=tcp$/.test(u)) }))).catch(() => null);
   await avatarsReady;
 
-  let myPersona = PERSONA_IDS.has(localStorage.getItem('toycity.persona')) ? localStorage.getItem('toycity.persona') : 'classic';
+  const look = myLook();
   let myName = cleanName(localStorage.getItem('toycity.name')) || 'Visitor ' + (100 + Math.floor(Math.random() * 900));
   let myMic = false;
   let seq = 0, sendT = 0, lastSent = null, roomT = 0;
@@ -53,8 +52,8 @@ export async function createPresence({ scene, player, toRD, fromRD, slug }) {
       p.track.push(s, p.last, { x, y, h, v });
       const name = cleanName(n), mic = micOn === 1;
       if ((name && name !== p.name) || mic !== p.mic) { p.name = name || p.name; p.mic = mic; if (p.player) setName(p.player, tag(p)); }
-      const persona = PERSONA_IDS.has(look) ? look : 'classic';
-      if (persona !== p.persona) { p.persona = persona; if (p.player) setPersona(p.player, persona); }
+      const l = parseLook(look) ? look : 'classic';
+      if (l !== p.look) { p.look = l; if (p.player) setLook(p.player, l); }
     });
     room.onPeerJoin(id => { const p = peer(id); p.rooms.add(key); p.last ||= performance.now() / 1000; lastSent = null; });   // say hello right away
     room.onPeerLeave(id => { const p = peers.get(id); if (p) { p.rooms.delete(key); if (!p.rooms.size) drop(p); } });
@@ -84,7 +83,7 @@ export async function createPresence({ scene, player, toRD, fromRD, slug }) {
     // 10 updates a second while moving, one a second standing still, and at once after a change
     sendT -= dt;
     if (!lastSent || (sendT <= 0 && (speed > 0.05 || now - lastSent >= 1 / MP.idleHz))) {
-      const state = [++seq, +X.toFixed(2), +Y.toFixed(2), +player.rotation.y.toFixed(3), +speed.toFixed(2), myName, myPersona, myMic ? 1 : 0];
+      const state = [++seq, +X.toFixed(2), +Y.toFixed(2), +player.rotation.y.toFixed(3), +speed.toFixed(2), myName, look, myMic ? 1 : 0];
       for (const r of rooms.values()) r.send(state);
       sendT = 1 / MP.sendHz; lastSent = now;
     }
@@ -93,7 +92,7 @@ export async function createPresence({ scene, player, toRD, fromRD, slug }) {
       const s = p.track.sample(now); if (!s) continue;
       p.dist = Math.hypot(s.x - X, s.y - Y);
       const show = visible(p.shown, p.dist, MP.showWithin, MP.hideBeyond);
-      if (show && !p.player) { p.player = makePlayer(p.id, tag(p), p.persona); scene.add(p.player.group); }
+      if (show && !p.player) { p.player = makePlayer(p.id, tag(p), p.look); scene.add(p.player.group); }
       if (p.player) {
         p.player.group.visible = show;
         const [x, z] = fromRD(s.x, s.y); p.player.group.position.set(x, 0.15, z); p.player.group.rotation.y = s.h;
@@ -106,8 +105,6 @@ export async function createPresence({ scene, player, toRD, fromRD, slug }) {
   return {
     selfId, peers, update,
     get name() { return myName; },
-    get persona() { return myPersona; },
-    setPersona(id) { if (!PERSONA_IDS.has(id)) return; myPersona = id; localStorage.setItem('toycity.persona', id); lastSent = null; },
     setMic(on) { myMic = !!on; lastSent = null; },
     setName(n) { n = cleanName(n); if (!n) return; myName = n; localStorage.setItem('toycity.name', n); lastSent = null; },
     // for a peer-to-peer voice transport: the same WebRTC connection, always through one room
