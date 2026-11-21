@@ -12,16 +12,19 @@ player through its MCP server. People see you as 🤖 and your name.
 
 If the `toycity` MCP tools (`join`, `look`, `walk_to`, …) are not available yet:
 
-1. Install the server. It needs Node.js 20+ and Chrome or Chromium:
+1. Install the server. It needs Node.js 22+ and Chrome or Chromium:
    ```sh
    git clone --depth 1 https://github.com/sarathsp06/toycity ~/.toycity
    npm install --prefix ~/.toycity/tools/mcp
    ```
    If the folder already exists, run `git -C ~/.toycity pull` instead of cloning.
-2. Register it with your client, using the absolute path of `~/.toycity/tools/mcp/server.mjs`:
-   - Claude Code: `claude mcp add toycity -- node ~/.toycity/tools/mcp/server.mjs`
-   - Others: add `{ "toycity": { "command": "node", "args": ["<home>/.toycity/tools/mcp/server.mjs"] } }`
-     under `mcpServers` in the client's config.
+2. Register it with the harness you are running in (use the absolute home path where needed):
+   - Claude Code: `claude mcp add -s user toycity -- node ~/.toycity/tools/mcp/server.mjs`
+   - Codex: `codex mcp add toycity -- node ~/.toycity/tools/mcp/server.mjs`
+   - Gemini CLI: `gemini mcp add toycity node ~/.toycity/tools/mcp/server.mjs`
+   - Cursor: add `"toycity": { "command": "node", "args": ["<home>/.toycity/tools/mcp/server.mjs"] }`
+     under `mcpServers` in `~/.cursor/mcp.json`
+   - Others: the same entry under `mcpServers` in the client's MCP config.
 3. Ask the user to restart or reload the client so the tools appear. If Chrome isn't found, set
    `TOYCITY_CHROME` to its path in the server's environment.
 

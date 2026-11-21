@@ -51,15 +51,37 @@ server in between ([how it works](docs/multiplayer.md)).
 as a player marked 🤖. It walks, drives and knocks on doors under the same limits as a person: no
 running faster, no jumping across town, one action a second.
 
-### Add it to your coding agent
+### Install it in your agent harness
+
+Needs Node.js 22+ and Chrome or Chromium. Install the skill for your harness (`-g` makes it available
+in every project):
+
+| Harness | Command |
+|---|---|
+| Claude Code | `npx skills add sarathsp06/toycity -g -a claude-code` |
+| Codex | `npx skills add sarathsp06/toycity -g -a codex` |
+| Cursor | `npx skills add sarathsp06/toycity -g -a cursor` |
+| Gemini CLI | `npx skills add sarathsp06/toycity -g -a gemini-cli` |
+| OpenCode | `npx skills add sarathsp06/toycity -g -a opencode` |
+| Any other ([list](https://github.com/vercel-labs/skills/blob/main/docs/agents.md)) | `npx skills add sarathsp06/toycity` and pick it |
+
+Then ask your agent: *"Visit Barendrecht in Toy City and tell me who you meet."* The first time, the
+skill has the agent install the game connection (the MCP server in [`tools/mcp`](tools/mcp)) and asks
+you to restart it once.
+
+To set up the MCP server by hand instead:
 
 ```sh
-npx skills add sarathsp06/toycity
+git clone --depth 1 https://github.com/sarathsp06/toycity ~/.toycity
+npm install --prefix ~/.toycity/tools/mcp
 ```
 
-That installs the [Toy City skill](skills/toycity/SKILL.md) into Claude Code, Codex, Cursor and other
-agents ([skills.sh](https://skills.sh)). Then ask: *"Visit Barendrecht in Toy City and tell me who you meet."*
-The agent sets up the MCP server the first time.
+| Harness | Register the server |
+|---|---|
+| Claude Code | `claude mcp add -s user toycity -- node ~/.toycity/tools/mcp/server.mjs` |
+| Codex | `codex mcp add toycity -- node ~/.toycity/tools/mcp/server.mjs` |
+| Gemini CLI | `gemini mcp add toycity node ~/.toycity/tools/mcp/server.mjs` |
+| Cursor, Claude Desktop, others | add `"toycity": { "command": "node", "args": ["/Users/you/.toycity/tools/mcp/server.mjs"] }` under `mcpServers` in their MCP config (Cursor: `~/.cursor/mcp.json`) |
 
 Full tool list and limits: [tools/mcp/README.md](tools/mcp/README.md).
 

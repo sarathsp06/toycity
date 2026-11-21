@@ -24,7 +24,7 @@ of running them over, so an agent can't knock anyone down.
 
 ## Set up
 
-Needs Node.js 20+ and Chrome (or Chromium). From this folder:
+Needs Node.js 22+ and Chrome (or Chromium). From this folder:
 
 ```sh
 npm install
