@@ -54,6 +54,7 @@ function ensureBrowser() {
   try { execFileSync(process.execPath, [cli, 'install', 'chromium'], { stdio: 'ignore', timeout: 600000 }); } catch { /* reported below */ }
   return chromePath();
 }
+let myVoice = process.env.TOYCITY_VOICE || 'af_heart';
 let browser = null, ctx = null, page = null, last = 0, me = null, hasVoice = false, lease = null, leaseT = null;
 
 // the shared browser (browser-host.mjs): connect to it, or start it and then connect
@@ -139,8 +140,10 @@ const server = new McpServer({ name: 'toycity', version: '0.1.0' }, {
 server.tool('join', 'Enter Toy City as a player. Start in a town (rotterdam, barendrecht or amsterdam), optionally next to an address or place in it, or from a meeting link someone shared. You can only choose where to start; after that you move like everyone else.',
   { link: z.string().max(400).optional().describe('a Toy City meeting link (…/city.html?…&meet=…): you arrive next to whoever shared it; town and near are then ignored'),
     town: z.enum(['rotterdam', 'barendrecht', 'amsterdam']).default('barendrecht'), near: z.string().max(80).optional().describe('an address or place to start next to, e.g. "Dorpsstraat 141"'), name: z.string().min(1).max(20).describe('your name in the game'),
-    voice: z.boolean().default(false).describe('join with a voice: you can take and make calls, speak with say and hear with listen. Leave it off if you will not listen; people then get no call button for you') },
-  async ({ link, town, near, name, voice }) => {
+    voice: z.boolean().default(false).describe('join with a voice: you can take and make calls, speak with say and hear with listen. Leave it off if you will not listen; people then get no call button for you'),
+    voice_name: z.string().max(30).optional().describe('which voice to speak with, e.g. af_heart, af_bella, am_michael, bf_emma, bm_george (Kokoro voices; see the README). Default af_heart') },
+  async ({ link, town, near, name, voice, voice_name }) => {
+    if (voice_name) myVoice = voice_name;
     if (page) return text('Already in Toy City. Call leave first to start again.');
     const meet = link ? parseLink(link) : null;
     if (link && !meet) return text('That is not a Toy City meeting link (it should look like …/city.html?place=…&meet=…).');
@@ -264,6 +267,47 @@ server.tool('answer_door', 'Someone is knocking at your home (look lists knocks)
   });
 
 // ---------- voice: only for an agent that joined with voice: true ----------
+// Speech: Kokoro (a natural neural voice, offline) when it is on this computer: TOYCITY_KOKORO_PYTHON
+// (a Python with kokoro-onnx and soundfile), TOYCITY_KOKORO_MODEL and TOYCITY_KOKORO_VOICES, or the copy
+// HyperFrames installs in ~/.cache/hyperframes. Otherwise the computer's own voice (macOS say, espeak-ng).
+let kokoro = null;
+function kokoroPaths() {
+  const h = path.join(os.homedir(), '.cache/hyperframes');
+  const py = process.env.TOYCITY_KOKORO_PYTHON || path.join(h, 'kokoro-venv/bin/python');
+  const model = process.env.TOYCITY_KOKORO_MODEL || path.join(h, 'tts/models/kokoro-v1.0.onnx');
+  const voices = process.env.TOYCITY_KOKORO_VOICES || path.join(h, 'tts/voices/voices-v1.0.bin');
+  return [py, model, voices].every(f => fs.existsSync(f)) ? { py, model, voices } : null;
+}
+function kokoroWorker() {
+  if (kokoro !== null) return kokoro;
+  const k = kokoroPaths(); if (!k) return (kokoro = false);
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'toycity-kokoro-'));   // a clean folder: no stray modules
+  const proc = spawn(k.py, ['-I', fileURLToPath(new URL('./kokoro-worker.py', import.meta.url)), k.model, k.voices], { cwd, stdio: ['pipe', 'pipe', 'ignore'] });
+  const waiting = []; let buf = '', ready = null;
+  const isReady = new Promise(r => ready = r);
+  proc.stdout.on('data', d => {
+    buf += d; let i;
+    while ((i = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, i); buf = buf.slice(i + 1);
+      let m; try { m = JSON.parse(line); } catch { continue; }
+      if (m.ready) { kokoro.voices = m.voices; ready(true); } else waiting.shift()?.(m);
+    }
+  });
+  proc.on('exit', () => { ready(false); kokoro = false; waiting.splice(0).forEach(f => f({ ok: false })); });
+  kokoro = { proc, isReady, voices: [], ask: req => new Promise(r => { waiting.push(r); proc.stdin.write(JSON.stringify(req) + '\n'); }) };
+  return kokoro;
+}
+async function speakNatural(text) {
+  const k = kokoroWorker();
+  if (k && await k.isReady) {
+    const out = path.join(os.tmpdir(), `toycity-kk-${process.pid}-${Date.now()}.wav`);
+    const r = await k.ask({ text, voice: k.voices.includes(myVoice) ? myVoice : 'af_heart', speed: 1.0, out });
+    if (r.ok && fs.existsSync(out)) { const b = fs.readFileSync(out).toString('base64'); fs.rmSync(out, { force: true }); return b; }
+  }
+  return speak(text);
+}
+// sentences, so a long answer starts quickly and can be cut off between (and within) them
+const sentences = t => (String(t).match(/[^.!?…]+[.!?…]+["')\]]*\s*|[^.!?…]+$/g) || [t]).map(x => x.trim()).filter(Boolean);
 function speak(text) {   // text to a WAV file with the computer's own speech: macOS say, or espeak-ng / espeak
   const f = path.join(os.tmpdir(), `toycity-say-${process.pid}.wav`);
   if (process.platform === 'darwin') {
@@ -303,17 +347,35 @@ server.tool('call', 'Ring someone near you who can talk (look shows can_talk). T
   { name: z.string().max(40).describe('their name, or part of it') },
   async ({ name }) => { needVoice(); await pace(); const who = await inPage(n => window.__agentCall?.ring(n), name); return text(who ? `Ringing ${who}…` : `Nobody called "${name}" who can talk is near you.`); });
 
-server.tool('say', 'Speak in your call (calls to you are answered by themselves when you have a voice). Text is spoken with a computer voice; or pass your own WAV audio.',
+server.tool('say', 'Speak in your call (calls to you are answered by themselves when you have a voice), in a natural voice when this computer has one. If the other person talks over you, you stop at once and are told what they said: answer that. Or pass your own WAV audio.',
   { text: z.string().max(500).optional(), wav_base64: z.string().max(4_000_000).optional() },
   async ({ text: t, wav_base64 }) => {
     needVoice(); await pace();
     if (!t && !wav_base64) return text('Give text or wav_base64.');
     const inCall = await inPage(() => window.__agentCall?.members.length || 0);
     if (!inCall) return text('You are not in a call: nobody would hear you. Use call, or wait for someone to call you.');
-    const secs = await inPage(b => window.__agentVoice.say(b), wav_base64 || speak(t));
-    if (!(secs > 0.1)) return text('The sound could not be played (it was empty). Try again with different words.');
-    await page.waitForTimeout(Math.min(30, secs) * 1000);
-    return text(`Said it (${secs.toFixed(1)} s).`);
+    if (wav_base64) {
+      const r = await inPage(b => window.__agentVoice.say(b), wav_base64);
+      return text(r.interrupted ? `They interrupted you after ${r.played.toFixed(1)} s. Listen to them now.` : `Said it (${r.seconds.toFixed(1)} s).`);
+    }
+    // sentence by sentence: the next one is made while this one plays; talking over me stops it all
+    const parts = sentences(t), said = [];
+    let next = speakNatural(parts[0]), total = 0;
+    for (let i = 0; i < parts.length; i++) {
+      const wav = await next; if (i + 1 < parts.length) next = speakNatural(parts[i + 1]);
+      const r = await inPage(b => window.__agentVoice.say(b), wav);
+      if (!(r.seconds > 0.1)) return text('The sound could not be played (it was empty). Try again with different words.');
+      total += r.played;
+      if (r.interrupted) {
+        // let them finish (until they have been quiet for a second, at most 15 s), then hear them
+        for (let w = 0; w < 30; w++) { await page.waitForTimeout(500); if (await inPage(() => performance.now() - (window.__agentVoice.lastLoud || 0) > 1200)) break; }
+        const heard = await inPage(() => window.__agentVoice?.take?.() || null), words = heard && !heard.silent ? transcribe(heard.wav) : null;
+        return text(`They interrupted you${said.length ? ` after: "${said.join(' ')}"` : ' at the start'} (stopped mid-sentence: "${parts[i]}"). ` +
+          (words ? `They said: "${words}". Answer that; keep it short.` : 'Listen to them now (listen).'));
+      }
+      said.push(parts[i]);
+    }
+    return text(`Said it (${total.toFixed(1)} s).`);
   });
 
 server.tool('listen', 'What was said in your call since you last listened (up to two minutes), as text (or audio if this computer has no speech-to-text). Wait a little first if you just spoke. To hold a conversation: listen, then say, then listen again.',
@@ -337,4 +399,5 @@ server.tool('leave', 'Leave Toy City.', {},
 // knocks at your home (and other messages) arrive while you wait; nothing else is needed for that
 await server.connect(new StdioServerTransport());
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, async () => { await leaveGame(); process.exit(0); });
-process.stdin.on('close', async () => { await leaveGame(); process.exit(0); });   // the client went away
+process.stdin.on('close', async () => { await leaveGame(); process.exit(0); });
+process.on('exit', () => { try { kokoro?.proc?.kill(); } catch {} });   // the client went away

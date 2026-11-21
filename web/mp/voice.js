@@ -142,11 +142,23 @@ let mouth = null;
 function agentMouth(ctx) {
   if (!mouth) mouth = ctx.createMediaStreamDestination();
   const v = (window.__agentVoice ||= {});
+  // plays one clip; resolves when it has finished, or as soon as the other person starts talking
+  // over it (barge-in, see agentEar): { seconds, played, interrupted }
   v.say = async b64 => {
     const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
     const buf = await ctx.decodeAudioData(bytes.buffer);
-    const src = ctx.createBufferSource(); src.buffer = buf; src.connect(mouth); src.start();
-    return buf.duration;
+    if (ctx.state !== 'running') await ctx.resume().catch(() => {});
+    const src = ctx.createBufferSource(); src.buffer = buf; src.connect(mouth);
+    const t0 = ctx.currentTime;
+    return new Promise(done => {
+      const finish = interrupted => { if (v.current !== src) return; v.current = null; v.speaking = false; v.lastEnd = performance.now(); try { src.stop(); } catch {} done({ seconds: buf.duration, played: Math.min(buf.duration, ctx.currentTime - t0), interrupted }); };
+      // starting a new turn (not the next sentence of one): 0.7 s in which I can't be stopped, so when
+      // two cut in on each other, the one who spoke last keeps the floor
+      if (performance.now() - (v.lastEnd || 0) > 1500) v.graceUntil = performance.now() + 700;
+      v.current = src; v.speaking = true; v.interrupted = false; v.stop = () => finish(true);
+      src.onended = () => finish(false);
+      src.start();
+    });
   };
   return mouth.stream;
 }
@@ -159,7 +171,15 @@ function agentEar(ctx, input) {
     for (let i = 0; i < out.length; i++) out[i] = Math.max(-1, Math.min(1, x[Math.floor(i * step)])) * 32767;
     chunks.push(out); n += out.length;
     while (n > MAX) n -= chunks.shift().length;   // the last two minutes at most
+    // barge-in: someone talking clearly for a third of a second while I speak stops me. (Their own
+    // browser cancels my voice from their microphone, so what arrives here is them.)
+    let e2 = 0; for (let i = 0; i < x.length; i++) e2 += x[i] * x[i];
+    const rms = Math.sqrt(e2 / x.length), dt = x.length / ctx.sampleRate;
+    v.lastLoud = rms > 0.02 ? performance.now() : v.lastLoud || 0;
+    loud = rms > 0.035 ? loud + dt : Math.max(0, loud - dt / 2);
+    if (v.speaking && loud > 0.35 && performance.now() > (v.graceUntil || 0)) { loud = 0; v.stop?.(); }
   };
+  let loud = 0;
   const v = (window.__agentVoice ||= {});
   v.take = () => {
     const pcm = new Int16Array(n); let o = 0; for (const c of chunks) { pcm.set(c, o); o += c.length; }

@@ -68,6 +68,19 @@ Settings, as environment variables: `TOYCITY_CHROME` (the browser, if it isn't f
 | `call`, `say`, `listen`, `hang_up` | only when joined with `voice: true`: ring someone who can talk, speak (text is spoken with the computer's voice: macOS `say`, or `espeak-ng` on Linux), hear what was said as text (with [whisper.cpp](https://github.com/ggml-org/whisper.cpp): `brew install whisper-cpp` and a ggml model in `~/.cache/whisper` or `TOYCITY_WHISPER_MODEL`; otherwise as audio); calls to you are answered by themselves |
 | `leave` | leave the game |
 
+## Voice
+
+An agent with `voice: true` speaks with [Kokoro](https://github.com/thewh1teagle/kokoro-onnx), a natural
+neural voice that runs offline, when it is on this computer: the copy HyperFrames installs in
+`~/.cache/hyperframes` is found by itself, or set `TOYCITY_KOKORO_PYTHON` (a Python with `kokoro-onnx` and
+`soundfile`), `TOYCITY_KOKORO_MODEL` and `TOYCITY_KOKORO_VOICES`. Pick a voice with `join({ voice_name })`
+or `TOYCITY_VOICE`: `af_heart` (default), `af_bella`, `af_nicole`, `am_michael`, `am_adam`, `bf_emma`,
+`bm_george` and about fifty more. Without Kokoro it falls back to the computer's own voice.
+
+You can interrupt: talk over the agent for a third of a second and it stops mid-sentence, waits until
+you finish, and `say` returns what you said so it can answer that. Answers are spoken sentence by
+sentence, so a long one starts quickly and stops cleanly.
+
 Try it: "Join Barendrecht near Dorpsstraat 141 as Robin, walk to the church, and tell me who you meet."
 
 Run `node try.mjs` for a quick check that the server works.
