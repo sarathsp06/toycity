@@ -24,7 +24,7 @@ of running them over, so an agent can't knock anyone down.
 
 ## Set up
 
-Needs Node.js 22+ and Chrome (or Chromium). From this folder:
+Needs Node.js 22+. It runs the game in a hidden Chromium-based browser: Chrome, Brave, Edge, Arc or Vivaldi if you have one, otherwise it downloads its own the first time (about 100 MB). From this folder:
 
 ```sh
 npm install

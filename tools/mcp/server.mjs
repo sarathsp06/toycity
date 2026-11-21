@@ -28,12 +28,31 @@ const MAX_WALK = 400;           // metres per walk command
 const MAX_WAIT = 30;            // seconds per wait
 
 // ---------- the browser ----------
+// a Chromium-based browser to run the game in: TOYCITY_CHROME, Chrome or Chromium, any other Chromium
+// browser (Brave, Edge, Arc, Vivaldi, Comet), or Playwright's own; with none, Playwright's is downloaded
+// once (about 100 MB, into its usual cache) so an agent never needs Chrome installed.
 function chromePath() {
   if (process.env.TOYCITY_CHROME) return process.env.TOYCITY_CHROME;
-  const mac = ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Chromium.app/Contents/MacOS/Chromium'];
-  const linux = ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'];
-  const win = ['C:/Program Files/Google/Chrome/Application/chrome.exe'];
-  return [...mac, ...linux, ...win].find(p => fs.existsSync(p));
+  const app = n => `/Applications/${n}.app/Contents/MacOS/${n}`;
+  const mac = ['Google Chrome', 'Chromium', 'Brave Browser', 'Microsoft Edge', 'Arc', 'Vivaldi', 'Comet'].map(app);
+  const linux = ['/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/brave-browser', '/usr/bin/microsoft-edge', '/snap/bin/chromium'];
+  const win = ['C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'];
+  const own = (() => { try { return chromium.executablePath(); } catch { return null; } })();
+  if (own && fs.existsSync(own)) return own;
+  // an older Playwright download in the cache does as well (it stays apart from your own browsers)
+  const cache = process.platform === 'darwin' ? path.join(os.homedir(), 'Library/Caches/ms-playwright') : process.platform === 'win32' ? path.join(os.homedir(), 'AppData/Local/ms-playwright') : path.join(os.homedir(), '.cache/ms-playwright');
+  try {
+    for (const d of fs.readdirSync(cache).filter(d => /^chromium-\d+$/.test(d)).sort().reverse())
+      for (const sub of ['chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing', 'chrome-mac/Chromium.app/Contents/MacOS/Chromium', 'chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing', 'chrome-linux/chrome', 'chrome-linux64/chrome', 'chrome-win/chrome.exe', 'chrome-win64/chrome.exe'])
+        if (fs.existsSync(path.join(cache, d, sub))) return path.join(cache, d, sub);
+  } catch { /* no cache */ }
+  return [...mac, ...linux, ...win].find(p => fs.existsSync(p)) || null;
+}
+function ensureBrowser() {
+  let exe = chromePath(); if (exe) return exe;
+  const cli = fileURLToPath(new URL('./node_modules/playwright-core/cli.js', import.meta.url));
+  try { execFileSync(process.execPath, [cli, 'install', 'chromium'], { stdio: 'ignore', timeout: 600000 }); } catch { /* reported below */ }
+  return chromePath();
 }
 let browser = null, ctx = null, page = null, last = 0, me = null, hasVoice = false, lease = null, leaseT = null;
 
@@ -42,10 +61,10 @@ const HOST_DIR = path.join(os.tmpdir(), 'toycity-browser'), HOST_INFO = path.joi
 async function sharedBrowser() {
   const tryConnect = async () => { try { const { ws } = JSON.parse(fs.readFileSync(HOST_INFO, 'utf8')); return await chromium.connect(ws, { timeout: 5000 }); } catch { return null; } };
   let b = await tryConnect(); if (b) return b;
-  const exe = chromePath();
+  const exe = ensureBrowser();
   spawn(process.execPath, [fileURLToPath(new URL('./browser-host.mjs', import.meta.url)), ...(exe ? [exe] : [])], { detached: true, stdio: 'ignore' }).unref();
   for (let i = 0; i < 60 && !b; i++) { await new Promise(r => setTimeout(r, 500)); b = await tryConnect(); }
-  if (!b) throw new Error('Could not start the browser. Is Chrome or Chromium installed? Set TOYCITY_CHROME to its path.');
+  if (!b) throw new Error(exe ? `Could not start the browser at ${exe}. Set TOYCITY_CHROME to another Chromium-based browser.` : 'No Chromium-based browser here, and downloading one failed (no internet?). Install Chrome, Brave or Edge, or set TOYCITY_CHROME.');
   return b;
 }
 function keepLease(on) {

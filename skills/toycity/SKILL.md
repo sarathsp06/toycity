@@ -12,7 +12,7 @@ player through its MCP server. People see you as 🤖 and your name.
 
 If the `toycity` MCP tools (`join`, `look`, `walk_to`, …) are not available yet:
 
-1. Install the server. It needs Node.js 22+ and Chrome or Chromium:
+1. Install the server. It needs Node.js 22+ (any Chromium-based browser is used if present; otherwise one is downloaded on first join):
    ```sh
    git clone --depth 1 https://github.com/sarathsp06/toycity ~/.toycity
    npm install --prefix ~/.toycity/tools/mcp
