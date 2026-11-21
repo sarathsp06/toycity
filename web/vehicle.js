@@ -38,6 +38,9 @@ const CRASH = 4.5;                             // m/s (16 km/h): a bump harder t
 const KNOCK = 1.2;                             // m/s: faster than this, a person in the way is knocked over
 const REACH = 4;                               // how close you must be to get in
 const PARK_OK = 2.5;                           // within this of a parking spot counts as parked
+const SNAP = 3.5;                              // stop this close to an empty spot and the vehicle is put in it
+const STAND_LEAN = 0.16;                       // a parked motorbike leans on its side stand (radians)
+const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
 const TICKET_AFTER = 8, TOOT_EVERY = 14, TOOTS = 3, TOOT_NEAR = 45;
 // sample points around a body as signs of (half length, half width): the four corners, then the middles
 const SAMPLES = [[1, 1], [1, -1], [-1, 1], [-1, -1], [0, 1], [0, -1], [1, 0], [-1, 0]];
@@ -173,6 +176,19 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
     }
     return bd;
   }
+  // the nearest parking spot within r metres whose car is out (yours, or another player's): { x, z, yaw }
+  function emptySpotNear(x, z, r) {
+    let best = null, bd = r;
+    for (const tile of carTiles) {
+      const { data } = tile.cars, ox = tile.group.position.x, oz = tile.group.position.z, pre = tile.i + '_' + tile.j + ':';
+      for (let k = 0; k < data.length; k += 6) {
+        if (!taken.has(pre + k)) continue;
+        const sx = data[k] + ox, sz = data[k + 2] + oz, d = Math.hypot(sx - x, sz - z);
+        if (d < bd) { bd = d; best = { x: sx, z: sz, yaw: data[k + 3] }; }
+      }
+    }
+    return best;
+  }
   function setTaken(key, on, tiles) {
     on ? taken.add(key) : taken.delete(key);
     for (const t of tiles) if (t.carFps && key.startsWith(t.i + '_' + t.j + ':')) { const f = t.carFps[+key.split(':')[1] / 6]; if (f) f.off = on; }
@@ -268,8 +284,13 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
     player.remove(st.car);
     const mesh = makeCar(models, st.model, st.color);   // the parked look: no interior
     disposeCar(st.car);
-    mesh.position.set(x, 0, z); mesh.rotation.y = h; scene.add(mesh);
-    left = { mesh, x, z, heading: h, model: st.model, color: st.color, origin: st.origin, speed: rolling ? st.speed : 0, t: 0, toots: 0, ticket: null };
+    // stopped next to an empty parking spot: the vehicle is put in it neatly, the way you would, facing
+    // whichever way along the bay is nearest to how you came in
+    let [px, pz, ph] = [x, z, h];
+    if (!rolling) { const sp = emptySpotNear(x, z, SNAP); if (sp) { px = sp.x; pz = sp.z; ph = Math.abs(wrap(sp.yaw - h)) < Math.PI / 2 ? sp.yaw : sp.yaw + Math.PI; } }
+    mesh.position.set(px, 0, pz); mesh.rotation.y = ph; scene.add(mesh);
+    if (st.model === 'bike') mesh.rotation.x = STAND_LEAN;   // on its side stand (the lean is about its length, as in the turns)
+    left = { mesh, x: px, z: pz, heading: ph, model: st.model, color: st.color, origin: st.origin, speed: rolling ? st.speed : 0, t: 0, toots: 0, ticket: null };
     swing(mesh); st.car = null; stopEngine();
     if (rolling) note('🏃 You jumped out. The handbrake was not on…');
     const out = sizeOf(left.model).hw + 1.3;
@@ -420,6 +441,7 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
 
   return {
     nearest, enter, exit, update, tick, taken, place, dented, release,
+    get left() { return left; },   // the vehicle you got out of (tests)
     get driving() { return !!st.car; },
     get speed() { return st.speed; },
     get model() { return st.model; },
