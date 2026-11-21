@@ -8,6 +8,7 @@ import { createVoice, p2pTransport } from './voice.js';
 import { createAmbience } from './ambience.js';
 import { MP } from './config.js';
 import { PERSON } from '../solids.js';
+import { footprintOf } from '../vehicle.js';
 import * as THREE from 'three';
 
 export async function start({ scene, camera, player, toRD, fromRD, slug, params, hud, surroundings, useAvatar, view, goToRD, solids, vehicle }) {
@@ -23,7 +24,11 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
   const presence = await createPresence({ scene, player, toRD, fromRD, slug, vehicle });
   // other people are solid: you walk around them, not through them
   solids?.live(() => [...presence.peers.values()].filter(p => p.player?.group.visible && p.dist < 20)
-    .map(p => ({ x: p.player.group.position.x, z: p.player.group.position.z, r: PERSON.r })));
+    .map(p => {
+      const g = p.player.group.position;
+      // someone driving is as big as their car, and carries its speed (a fast one wrecks a car it hits)
+      return p.car ? { ...footprintOf(p.car.split(':')[0], g.x, g.z, p.player.group.rotation.y), v: p.speed || 0 } : { x: g.x, z: g.z, r: PERSON.r };
+    }));
   // Calls. The people near you are listed as "📞 Talk to …" buttons at the bottom of the screen; tapping
   // one (or the person themselves, or Talk in the people list) rings them. Only people in the same call
   // hear each other, at full volume wherever they stand. Ringing someone else while in a call adds them.

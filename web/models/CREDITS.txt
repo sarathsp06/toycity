@@ -1,3 +1,4 @@
 Car models from BlendSwap (licence as declared by the uploader):
 - Generic SUV ZYX0 by 1DInc, CC0, https://blendswap.com/blend/29795
+- Honda VFR800 by danielfc10, CC-BY, https://blendswap.com/blend/5449
 Person: Xbot from the three.js examples, dressed with tools/dress_person.py.

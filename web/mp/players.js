@@ -45,7 +45,7 @@ export function setLook(p, look) {
       if (o.isMesh && o.material.name === 'toy_shirt') { o.material = o.material.clone(); o.material.color.copy(shirt); o.userData.own = true; }
     });
     if (p.model) { p.mixer.stopAllAction(); disposeOwn(p.model); p.group.remove(p.model); }
-    p.model = model; p.group.add(model); model.visible = !p.carMesh;
+    p.model = model; p.group.add(model); model.visible = !p.carMesh || p.riding; ride(p);
     p.mixer = new THREE.AnimationMixer(model);
     p.act = {}; for (const n of ['idle', 'walk', 'run']) { p.act[n] = p.mixer.clipAction(t.clips[n]); p.act[n].play(); p.act[n].setEffectiveWeight(n === 'idle' ? 1 : 0); }
   });
@@ -59,12 +59,31 @@ export function setName(p, name) {
   p.tag = label(name || 'Visitor'); p.group.add(p.tag);
 }
 
+const RQ = new THREE.Quaternion(), RE = new THREE.Euler();
+const bendBone = (m, n, x, z = 0) => { const b = m.getObjectByName('mixamorig' + n); if (b) b.quaternion.multiply(RQ.setFromEuler(RE.set(x, 0, z))); };
+// the same seated pose the local player gets on a motorbike (city.js ridePose)
+function ride(p) {
+  const m = p.model; if (!m) return;
+  m.rotation.y = p.riding ? Math.PI / 2 : 0;
+  m.position.set(p.riding ? -0.12 : 0, p.riding ? -0.12 : 0, 0);
+}
+function ridePose(m) {
+  for (const s of ['Left', 'Right']) {
+    const k = s === 'Left' ? 1 : -1;
+    bendBone(m, s + 'UpLeg', -1.35, -k * 0.12); bendBone(m, s + 'Leg', 1.5);
+    bendBone(m, s + 'Arm', -0.9, k * 0.35); bendBone(m, s + 'ForeArm', 0, k * 0.25);
+  }
+  bendBone(m, 'Spine', 0.35);
+}
+
 export function animate(p, speed, dt) {
+  if (p.riding) speed = 0;   // sitting still on the bike, whatever its speed
   const w = THREE.MathUtils.clamp(speed / 1.4, 0, 1), r = THREE.MathUtils.clamp((speed - 2.2) / 1.8, 0, 1);
   if (p.mixer) {
   p.act.idle.setEffectiveWeight(1 - w); p.act.walk.setEffectiveWeight(w * (1 - r)); p.act.run.setEffectiveWeight(w * r);
   p.act.walk.timeScale = THREE.MathUtils.clamp(speed / 1.4, 0.6, 1.6);
   p.mixer.update(dt);
+  if (p.riding) ridePose(p.model);
   }
   p.ring.material.opacity += ((p.speaking > 0.02 ? 0.9 : 0) - p.ring.material.opacity) * Math.min(1, dt * 10);
 }
@@ -74,7 +93,8 @@ export function setVehicle(p, car, make) {
   if (p.carMesh) { p.carMesh.removeFromParent(); p.carMesh.traverse(o => { if (o.isMesh && o.userData.own) o.material.dispose(); }); p.carMesh = null; }
   const [name, col] = (car || '').split(':');
   if (name && make) { p.carMesh = make(name, parseInt(col, 16)); if (p.carMesh) { p.carMesh.position.y = -0.15; p.group.add(p.carMesh); } }
-  if (p.model) p.model.visible = !p.carMesh;
+  p.riding = name === 'bike';   // a motorbike shows its rider, sitting (see ride below)
+  if (p.model) { p.model.visible = !p.carMesh || p.riding; ride(p); }
   p.ring.visible = !p.carMesh;
 }
 

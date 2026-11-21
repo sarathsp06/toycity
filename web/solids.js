@@ -67,5 +67,11 @@ export function createSolids() {
     for (const fn of live) for (const f of fn()) if (hits(f, x, z, r)) return true;
     return false;
   }
-  return { add, drop, hit, live: fn => live.push(fn) };
+  // moving things (other players, their cars) within r of a point, for checks beyond 'is it solid'
+  function liveNear(x, z, r) {
+    const out = [];
+    for (const fn of live) for (const f of fn()) if (Math.hypot(f.x - x, f.z - z) < r) out.push(f);
+    return out;
+  }
+  return { add, drop, hit, liveNear, live: fn => live.push(fn) };
 }

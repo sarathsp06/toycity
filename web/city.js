@@ -11,7 +11,7 @@ import * as BU from 'three/addons/utils/BufferGeometryUtils.js';
 import * as TX from './textures.js';
 import { loadAvatar, myLook } from './avatar.js';
 import { createSolids, footprintsOf, PERSON } from './solids.js';
-import { createDriving, makeCar, carKey } from './vehicle.js';
+import { createDriving, makeCar, carKey, footprintOf, FRONT } from './vehicle.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 const params = new URLSearchParams(location.search);
@@ -184,7 +184,8 @@ function aerialTexture(bitmap, aniso) {
 // Three levels by distance to the player, re-sorted a few times a second:
 //   near (< CAR_NEAR m): about 30k triangles, mid (< CAR_MID m): about 5k, beyond: the simple box car.
 // bump the ?v= on cars.glb when the models change: the file is cached for a day
-const CAR_MIX = { suv: 1 };   // one model in many paints (tools/blendswap_cars.py IN_GAME)
+const CAR_MIX = { suv: 12, bike: 1 };   // one SUV in many paints, and the odd motorbike (tools/blendswap_cars.py IN_GAME)
+const CAR_EXTRA = ['suv_wreck'];       // loaded but never parked: what a crashed SUV turns into
 const CAR_NEAR = 25, CAR_MID = 70;
 function partsOf(obj) {
   const parts = []; obj.updateMatrixWorld(true);
@@ -202,13 +203,14 @@ function openParts(root, name) {
     const parts = partsOf(node); for (const [geo] of parts) geo.translate(-hinge.x, -hinge.y, -hinge.z);
     doors.push({ hinge, parts });
   }
-  return { body: partsOf(body), doors };
+  const inside = root.getObjectByName(name + '_interior');
+  return { body: partsOf(body), doors, interior: inside ? partsOf(inside) : null };
 }
 progress(0.08, 'Parking the cars');
-const CAR_MODELS = await new GLTFLoader().loadAsync(new URL('./models/cars.glb?v=suvonly1', import.meta.url).href,
+const CAR_MODELS = await new GLTFLoader().loadAsync(new URL('./models/cars.glb?v=bike1', import.meta.url).href,
   e => e.total && progress(0.08 + 0.37 * e.loaded / e.total, 'Parking the cars')).then(g => {
   const list = [];
-  for (const [name, w] of Object.entries(CAR_MIX)) {
+  for (const [name, w] of [...Object.entries(CAR_MIX), ...CAR_EXTRA.map(n => [n, 0])]) {
     const hi = g.scene.getObjectByName(name), lo = g.scene.getObjectByName(name + '_lo');
     if (!hi) continue;
     list.push({ name, w, hi: partsOf(hi), lo: partsOf(lo || hi), open: openParts(g.scene, name) });
@@ -270,7 +272,9 @@ const solids = createSolids();   // cars, trees, lamps, furniture and other play
 let driving = null;              // set up once the player exists (see 'driving' below)
 function instances(tile, name, data) {
   const fps = footprintsOf(name, data, tile.group.position);
-  if (name === 'car') { tile.carFps = fps; fps.forEach((f, n) => { if (driving?.taken.has(tile.i + '_' + tile.j + ':' + n * 6)) f.off = true; }); }
+  if (name === 'car') {
+    fps.forEach((f, n) => { const m = carModelAt(data[n * 6], data[n * 6 + 2]).name; if (m === 'bike') Object.assign(f, footprintOf(m, f.x, f.z, f.yaw)); });
+    tile.carFps = fps; fps.forEach((f, n) => { if (driving?.taken.has(tile.i + '_' + tile.j + ':' + n * 6)) f.off = true; }); }
   solids.add(tile, fps);
   if (name === 'tree') tile.trees = data;   // kept for the background sounds (more trees, more birds)
   if (name === 'car' && CAR_MODELS.length) return carInstances(tile, data);
@@ -542,7 +546,7 @@ async function useAvatar(look) {
   const bones = {};
   for (const n of ['Hips', 'Spine', 'Spine1', 'LeftUpLeg', 'RightUpLeg', 'LeftLeg', 'RightLeg', 'LeftFoot', 'RightFoot',
     'LeftArm', 'RightArm', 'LeftForeArm', 'RightForeArm']) bones[n] = bone(n);
-  Object.assign(avatar, { mixer, actions, bones });
+  Object.assign(avatar, { mixer, actions, bones, model });
 }
 useAvatar(myLook()).catch(e => console.warn('avatar', e));
 // natural speeds of the clips in m/s at this scale, used to keep the feet from sliding
@@ -560,12 +564,28 @@ function animateAvatar(dt, moved) {
   a.run.timeScale = THREE.MathUtils.clamp(s / RUN_MS, 0.8, 2.2);
   avatar.mixer.update(dt);
   jumpPose();
+  ridePose();
 }
 // jump pose layered on top of the clips (the mannequin has no jump clip):
 //   crouch: knees bend and the body dips before take-off
 //   air:    knees tuck while rising, legs reach down again for the landing, arms swing up
 //   land:   a short knee bend that absorbs the impact
 const JQ = new THREE.Quaternion(), JE = new THREE.Euler();
+// on a motorbike: sit down, knees up, hands forward to the handlebars; the person turns to face the bike's front
+function ridePose() {
+  const B = avatar.bones, m = avatar.model; if (!B || !m) return;
+  const riding = driving?.rider;
+  m.rotation.y = riding ? (FRONT.bike ?? 1) * Math.PI / 2 : 0;
+  m.position.set(riding ? -0.12 * (FRONT.bike ?? 1) : 0, riding ? -0.12 : 0, 0);
+  if (!riding) return;
+  for (const s of ['Left', 'Right']) {
+    bend(B[s + 'UpLeg'], -1.35, 0, (s === 'Left' ? -1 : 1) * 0.12);
+    bend(B[s + 'Leg'], 1.5);
+    bend(B[s + 'Arm'], -0.9, 0, (s === 'Left' ? 1 : -1) * 0.35);
+    bend(B[s + 'ForeArm'], 0, 0, (s === 'Left' ? 1 : -1) * 0.25);
+  }
+  bend(B.Spine, 0.35);
+}
 function bend(b, x, y = 0, z = 0) { if (b) b.quaternion.multiply(JQ.setFromEuler(JE.set(x, y, z))); }
 function jumpPose() {
   const B = avatar.bones; if (!B) return;
@@ -642,7 +662,12 @@ document.getElementById('zin').onclick = () => { if (firstPerson) setFirstPerson
 const eyesBtn = document.getElementById('eyesbtn'); if (eyesBtn) eyesBtn.onclick = () => setFirstPerson(!firstPerson);
 document.getElementById('zout').onclick = () => zoomBy(1.6);
 // ---------- driving (web/vehicle.js): E or the 🚗 button gets you into the nearest parked car ----------
-driving = createDriving({ scene, player, models: CAR_MODELS, carTiles, solids, ground: (x, z) => blockedAt(x, z) });
+// short messages (a ticket, a crash) appear where the start hint was, then fade again
+function note(text) {
+  const h = document.getElementById('hint'); if (!h) return;
+  h.textContent = text; h.classList.remove('gone'); clearTimeout(note.t); note.t = setTimeout(() => h.classList.add('gone'), 4500);
+}
+driving = createDriving({ scene, player, models: CAR_MODELS, carTiles, solids, ground: (x, z) => blockedAt(x, z), note });
 let walkDist = dist;
 function toggleCar() {
   if (fly) toggleFly();
@@ -896,12 +921,18 @@ function setFirstPerson(on) {
 function chaseCam() {
   if (firstPerson) {
     const look = 0.42 - pitch;                     // drag up and down to look up and down
-    camera.position.set(player.position.x - Math.sin(yaw) * 0.12, player.position.y + (driving.driving ? 1.1 : 1.62), player.position.z - Math.cos(yaw) * 0.12);
+    if (driving.driving) {
+      // from the driver's seat: you see the dashboard, the steering wheel and the bonnet (or the handlebars)
+      driving.eyes(camera.position);
+      for (const c of player.children) c.visible = !!c.userData.car;
+    } else {
+      camera.position.set(player.position.x - Math.sin(yaw) * 0.12, player.position.y + 1.62, player.position.z - Math.cos(yaw) * 0.12);
+      for (const c of player.children) c.visible = false;
+    }
     camera.lookAt(camera.position.x - Math.sin(yaw) * Math.cos(look), camera.position.y + Math.sin(look), camera.position.z - Math.cos(yaw) * Math.cos(look));
-    for (const c of player.children) c.visible = false;
     return;
   }
-  for (const c of player.children) c.visible = !driving.driving || !!c.userData.car;   // in a car you see the car, not the person
+  for (const c of player.children) c.visible = !driving.driving || !!c.userData.car || driving.rider;   // in a car you see the car, not the person
   const pe = pitch + Math.max(0, 1.2 - pitch) * THREE.MathUtils.smoothstep(dist, 30, 300);
   const off = new THREE.Vector3(Math.sin(yaw) * Math.cos(pe), Math.sin(pe), Math.cos(yaw) * Math.cos(pe)).multiplyScalar(dist);
   camera.position.lerp(player.position.clone().add(off), 0.18);
@@ -993,7 +1024,7 @@ function frame(now) {
   avatar.dip = 0;
   animateAvatar(dt, jump.phase === 'air' ? 0 : movedThisFrame); movedThisFrame = 0;
   social?.update(dt, driving.driving ? Math.abs(driving.speed) : avatar.speed);
-  driving.tick(dt);
+  driving.tick(dt, player.position);
   player.position.y = 0.15 + jump.h - avatar.dip;
   // sharp shadows that follow the player
   const R = 40 + Math.min(dist, 150) * 0.9;

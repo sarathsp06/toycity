@@ -96,6 +96,7 @@ export async function createPresence({ scene, player, toRD, fromRD, slug, vehicl
     for (const p of [...peers.values()]) {
       if (p.last && now - p.last > MP.peerTimeout) { drop(p); continue; }
       const s = p.track.sample(now); if (!s) continue;
+      p.speed = s.v;
       p.dist = Math.hypot(s.x - X, s.y - Y);
       const show = visible(p.shown, p.dist, MP.showWithin, MP.hideBeyond);
       if (show && !p.player) { p.player = makePlayer(p.id, tag(p), p.look); scene.add(p.player.group); if (p.car) setVehicle(p.player, p.car, vehicle?.make); }

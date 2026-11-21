@@ -22,7 +22,7 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(HERE, "data", "blendswap")
 OUT = os.path.join(HERE, "web", "models", "cars.glb")
 HI_TRIS, LO_TRIS = 30000, 5000
-HI_LIMIT = {"fiat500": 15000}
+HI_LIMIT = {"fiat500": 15000, "bike": 20000}
 NO_LO = {"fiat500"}
 
 # name: (file under data/blendswap, real length in metres, body object = the anchor for what belongs to the car)
@@ -34,12 +34,16 @@ CARS = {
     "van": ("19228/x/VAN.blend", (5.2, 2.0), "van_body"),
     # the file holds a clean SUV at the origin and a wrecked copy 6 m away; the anchor keeps the clean one
     "suv": ("29795/suv.blend", (4.55, 1.72), "UCR_GENSUV_ZYX0_2SBD.001"),
+    # the damaged copy next to it in the same file: what the SUV turns into after a hard crash
+    "suv_wreck": ("29795/suv.blend", (4.55, 1.72), "UCR_GENSUV_ZYX0_DMG_2SBD.001"),
+    "bike": ("5449/x/vfr800.blend", (2.12, 1.2), "Plane.035"),
 }
 # the cars that go into the game; the others can still be built and switched back in here.
 # Only the SUV (2026-11-21): one model in many paints loads in a tenth of the time and every car opens its doors.
-IN_GAME = ["suv"]
+IN_GAME = ["suv", "suv_wreck", "bike"]
 # per car: extra object names to drop (snow cover, the bonus driver, interior) and material names to pin
 EXTRA_DROP = {"suv": ("_snow", "_man", "_int_", "zyx0_006", "zyx0_1sbd")}
+EXTRA_DROP["suv_wreck"] = EXTRA_DROP["suv"]
 # cars whose doors are separate parts in the source: each door is a list of objects, exported on its own as
 # <name>_door<i> with its origin on the hinge (the front edge), next to <name>_body (the car without them).
 # FRONT_END: which end of the finished car (along x) is the bonnet, to find each door's front edge.
@@ -49,7 +53,11 @@ DOORS = {
 # the van's front doors are separate too (van_door_FL/FR + doorglass + doorpanel), but its export clashes with
 # object names in the source file; left out until that is sorted
 FRONT_END = {"suv": -1, "van": 1}
+# interior parts (seats, dashboard, steering wheel) exported as <name>_interior, only for the car you drive
+INTERIOR = {"suv": ["UCR_GENSUV_ZYX0_006", "UCR_GENSUV_ZYX0_INT_ARCH_A", "UCR_GENSUV_ZYX0_INT_SEAT_B",
+                    "UCR_GENSUV_ZYX0_INT_WALL", "UCR_GENSUV_ZYX0_1SBD"]}
 MAT_PIN = {"suv": {"x_ucr_light": "headlight", "x_ucr_leather": "trim", "x_ucr_grey": "trim", "x_ucr_plastic_grey": "trim"}}
+MAT_PIN["suv_wreck"] = MAT_PIN["suv"]
 CREDITS = {
     "golf": "Volkswagen VW Golf MK4 by Jay-Artist, CC-BY, https://blendswap.com/blend/3976",
     "camry": "Toyota Camry 2001 by abdulsalamnaqeeb, CC-BY, https://blendswap.com/blend/23001",
@@ -57,6 +65,7 @@ CREDITS = {
     "jeep": "Jeep Cherokee with rig by koumis, CC0, https://blendswap.com/blend/25471",
     "van": "BEAMNG VAN by BlenderBach, CC-BY, https://blendswap.com/blend/19228",
     "suv": "Generic SUV ZYX0 by 1DInc, CC0, https://blendswap.com/blend/29795",
+    "bike": "Honda VFR800 by danielfc10, CC-BY, https://blendswap.com/blend/5449",
 }
 
 DROP_OBJ = ("interior", "seat", "steer", "gauge", "dash", "brake", "caliper", "coilover", "floor", "studio",
@@ -119,7 +128,7 @@ def convert(name, path, length, body):
     mats = materials()   # after opening: loading a file replaces all data blocks
     scene = bpy.context.scene
     objs = [o for o in scene.objects if o.type in ("MESH", "CURVE") and not o.hide_render
-            and not any(k in o.name.lower() for k in DROP_OBJ + EXTRA_DROP.get(name, ()))]
+            and (o.name in INTERIOR.get(name, ()) or not any(k in o.name.lower() for k in DROP_OBJ + EXTRA_DROP.get(name, ())))]
     for o in objs:                      # subdivision off: the cages are already smooth enough here
         for m in o.modifiers:
             if m.type == "SUBSURF":
@@ -202,6 +211,9 @@ def convert(name, path, length, body):
             mesh.materials.append(mats[k])
         return mesh, area, paint_key
 
+    inside = set(INTERIOR.get(name, ()))
+    interior_items = [it for it in keep if it[1] in inside]
+    keep = [it for it in keep if it[1] not in inside]
     mesh, area, paint_key = build(keep, name)
     obj = bpy.data.objects.new(name, mesh)
     scene.collection.objects.link(obj)
@@ -240,7 +252,7 @@ def convert(name, path, length, body):
         # decimate through the depsgraph (no operators, so it works headless without a UI context)
         o = src.copy(); o.data = src.data.copy(); o.name = name + suffix
         scene.collection.objects.link(o)
-        if target < 8000 and "_door" not in suffix:
+        if target < 8000 and "_door" not in suffix and "_interior" not in suffix:
             # far version: small loose bits (bolts, badges, wipers) cost triangles and are invisible
             bm2 = bmesh.new(); bm2.from_mesh(o.data)
             seen, drop = set(), []
@@ -284,6 +296,12 @@ def convert(name, path, length, body):
           + ", ".join(f"{c}:{a * s * s:.1f}" for c, a in sorted(area.items(), key=lambda t: -t[1])[:6]))
     # move to a fresh file for export
     extra = []
+    if interior_items:
+        im, _, _ = build(interior_items, name + "_interiorsrc", paint_key)
+        im.transform(M)
+        io = bpy.data.objects.new(name + "_interiorsrc", im); scene.collection.objects.link(io)
+        extra.append(lod(io, 8000, "_interior")); bpy.data.objects.remove(io)
+        print(f"  INTERIOR {name}: {len(extra[-1].data.polygons)} tris from {len(interior_items)} parts")
     if name in DOORS:
         doors = DOORS[name]
         in_door = {n for d in doors for n in d}
@@ -336,7 +354,7 @@ def main():
             o.name = re.sub(r"\.\d{3}$", "", o.name)
         if any(o.name == n for o in new):
             continue   # the names came through (doors and bodies rely on them)
-        new = [o for o in new if "_door" not in o.name and not o.name.endswith("_body")]
+        new = [o for o in new if "_door" not in o.name and not o.name.endswith(("_body", "_interior"))]
         new[0].name = n
         if len(new) > 1:
             new[1].name = n + "_lo"
@@ -344,7 +362,7 @@ def main():
     with open(os.path.join(HERE, "web", "models", "CREDITS.txt"), "w") as fh:
         fh.write("Car models from BlendSwap (licence as declared by the uploader):\n")
         for n in IN_GAME:
-            fh.write(f"- {CREDITS[n]}\n")
+            if n in CREDITS: fh.write(f"- {CREDITS[n]}\n")
         fh.write("Person: Xbot from the three.js examples, dressed with tools/dress_person.py.\n")
     print("WROTE", OUT, os.path.getsize(OUT))
 
