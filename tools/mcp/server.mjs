@@ -19,7 +19,8 @@ import { chromium } from 'playwright-core';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const SITE = process.env.TOYCITY_URL || 'https://toycity.pages.dev/';
 const MIN_GAP = 1000;           // ms between actions: no faster than a person clicking
@@ -34,7 +35,34 @@ function chromePath() {
   const win = ['C:/Program Files/Google/Chrome/Application/chrome.exe'];
   return [...mac, ...linux, ...win].find(p => fs.existsSync(p));
 }
-let browser = null, page = null, last = 0, me = null, hasVoice = false;
+let browser = null, ctx = null, page = null, last = 0, me = null, hasVoice = false, lease = null, leaseT = null;
+
+// the shared browser (browser-host.mjs): connect to it, or start it and then connect
+const HOST_DIR = path.join(os.tmpdir(), 'toycity-browser'), HOST_INFO = path.join(HOST_DIR, 'endpoint.json');
+async function sharedBrowser() {
+  const tryConnect = async () => { try { const { ws } = JSON.parse(fs.readFileSync(HOST_INFO, 'utf8')); return await chromium.connect(ws, { timeout: 5000 }); } catch { return null; } };
+  let b = await tryConnect(); if (b) return b;
+  const exe = chromePath();
+  spawn(process.execPath, [fileURLToPath(new URL('./browser-host.mjs', import.meta.url)), ...(exe ? [exe] : [])], { detached: true, stdio: 'ignore' }).unref();
+  for (let i = 0; i < 60 && !b; i++) { await new Promise(r => setTimeout(r, 500)); b = await tryConnect(); }
+  if (!b) throw new Error('Could not start the browser. Is Chrome or Chromium installed? Set TOYCITY_CHROME to its path.');
+  return b;
+}
+function keepLease(on) {
+  clearInterval(leaseT);
+  if (!on) { if (lease) fs.rmSync(lease, { force: true }); lease = null; return; }
+  fs.mkdirSync(HOST_DIR, { recursive: true }); lease = path.join(HOST_DIR, `${process.pid}.lease`);
+  const touch = () => fs.writeFileSync(lease, String(Date.now())); touch(); leaseT = setInterval(touch, 30000);
+}
+async function leaveGame() { keepLease(false); await ctx?.close().catch(() => {}); await browser?.close().catch(() => {}); browser = ctx = page = null; }
+// a meeting link (city.html?...&meet=X,Y, from the game's 📍 Meeting link): the town and spot to start at
+function parseLink(link) {
+  try {
+    const u = new URL(link), q = u.searchParams, m = (q.get('meet') || '').split(',').map(Number);
+    if (!/city\.html$|\/city$/.test(u.pathname)) return null;
+    return { place: q.get('place'), region: q.get('region'), meet: m.length === 2 && m.every(Number.isFinite) ? m : null };
+  } catch { return null; }
+}
 
 async function pace() {   // the one-action-a-second rule
   const wait = last + MIN_GAP - Date.now();
@@ -89,21 +117,24 @@ const server = new McpServer({ name: 'toycity', version: '0.1.0' }, {
   instructions: 'You are a player in Toy City, a 3D copy of real Dutch towns shared with real people. Move like a person: walk or run to nearby places, take a car for longer trips, knock on doors. Be kind: people can see you (your name has a 🤖), and hitting someone with a car gets you a yellow, then red, card.',
 });
 
-server.tool('join', 'Enter Toy City as a player. Start in a town (rotterdam, barendrecht or amsterdam), optionally next to an address or place in it. You can only choose where to start; after that you move like everyone else.',
-  { town: z.enum(['rotterdam', 'barendrecht', 'amsterdam']).default('barendrecht'), near: z.string().max(80).optional().describe('an address or place to start next to, e.g. "Dorpsstraat 141"'), name: z.string().min(1).max(20).describe('your name in the game'),
+server.tool('join', 'Enter Toy City as a player. Start in a town (rotterdam, barendrecht or amsterdam), optionally next to an address or place in it, or from a meeting link someone shared. You can only choose where to start; after that you move like everyone else.',
+  { link: z.string().max(400).optional().describe('a Toy City meeting link (…/city.html?…&meet=…): you arrive next to whoever shared it; town and near are then ignored'),
+    town: z.enum(['rotterdam', 'barendrecht', 'amsterdam']).default('barendrecht'), near: z.string().max(80).optional().describe('an address or place to start next to, e.g. "Dorpsstraat 141"'), name: z.string().min(1).max(20).describe('your name in the game'),
     voice: z.boolean().default(false).describe('join with a voice: you can take and make calls, speak with say and hear with listen. Leave it off if you will not listen; people then get no call button for you') },
-  async ({ town, near, name, voice }) => {
+  async ({ link, town, near, name, voice }) => {
     if (page) return text('Already in Toy City. Call leave first to start again.');
-    const exe = chromePath();
-    browser = await chromium.launch({ headless: true, ...(exe ? { executablePath: exe } : {}), args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--autoplay-policy=no-user-gesture-required', ...(voice ? [] : ['--mute-audio'])] });
+    const meet = link ? parseLink(link) : null;
+    if (link && !meet) return text('That is not a Toy City meeting link (it should look like …/city.html?place=…&meet=…).');
+    browser = await sharedBrowser(); keepLease(true);
     hasVoice = voice;
-    const ctx = await browser.newContext({ viewport: { width: 960, height: 600 } });
+    ctx = await browser.newContext({ viewport: { width: 960, height: 600 } });
     me = '🤖 ' + name.replace(/[\u0000-\u001f<>]/g, '').slice(0, 20);
     await ctx.addInitScript(n => { localStorage.setItem('toycity.name', n); localStorage.setItem('toycity.view', 'chase'); }, me);
     page = await ctx.newPage();
-    await page.goto(`${SITE}city.html?place=${town}&agent=1&quality=low${voice ? '&voice=1' : ''}`);
+    const where = meet ? (meet.place ? `place=${encodeURIComponent(meet.place)}` : `region=${encodeURIComponent(meet.region || 'rotterdam')}`) + (meet.meet ? `&meet=${meet.meet.join(',')}` : '') : `place=${town}`;
+    await page.goto(`${SITE}city.html?${where}&agent=1&quality=low${voice ? '&voice=1' : ''}`);
     await page.waitForFunction(() => document.getElementById('loading')?.classList.contains('done') && window.__agent, null, { timeout: 120000 });
-    if (near) {   // the one jump allowed: where you start
+    if (near && !meet) {   // the one jump allowed: where you start
       const hit = await inPage(q => window.__city.findPlace(q), near);
       if (!hit) return text(`Joined ${town}, but "${near}" was not found there; you are at the town's starting point.\n` + describe(await state()));
       await inPage(q => window.__city.goTo(q), near);   // the game's own search: lands on the street in front
@@ -252,8 +283,9 @@ server.tool('hang_up', 'Leave your call.', {},
   async () => { needVoice(); await pace(); await inPage(() => window.__agentCall?.leave()); return text('You left the call.'); });
 
 server.tool('leave', 'Leave Toy City.', {},
-  async () => { if (browser) await browser.close().catch(() => {}); browser = page = null; clearInterval(walker); return text('You left Toy City.'); });
+  async () => { clearInterval(walker); await leaveGame(); return text('You left Toy City.'); });
 
 // knocks at your home (and other messages) arrive while you wait; nothing else is needed for that
 await server.connect(new StdioServerTransport());
-process.on('SIGINT', async () => { await browser?.close().catch(() => {}); process.exit(0); });
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, async () => { await leaveGame(); process.exit(0); });
+process.stdin.on('close', async () => { await leaveGame(); process.exit(0); });   // the client went away

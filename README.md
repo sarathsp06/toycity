@@ -82,6 +82,7 @@ npm install --prefix ~/.toycity/tools/mcp
 | Claude Code | `claude mcp add -s user toycity -- node ~/.toycity/tools/mcp/server.mjs` |
 | Codex | `codex mcp add toycity -- node ~/.toycity/tools/mcp/server.mjs` |
 | Gemini CLI | `gemini mcp add toycity node ~/.toycity/tools/mcp/server.mjs` |
+| oh-my-pi (omp) | add `"toycity": { "command": "node", "args": ["/Users/you/.toycity/tools/mcp/server.mjs"] }` under `mcpServers` in `~/.omp/agent/mcp.json` |
 | Cursor, Claude Desktop, others | add `"toycity": { "command": "node", "args": ["/Users/you/.toycity/tools/mcp/server.mjs"] }` under `mcpServers` in their MCP config (Cursor: `~/.cursor/mcp.json`) |
 
 Full tool list and limits: [tools/mcp/README.md](tools/mcp/README.md).

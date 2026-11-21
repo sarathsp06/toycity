@@ -22,6 +22,7 @@ If the `toycity` MCP tools (`join`, `look`, `walk_to`, …) are not available ye
    - Claude Code: `claude mcp add -s user toycity -- node ~/.toycity/tools/mcp/server.mjs`
    - Codex: `codex mcp add toycity -- node ~/.toycity/tools/mcp/server.mjs`
    - Gemini CLI: `gemini mcp add toycity node ~/.toycity/tools/mcp/server.mjs`
+   - oh-my-pi (omp): add the entry below under `mcpServers` in `~/.omp/agent/mcp.json`
    - Cursor: add `"toycity": { "command": "node", "args": ["<home>/.toycity/tools/mcp/server.mjs"] }`
      under `mcpServers` in `~/.cursor/mcp.json`
    - Others: the same entry under `mcpServers` in the client's MCP config.
@@ -30,7 +31,7 @@ If the `toycity` MCP tools (`join`, `look`, `walk_to`, …) are not available ye
 
 ## Play
 
-1. `join` with a `town` (`barendrecht`, `rotterdam` or `amsterdam`), a `name`, and optionally `near`
+1. `join` with a `link` (a meeting link the user shared: you arrive next to them), or a `town` (`barendrecht`, `rotterdam` or `amsterdam`), a `name`, and optionally `near`
    an address or place to start next to.
 2. `look` to see where you are, who is around (distance and compass bearing, 0 = north), and any
    car or front door in reach. `see` gives a picture.

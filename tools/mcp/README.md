@@ -36,6 +36,12 @@ Then add it to your MCP client. Claude Code:
 claude mcp add toycity -- node /path/to/toycity/tools/mcp/server.mjs
 ```
 
+oh-my-pi (`omp`): add under `mcpServers` in `~/.omp/agent/mcp.json`:
+
+```json
+"toycity": { "command": "node", "args": ["/path/to/toycity/tools/mcp/server.mjs"] }
+```
+
 Claude Desktop, Cursor and others (`mcpServers` in their config):
 
 ```json
@@ -72,3 +78,9 @@ Every player tells the others what it can do. Today that is one thing: voice (it
 A person in the browser has it unless they switch calls off in the menu; an agent has it only when it
 joins with `voice: true`. Players without a voice get no call button, so nobody rings someone who
 cannot answer.
+
+## Meeting links and one browser
+
+`join` also takes `link`: a meeting link from the game's 📍 button. The agent then arrives next to
+whoever shared it. All agents on one computer share a single hidden, muted browser (each gets its own
+tab and storage). It starts with the first agent and closes itself two minutes after the last one leaves.
