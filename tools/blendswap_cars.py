@@ -12,6 +12,7 @@ For each car:
   - two levels of detail: <name> (about HI_TRIS triangles) and <name>_lo (about LO_TRIS)
 """
 import os
+import re
 import sys
 import bpy
 import bmesh
@@ -36,6 +37,15 @@ CARS = {
 }
 # per car: extra object names to drop (snow cover, the bonus driver, interior) and material names to pin
 EXTRA_DROP = {"suv": ("_snow", "_man", "_int_", "zyx0_006", "zyx0_1sbd")}
+# cars whose doors are separate parts in the source: each door is a list of objects, exported on its own as
+# <name>_door<i> with its origin on the hinge (the front edge), next to <name>_body (the car without them).
+# FRONT_END: which end of the finished car (along x) is the bonnet, to find each door's front edge.
+DOORS = {
+    "suv": [["UCR_GENSUV_ZYX0_2SBD.002"], ["UCR_GENSUV_ZYX0_2SBD.003"], ["UCR_GENSUV_ZYX0_2SBD.004"], ["UCR_GENSUV_ZYX0_2SBD.005"]],
+}
+# the van's front doors are separate too (van_door_FL/FR + doorglass + doorpanel), but its export clashes with
+# object names in the source file; left out until that is sorted
+FRONT_END = {"suv": -1, "van": 1}
 MAT_PIN = {"suv": {"x_ucr_light": "headlight", "x_ucr_leather": "trim", "x_ucr_grey": "trim", "x_ucr_plastic_grey": "trim"}}
 CREDITS = {
     "golf": "Volkswagen VW Golf MK4 by Jay-Artist, CC-BY, https://blendswap.com/blend/3976",
@@ -141,55 +151,63 @@ def convert(name, path, length, body):
         flat_sheet = min(d) < 0.005 * span and sorted(d)[1] > 0.3 * span     # backdrops, blueprints
         too_wide = any(d[i] > (a1[i] - a0[i]) * 1.08 + 0.02 * span for i in range(3))
         if inside and not flat_sheet and not too_wide and d.length <= 1.05 * span:
-            keep.append(me)
+            keep.append((me, _))
             if (b1.y - b0.y) > (a1.y - a0.y) * 1.05 or (b1.x - b0.x) > (a1.x - a0.x) * 1.05:
                 print("  WIDE", name, _, [round(v, 2) for v in (b1 - b0)])
 
-    # one bmesh, faces tagged with their category
-    bm = bmesh.new()
-    cat_of_face = []
-    area = {}
-    for me in keep:
-        tmp = bmesh.new(); tmp.from_mesh(me)
-        cats = []
-        for f in tmp.faces:
-            mat = me.materials[f.material_index] if f.material_index < len(me.materials) else None
-            if mat is not None and any(k in mat.name.lower() for k in DROP_MAT):
-                cats.append("_drop"); continue
-            c = MAT_PIN.get(name, {}).get((mat.name if mat else "").lower()) or category(mat)
-            if c is None:
-                c = "?" + (mat.name if mat else "")
-            cats.append(c)
-            area[c] = area.get(c, 0) + f.calc_area()
-        tmp.to_mesh(me); tmp.free()
-        bm.from_mesh(me)
-        bm.faces.ensure_lookup_table()
-        cat_of_face += cats
-    # unknown materials: the largest is the body paint (if no paint was named), others go dark trim
-    unknown = sorted((a, c) for c, a in area.items() if c.startswith("?"))
-    if "paint" not in area and unknown:
-        paint_key = unknown[-1][1]
-    else:
-        paint_key = None
+    # one mesh, faces tagged with their category (paint_key: which unnamed material is the body paint)
     order = list(LOOK)
-    bm.faces.ensure_lookup_table()
-    drop = []
-    for f, c in zip(bm.faces, cat_of_face):
-        if c == "_drop":
-            drop.append(f); continue
-        if c.startswith("?"):
-            c = "paint" if c == paint_key else "trim"
-        f.material_index = order.index(c)
-    bmesh.ops.delete(bm, geom=drop, context="FACES")
-    bmesh.ops.triangulate(bm, faces=bm.faces[:])
-    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.0005)
 
-    mesh = bpy.data.meshes.new(name)
-    bm.to_mesh(mesh); bm.free()
-    for k in order:
-        mesh.materials.append(mats[k])
+    def build(items, mesh_name, paint_key=None):
+        bm = bmesh.new()
+        cat_of_face = []
+        area = {}
+        for me, _ in items:
+            tmp = bmesh.new(); tmp.from_mesh(me)
+            cats = []
+            for f in tmp.faces:
+                mat = me.materials[f.material_index] if f.material_index < len(me.materials) else None
+                if mat is not None and any(k in mat.name.lower() for k in DROP_MAT):
+                    cats.append("_drop"); continue
+                c = MAT_PIN.get(name, {}).get((mat.name if mat else "").lower()) or category(mat)
+                if c is None:
+                    c = "?" + (mat.name if mat else "")
+                cats.append(c)
+                area[c] = area.get(c, 0) + f.calc_area()
+            tmp.to_mesh(me); tmp.free()
+            bm.from_mesh(me)
+            bm.faces.ensure_lookup_table()
+            cat_of_face += cats
+        # unknown materials: the largest is the body paint (if no paint was named), others go dark trim
+        if paint_key is None:
+            unknown = sorted((a, c) for c, a in area.items() if c.startswith("?"))
+            paint_key = unknown[-1][1] if "paint" not in area and unknown else ""
+        bm.faces.ensure_lookup_table()
+        drop = []
+        for f, c in zip(bm.faces, cat_of_face):
+            if c == "_drop":
+                drop.append(f); continue
+            if c.startswith("?"):
+                c = "paint" if c == paint_key else "trim"
+            f.material_index = order.index(c)
+        bmesh.ops.delete(bm, geom=drop, context="FACES")
+        bmesh.ops.triangulate(bm, faces=bm.faces[:])
+        bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.0005)
+        mesh = bpy.data.meshes.new(mesh_name)
+        bm.to_mesh(mesh); bm.free()
+        for k in order:
+            mesh.materials.append(mats[k])
+        return mesh, area, paint_key
+
+    mesh, area, paint_key = build(keep, name)
     obj = bpy.data.objects.new(name, mesh)
     scene.collection.objects.link(obj)
+
+    M = Matrix.Identity(4)   # everything done to the whole car, to repeat on the door parts
+
+    def tf(X):
+        nonlocal M
+        mesh.transform(X); M = X @ M
 
     # orient: length along X, then uniform scale to the real length, centred, wheels on z = 0
     def ext():
@@ -199,19 +217,19 @@ def convert(name, path, length, body):
     dims = sorted([(x1 - x0, "x"), (y1 - y0, "y"), (z1 - z0, "z")], reverse=True)
     up = "z"
     if dims[0][1] == "z":               # some files are modelled lying on their side or with Y up
-        mesh.transform(Matrix.Rotation(-1.5707963, 4, "X"))
+        tf(Matrix.Rotation(-1.5707963, 4, "X"))
         x0, x1, y0, y1, z0, z1 = ext()
     if (y1 - y0) > (x1 - x0):
-        mesh.transform(Matrix.Rotation(1.5707963, 4, "Z"))
+        tf(Matrix.Rotation(1.5707963, 4, "Z"))
         x0, x1, y0, y1, z0, z1 = ext()
     if (z1 - z0) > (y1 - y0) * 1.4:     # still wrong way up: height should not exceed width much
-        mesh.transform(Matrix.Rotation(1.5707963, 4, "X"))
+        tf(Matrix.Rotation(1.5707963, 4, "X"))
         x0, x1, y0, y1, z0, z1 = ext()
     length, height = length
     s = length / (x1 - x0)
     # uniform by length, then height corrected to the real car (some models are built tall)
     sz = height / (z1 - z0)
-    mesh.transform(Matrix.Diagonal((s, s, sz, 1)) @ Matrix.Translation(Vector((-(x0 + x1) / 2, -(y0 + y1) / 2, -z0))))
+    tf(Matrix.Diagonal((s, s, sz, 1)) @ Matrix.Translation(Vector((-(x0 + x1) / 2, -(y0 + y1) / 2, -z0))))
     x0, x1, y0, y1, z0, z1 = ext()
     tris0 = len(mesh.polygons)
 
@@ -219,7 +237,7 @@ def convert(name, path, length, body):
         # decimate through the depsgraph (no operators, so it works headless without a UI context)
         o = src.copy(); o.data = src.data.copy(); o.name = name + suffix
         scene.collection.objects.link(o)
-        if target < 8000:
+        if target < 8000 and "_door" not in suffix:
             # far version: small loose bits (bolts, badges, wipers) cost triangles and are invisible
             bm2 = bmesh.new(); bm2.from_mesh(o.data)
             seen, drop = set(), []
@@ -262,7 +280,28 @@ def convert(name, path, length, body):
           f"{x1 - x0:.2f} x {y1 - y0:.2f} x {z1 - z0:.2f} m, kept {len(keep)}/{len(parts)} parts, areas "
           + ", ".join(f"{c}:{a * s * s:.1f}" for c, a in sorted(area.items(), key=lambda t: -t[1])[:6]))
     # move to a fresh file for export
-    return hi, lo
+    extra = []
+    if name in DOORS:
+        doors = DOORS[name]
+        in_door = {n for d in doors for n in d}
+        body_mesh, _, _ = build([it for it in keep if it[1] not in in_door], name + "_body", paint_key)
+        body_mesh.transform(M)
+        bo = bpy.data.objects.new(name + "_bodysrc", body_mesh); scene.collection.objects.link(bo)
+        extra.append(lod(bo, 14000, "_body"))   # only the car you drive uses these: lighter; bpy.data.objects.remove(bo)
+        for i, names in enumerate(doors):
+            items = [it for it in keep if it[1] in names]
+            if not items:
+                print("  NO DOOR PARTS", name, names); continue
+            dm, _, _ = build(items, f"{name}_door{i}src", paint_key)
+            dm.transform(M)
+            xs = [v.co.x for v in dm.vertices]; ys = [v.co.y for v in dm.vertices]
+            ymid = (min(ys) + max(ys)) / 2
+            hinge = Vector((min(xs) if FRONT_END[name] < 0 else max(xs), min(ys) if ymid < 0 else max(ys), 0))
+            dm.transform(Matrix.Translation(-hinge))
+            do = bpy.data.objects.new(f"{name}_door{i}src", dm); do.location = hinge; scene.collection.objects.link(do)
+            extra.append(lod(do, 2000, f"_door{i}")); bpy.data.objects.remove(do)
+            print(f"  DOOR {name}{i}: hinge {tuple(round(v, 2) for v in hinge)}, {len(extra[-1].data.polygons)} tris")
+    return hi, lo, extra
 
 
 def main():
@@ -272,12 +311,12 @@ def main():
         path, length, body = CARS[name]
         bpy.ops.wm.read_factory_settings(use_empty=True)
         try:
-            hi, lo = convert(name, path, length, body)
+            hi, lo, extra = convert(name, path, length, body)
         except Exception as e:
             print("FAILED", name, repr(e)); continue
         tmp = os.path.join(HERE, "data", "blendswap", f"_{name}.glb")
         for o in bpy.context.scene.objects:
-            o.select_set(o in (hi, lo))
+            o.select_set(o in (hi, lo, *extra))
         bpy.ops.export_scene.gltf(filepath=tmp, export_format="GLB", use_selection=True, export_yup=True,
                                   export_apply=True, export_materials="EXPORT")
         built.append(tmp)
@@ -290,6 +329,11 @@ def main():
         bpy.ops.import_scene.gltf(filepath=f)
         new = sorted((o for o in bpy.data.objects if o not in before and o.type == "MESH"), key=lambda o: -len(o.data.polygons))
         n = os.path.basename(f)[1:-4]
+        for o in new:   # Blender adds .001 when a source object already had the name
+            o.name = re.sub(r"\.\d{3}$", "", o.name)
+        if any(o.name == n for o in new):
+            continue   # the names came through (doors and bodies rely on them)
+        new = [o for o in new if "_door" not in o.name and not o.name.endswith("_body")]
         new[0].name = n
         if len(new) > 1:
             new[1].name = n + "_lo"

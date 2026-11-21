@@ -19,11 +19,22 @@ export const REACH = 4;                        // how close you must be to get i
 export function makeCar(models, name, color) {
   const model = models.find(m => m.name === name) || models[0]; if (!model) return null;
   const g = new THREE.Group(); g.userData.car = true;
-  for (const [geo, mat, role] of model.hi) {
-    const m = new THREE.Mesh(geo, role === 'paint' ? mat.clone() : mat);
-    if (role === 'paint') { m.material.color.setHex(color); m.userData.own = true; }
-    m.castShadow = true; g.add(m);
-  }
+  const add = (parent, parts) => {
+    for (const [geo, mat, role] of parts) {
+      const m = new THREE.Mesh(geo, role === 'paint' ? mat.clone() : mat);
+      if (role === 'paint') { m.material.color.setHex(color); m.userData.own = true; }
+      m.castShadow = true; parent.add(m);
+    }
+  };
+  // a car with separate doors (see tools/blendswap_cars.py): the body plus one pivot per door, on its hinge
+  if (model.open) {
+    add(g, model.open.body);
+    g.userData.doors = model.open.doors.map(d => {
+      const pivot = new THREE.Group(); pivot.position.copy(d.hinge); add(pivot, d.parts); g.add(pivot);
+      return { pivot, hinge: d.hinge };
+    });
+  } else add(g, model.hi);
+  g.userData.model = model.name;
   return g;
 }
 export function disposeCar(g) { g?.removeFromParent(); g?.traverse(o => { if (o.isMesh && o.userData.own) o.material.dispose(); }); }
@@ -36,6 +47,27 @@ export function createDriving({ scene, player, models, carTiles, solids, ground 
   const st = { car: null, origin: null, speed: 0, steer: 0, heading: 0, model: null, color: 0 };
   let left = null;          // the car you got out of: { mesh, x, z, heading, model, color, origin }
   let engine = null;
+  let door = null;          // the driver's door swinging open and shut: { pivot, angle, t }
+
+  // the driver's door: the front door on the car's left (Dutch cars). The car points along FRONT * x, so its
+  // left is -FRONT * z; a door hinges at its front edge and swings its back edge outwards.
+  function swing(car) {
+    const doors = car?.userData.doors; if (!doors?.length) return;
+    const f = FRONT[car.userData.model] ?? 1;
+    const d = doors.filter(d => d.hinge.z * -f > 0).sort((a, b) => b.hinge.x * f - a.hinge.x * f)[0];
+    if (!d) return;
+    if (door && door.pivot !== d.pivot) door.pivot.rotation.y = 0;
+    door = { pivot: d.pivot, angle: Math.sign(d.hinge.z) * f * 1.15, t: 0 };
+  }
+  const OPEN_T = 0.35, HOLD_T = 0.55;
+  const ease = k => k * k * (3 - 2 * k);
+  function tick(dt) {
+    if (!door) return;
+    const t = (door.t += dt);
+    const k = t < OPEN_T ? ease(t / OPEN_T) : t < OPEN_T + HOLD_T ? 1 : 1 - ease(Math.min(1, (t - OPEN_T - HOLD_T) / OPEN_T));
+    door.pivot.rotation.y = door.angle * k;
+    if (t >= 2 * OPEN_T + HOLD_T) { door.pivot.rotation.y = 0; door = null; }
+  }
 
   // parked car within reach (the free one you left behind counts too)
   function nearest(p) {
@@ -78,6 +110,7 @@ export function createDriving({ scene, player, models, carTiles, solids, ground 
       x = target.x; z = target.z; heading = target.yaw; name = target.model.name; color = target.color;
     }
     const car = makeCar(models, name, color); car.position.y = -0.15;
+    swing(car);
     player.add(car); player.position.x = x; player.position.z = z; player.rotation.y = heading;
     Object.assign(st, { car, origin, speed: 0, steer: 0, heading, model: name, color });
     startEngine();
@@ -89,7 +122,7 @@ export function createDriving({ scene, player, models, carTiles, solids, ground 
     const x = player.position.x, z = player.position.z;
     left = { mesh: st.car, x, z, heading: h, model: st.model, color: st.color, origin: st.origin };
     player.remove(st.car); st.car.position.set(x, 0, z); st.car.rotation.y = h; scene.add(st.car);
-    st.car = null; stopEngine();
+    swing(st.car); st.car = null; stopEngine();
     for (const [dx, dz] of [[fz, -fx], [-fz, fx], [-fx, -fz], [fx, fz]]) {
       const ex = x + dx * 2.2, ez = z + dz * 2.2;
       if (!ground(ex, ez) && !solids.hit(ex, ez, 0.35)) return { x: ex, z: ez };
@@ -146,7 +179,7 @@ export function createDriving({ scene, player, models, carTiles, solids, ground 
   }
 
   return {
-    nearest, enter, exit, update, taken,
+    nearest, enter, exit, update, tick, taken,
     get driving() { return !!st.car; },
     get speed() { return st.speed; },
     // forward direction of the car, for the camera

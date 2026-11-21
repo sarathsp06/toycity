@@ -191,14 +191,27 @@ function partsOf(obj) {
   obj.traverse(o => { if (o.isMesh) { const geo = o.geometry.clone(); geo.applyMatrix4(o.matrixWorld); parts.push([geo, o.material, o.material.name.startsWith('paint') ? 'paint' : null]); } });
   return parts;
 }
+// cars with separate doors also come as <name>_body plus <name>_door0.. with their origin on the hinge;
+// the car you drive is built from those so its doors can open (vehicle.js)
+function openParts(root, name) {
+  const body = root.getObjectByName(name + '_body'); if (!body) return null;
+  const doors = [];
+  for (let i = 0; ; i++) {
+    const node = root.getObjectByName(`${name}_door${i}`); if (!node) break;
+    const hinge = node.position.clone();
+    const parts = partsOf(node); for (const [geo] of parts) geo.translate(-hinge.x, -hinge.y, -hinge.z);
+    doors.push({ hinge, parts });
+  }
+  return { body: partsOf(body), doors };
+}
 progress(0.08, 'Parking the cars');
-const CAR_MODELS = await new GLTFLoader().loadAsync(new URL('./models/cars.glb?v=suv1', import.meta.url).href,
+const CAR_MODELS = await new GLTFLoader().loadAsync(new URL('./models/cars.glb?v=doors1', import.meta.url).href,
   e => e.total && progress(0.08 + 0.37 * e.loaded / e.total, 'Parking the cars')).then(g => {
   const list = [];
   for (const [name, w] of Object.entries(CAR_MIX)) {
     const hi = g.scene.getObjectByName(name), lo = g.scene.getObjectByName(name + '_lo');
     if (!hi) continue;
-    list.push({ name, w, hi: partsOf(hi), lo: partsOf(lo || hi) });
+    list.push({ name, w, hi: partsOf(hi), lo: partsOf(lo || hi), open: openParts(g.scene, name) });
   }
   return list;
 }).catch(e => { console.warn('cars', e); return []; });
@@ -980,6 +993,7 @@ function frame(now) {
   avatar.dip = 0;
   animateAvatar(dt, jump.phase === 'air' ? 0 : movedThisFrame); movedThisFrame = 0;
   social?.update(dt, driving.driving ? Math.abs(driving.speed) : avatar.speed);
+  driving.tick(dt);
   player.position.y = 0.15 + jump.h - avatar.dip;
   // sharp shadows that follow the player
   const R = 40 + Math.min(dist, 150) * 0.9;
