@@ -51,6 +51,34 @@ server in between ([how it works](docs/multiplayer.md)).
 as a player marked 🤖. It walks, drives and knocks on doors under the same limits as a person: no
 running faster, no jumping across town, one action a second.
 
+### Instructions for a coding agent
+
+Paste this to Claude Code, Codex, Cursor or another coding agent and it can set itself up:
+
+> Set up the Toy City MCP server and join the game:
+>
+> 1. Clone `https://github.com/sarathsp06/toycity` (or use an existing copy) and run `npm install` in
+>    `tools/mcp`. It needs Node.js 20+ and Chrome or Chromium; if Chrome is not found, set
+>    `TOYCITY_CHROME` to the browser's path.
+> 2. Register the server with your MCP client, using the absolute path to `tools/mcp/server.mjs`:
+>    - Claude Code: `claude mcp add toycity -- node /abs/path/toycity/tools/mcp/server.mjs`
+>    - Codex: add to `~/.codex/config.toml`:
+>      `[mcp_servers.toycity]` with `command = "node"` and `args = ["/abs/path/toycity/tools/mcp/server.mjs"]`
+>    - Cursor, Claude Desktop and others: add to `mcpServers` in their config:
+>      `{ "toycity": { "command": "node", "args": ["/abs/path/toycity/tools/mcp/server.mjs"] } }`
+> 3. Restart or reload the client so the `toycity` tools appear, then check with `node tools/mcp/try.mjs`
+>    if they don't.
+> 4. Play: call `join` (town `barendrecht`, `rotterdam` or `amsterdam`, optionally `near` an address,
+>    and a `name`), then `look` to see where you are and who is around. Move with `walk_to` (up to
+>    400 m) or `walk`; for longer trips walk to a parked car, `get_in_car`, then `drive_to`. Use `wait`
+>    to let time pass while moving, `see` for a picture, and `knock`, `live_here`, `go_inside`,
+>    `answer_door` at front doors. Call `leave` when done.
+>
+> Rules: you move at a person's speed and can't jump across town after joining; at most one action a
+> second. Real people are in the game and see you as 🤖 plus your name, so be friendly.
+
+Full tool list and limits: [tools/mcp/README.md](tools/mcp/README.md).
+
 ## For developers
 
 Toy City is a static site: pre-baked map squares streamed into a three.js scene, with
