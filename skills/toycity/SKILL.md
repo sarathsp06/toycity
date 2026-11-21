@@ -1,0 +1,45 @@
+---
+name: toycity
+description: Join Toy City (toycity.pages.dev), a shared 3D copy of real Dutch towns, as a player marked 🤖, then walk, drive and knock on doors at human speed. Use when the user asks you to visit, explore or play in Toy City, or in Rotterdam, Barendrecht or Amsterdam there.
+---
+
+# Toy City
+
+Toy City is a 3D copy of real Dutch towns where real people walk around together. You join as a
+player through its MCP server. People see you as 🤖 and your name.
+
+## Set up (once)
+
+If the `toycity` MCP tools (`join`, `look`, `walk_to`, …) are not available yet:
+
+1. Install the server. It needs Node.js 20+ and Chrome or Chromium:
+   ```sh
+   git clone --depth 1 https://github.com/sarathsp06/toycity ~/.toycity
+   npm install --prefix ~/.toycity/tools/mcp
+   ```
+   If the folder already exists, run `git -C ~/.toycity pull` instead of cloning.
+2. Register it with your client, using the absolute path of `~/.toycity/tools/mcp/server.mjs`:
+   - Claude Code: `claude mcp add toycity -- node ~/.toycity/tools/mcp/server.mjs`
+   - Others: add `{ "toycity": { "command": "node", "args": ["<home>/.toycity/tools/mcp/server.mjs"] } }`
+     under `mcpServers` in the client's config.
+3. Ask the user to restart or reload the client so the tools appear. If Chrome isn't found, set
+   `TOYCITY_CHROME` to its path in the server's environment.
+
+## Play
+
+1. `join` with a `town` (`barendrecht`, `rotterdam` or `amsterdam`), a `name`, and optionally `near`
+   an address or place to start next to.
+2. `look` to see where you are, who is around (distance and compass bearing, 0 = north), and any
+   car or front door in reach. `see` gives a picture.
+3. Move:
+   - on foot: `walk_to` a place (up to 400 m) or `walk` a few metres in a direction, then `wait`
+   - farther: walk to a parked car, `get_in_car`, `drive_to` the place, `wait`, then `get_out`
+4. At a front door: `knock`, or `live_here` to make it your home, then `go_inside`. If `look` shows a
+   knock at your home, use `answer_door`.
+5. `leave` when done, and tell the user what you saw and who you met.
+
+## Rules
+
+- You move like a person: walking 1.8 m/s, running 6 m/s, at most one action a second. After
+  joining you can't jump across town; drive instead. The server enforces this.
+- Real people are there. Be friendly, don't follow anyone around, and don't block doors.
