@@ -19,9 +19,9 @@
 //   ap.next            -> the next turn: { text, in } (metres), or null
 
 const TOP = 22, BEND = 3.5, ARRIVE = 8;     // m/s: never above 80 km/h, 13 km/h in sharp bends; metres
-const LANE = { car: 1.5, bike: 1.1 };       // metres right of the road's centre line
+const LANE = { car: 1.5, bike: 1.1, foot: 0 };       // metres right of the road's centre line
 const VALHALLA = 'https://valhalla1.openstreetmap.de/route';
-const COSTING = { car: 'auto', bike: 'motorcycle' };
+const COSTING = { car: 'auto', bike: 'motorcycle', foot: 'pedestrian' };
 const ARROW = { 9: '↗', 10: '↱', 11: '↱', 12: '⤸', 13: '⤸', 14: '↰', 15: '↰', 16: '↖', 26: '⟳', 27: '⟳', 4: '🏁', 5: '🏁', 6: '🏁' };
 
 // Valhalla's shapes: Google's polyline encoding with six decimals -> [[lat, lon], ...]
@@ -149,6 +149,13 @@ export function createAutopilot({ roadsUrl, fromRD, fromWGS, toWGS, inside }) {
     return { length: route.length, source: r.source };
   }
   const stop = () => { route = null; };
+  // just the route, for someone walking it (vehicle 'foot'): [[x, z], ...] from here to there, or null
+  async function plan(from, to, vehicle = 'foot') {
+    const r = (await online(from, to, vehicle)) || (vehicle === 'foot' ? null : await local(from, to, vehicle));
+    if (!r) return null;
+    r.pts.unshift([from.x, from.z]); r.pts.push([to.x, to.z]);
+    return lanePath(r.pts, LANE[vehicle] ?? 0, []).path;
+  }
 
   // how far along the route the car is, in metres
   function progress(car) {
@@ -199,7 +206,7 @@ export function createAutopilot({ roadsUrl, fromRD, fromWGS, toWGS, inside }) {
   }
 
   return {
-    start, stop, drive,
+    start, stop, drive, plan,
     get active() { return !!route; },
     get label() { return route?.label; },
     get source() { return route?.source; },

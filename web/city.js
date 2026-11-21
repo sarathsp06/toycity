@@ -856,6 +856,9 @@ function toggleFly() { fly = !fly; orbit.enabled = fly; if (fly) orbit.target.co
 // click (not drag) to walk somewhere; in fly mode, drop in at the spot
 const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
 let goal = null;
+// ?agent=1: an AI agent plays (tools/mcp). It moves only through what a person can do, at a person's speed:
+// walking or running to a point, the car and its autopilot, doors. It cannot jump to a place once in.
+const AGENT = params.get('agent') === '1' ? { run: false, draw: 0 } : null;
 const marker = new THREE.Mesh(new THREE.RingGeometry(0.8, 1.2, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffd23f, transparent: true, opacity: 0.9, depthTest: false }));
 marker.visible = false; marker.renderOrder = 10; scene.add(marker);
 renderer.domElement.addEventListener('pointerup', e => {
@@ -1127,7 +1130,7 @@ function chaseCam() {
   camera.lookAt(player.position.x, player.position.y + 1.6, player.position.z);
 }
 function frame(now) {
-  const dt = Math.min((now - last) / 1000, 0.05); last = now;
+  const dt = Math.min((now - last) / 1000, AGENT ? 0.1 : 0.05); last = now;
 
   // apply decoded squares within a small per-frame time budget
   const t0 = performance.now();
@@ -1190,7 +1193,9 @@ function frame(now) {
     let speed = keys['shift'] || jm > 0.9 ? 6 : jm > 0.15 ? 1.2 + 0.8 * jm : 1.8;
     if (goal) {
       const to = goal.clone().sub(player.position); to.y = 0; const d = to.length();
-      if (d < 0.4) { goal = null; marker.visible = false; } else { v.copy(to); speed = Math.min(Math.max(speed, d / 2.5) * dt, d) / dt; }
+      // a person's click-to-go speeds up on long trips; an agent walks (1.8 m/s) or runs (6 m/s) like anyone on foot
+      const boost = AGENT ? (AGENT.run ? 6 : 1.8) : Math.max(speed, d / 2.5);
+      if (d < 0.4) { goal = null; marker.visible = false; } else { v.copy(to); speed = Math.min(boost * dt, d) / dt; }
       marker.material.opacity = 0.5 + 0.4 * Math.sin(now / 150);
     }
     if (v.lengthSq() > 0) {
@@ -1245,7 +1250,9 @@ function frame(now) {
   if (sc.right !== R) { sc.left = -R; sc.right = R; sc.top = R; sc.bottom = -R; sc.updateProjectionMatrix(); }
   scene.fog.near = 300 + dist; scene.fog.far = (OV ? Q.horizon : Q.far) + dist;
 
-  renderer.render(scene, camera);
+  // an agent's headless browser draws only when the agent asks to see (rendering there is slow, and
+  // a slow frame rate would make it slower than a person on foot)
+  if (!AGENT || AGENT.draw > 0) { renderer.render(scene, camera); if (AGENT) AGENT.draw--; }
   frames++;
   if (now - fpsT > 500) {
     const fps = frames * 1000 / (now - fpsT); frames = 0; fpsT = now;
@@ -1262,7 +1269,16 @@ function bench(n = 30) {
   for (let k = 0; k < n; k++) { renderer.render(scene, camera); gl.finish(); }
   return +((performance.now() - t0) / n).toFixed(2);
 }
-window.__city = { ovTiles, solids, driving, knockDown, card, fling, homes, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, bench, blocked, jump, toRD, ORX, ORY, get stats() { return window.__stats; } };
+// the agent's handle (tools/mcp/toycity-mcp): only human-sized moves
+if (AGENT) window.__agent = {
+  walkTo(x, z, run) { if (driving.driving || ride || fly || homes.inside) return false; AGENT.run = !!run; goal = new THREE.Vector3(x, 0.15, z); marker.position.set(x, 0.35, z); marker.visible = true; return true; },
+  stop() { goal = null; marker.visible = false; },
+  get walking() { return !!goal; },
+  get stuck() { return stuck; },
+  face(y) { yaw = y; },
+  draw(n = 3) { AGENT.draw = n; },   // render the next few frames (for a screenshot)
+};
+window.__city = { ovTiles, solids, driving, knockDown, card, fling, homes, nearestPlace, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, bench, blocked, jump, toRD, ORX, ORY, get stats() { return window.__stats; } };
 // ---------- social layer: other people, voice and background sounds (web/mp/, ?mp=0 turns it off) ----------
 // It only reads the player's position and the trees and parked cars around it; nothing here depends on it.
 let social = null;
@@ -1274,7 +1290,7 @@ function surroundings() {
     if (t.trees) for (let k = 0; k < t.trees.length; k += 6) if (Math.hypot(t.trees[k] + ox - p.x, t.trees[k + 2] + oz - p.z) < 40) trees++;
     if (t.cars) for (let k = 0; k < t.cars.data.length; k += 6) if (Math.hypot(t.cars.data[k] + ox - p.x, t.cars.data[k + 2] + oz - p.z) < 60) cars++;
   }
-  return { green: Math.min(1, trees / 25), street: Math.min(1, cars / 30) };
+  return { green: Math.min(1, trees / 25), street: Math.min(1, cars / 30), inCar: (driving.driving && !driving.rider) || (!!ride && !ride.car?.startsWith('bike')) };
 }
 if (params.get('mp') !== '0') import('./mp/index.js').then(m => m.start({
   scene, camera, player, toRD, fromRD: (X, Y) => [X - ORX, ORY - Y], slug, params, surroundings, useAvatar, solids, goToRD: arriveNear,

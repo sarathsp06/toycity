@@ -45,6 +45,12 @@ server in between ([how it works](docs/multiplayer.md)).
 
 ---
 
+## Bring your AI agent
+
+[`tools/mcp`](tools/mcp) is an MCP server that lets an AI agent (Claude, or any MCP client) join the map
+as a player marked 🤖. It walks, drives and knocks on doors under the same limits as a person: no
+running faster, no jumping across town, one action a second.
+
 ## For developers
 
 Toy City is a static site: pre-baked map squares streamed into a three.js scene, with

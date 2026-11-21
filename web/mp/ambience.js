@@ -38,7 +38,8 @@ export function createAmbience({ ctx, surroundings }) {
     for (let k = 0; k < n; k++) {
       const s = t + k * 0.12;
       o.frequency.setValueAtTime(base, s); o.frequency.exponentialRampToValueAtTime(base * (1.3 + Math.random() * 0.4), s + 0.07);
-      g.gain.setValueAtTime(0, s); g.gain.linearRampToValueAtTime(0.01, s + 0.01);   // birds: a fifth of the first version (0.05), they were too loud g.gain.linearRampToValueAtTime(0, s + 0.08);
+      // each note fades out again (it used to hold, which made the birds a constant whistle), and quietly
+      g.gain.setValueAtTime(0, s); g.gain.linearRampToValueAtTime(0.004, s + 0.01); g.gain.linearRampToValueAtTime(0, s + 0.08);
     }
     o.start(t); o.stop(t + n * 0.12 + 0.1);
   }
@@ -48,11 +49,13 @@ export function createAmbience({ ctx, surroundings }) {
     const t = ctx.currentTime;
     out.gain.setTargetAtTime(on ? 0.6 : 0, t, 0.3);
     if (!on) return;
-    if ((envT -= dt) <= 0) { envT = 2; Object.assign(env, surroundings()); }
-    wind.g.gain.setTargetAtTime(0.025, t, 1);
-    leaves.g.gain.setTargetAtTime(0.006 + 0.02 * env.green, t, 1);
-    traffic.g.gain.setTargetAtTime(0.02 + 0.12 * env.street, t, 1);
-    if ((birdT -= dt) <= 0) { birdT = 0.6 + Math.random() * (6 - 5 * env.green); if (Math.random() < 0.3 + 0.6 * env.green) chirp(t + 0.05); }
+    if ((envT -= dt) <= 0) { envT = 0.5; Object.assign(env, surroundings()); }
+    // in a car the windows are shut: no birds or rustling leaves, the street only faintly
+    const car = env.inCar ? 1 : 0;
+    leaves.g.gain.setTargetAtTime(car ? 0 : 0.004 + 0.012 * env.green, t, car ? 0.2 : 1);
+    traffic.g.gain.setTargetAtTime((0.02 + 0.12 * env.street) * (car ? 0.3 : 1), t, 1);
+    wind.g.gain.setTargetAtTime(car ? 0.008 : 0.025, t, car ? 0.2 : 1);
+    if ((birdT -= dt) <= 0) { birdT = 2 + Math.random() * (10 - 6 * env.green); if (!car && Math.random() < 0.2 + 0.4 * env.green) chirp(t + 0.05); }
   }
 
   return {
