@@ -32,3 +32,18 @@ test('static squares come and go; live things are asked each time', () => {
   other = { x: 50, z: 5, r: PERSON.r };
   assert.equal(s.hit(5.3, 5, PERSON.r), false);
 });
+test('a car just across an 8 m grid cell border still blocks', () => {
+  const s = createSolids();
+  s.add('sq', [{ x: 8.6, z: 4, hx: 0.5, hz: 0.1, yaw: 0 }]);   // reach 0.51: cells x 8..16 only, before the slack
+  assert.equal(s.hit(7.9, 4, PERSON.r), true, 'tested from the cell next door, within the person radius');
+  assert.equal(s.hit(7.5, 4, PERSON.r), false);
+});
+test('live things are asked once per frame once beginFrame is used', () => {
+  const s = createSolids(); let asked = 0;
+  s.live(() => { asked++; return [{ x: 5, z: 5, r: PERSON.r }]; });
+  s.hit(0, 0, PERSON.r); s.hit(0, 0, PERSON.r);
+  assert.equal(asked, 2, 'no frames yet: asked on every test');
+  s.beginFrame(); s.hit(0, 0, PERSON.r); s.hit(5.3, 5, PERSON.r); s.liveNear(5, 5, 1);
+  assert.equal(asked, 3, 'one frame, one ask');
+  s.beginFrame(); assert.equal(s.hit(5.3, 5, PERSON.r), true); assert.equal(asked, 4);
+});

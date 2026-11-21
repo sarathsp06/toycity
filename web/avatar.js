@@ -108,7 +108,7 @@ function retarget(src, target, clip, fps = 30) {
     mixer.setTime(t); S.updateMatrixWorld(true);
     for (const pr of pairs) {
       // world target = (source now * source rest^-1) * target rest, then back into the parent's frame
-      _q.copy(pr.s.getWorldQuaternion(_q)).multiply(_p.copy(pr.sRest).invert()).multiply(pr.tRest);
+      pr.s.getWorldQuaternion(_q).multiply(_p.copy(pr.sRest).invert()).multiply(pr.tRest);
       pr.t.parent.getWorldQuaternion(_p).invert();
       const local = _p.multiply(_q);
       pr.q.push(local.x, local.y, local.z, local.w);
@@ -116,8 +116,7 @@ function retarget(src, target, clip, fps = 30) {
     }
     target.updateMatrixWorld(true);
     // hips: rest position plus the source's world offset, scaled, expressed in the hips' parent frame
-    const off = hipS.getWorldPosition(_v).sub(sHip0).multiplyScalar(k);
-    const w = tHip0.clone().add(off); hipT.parent.worldToLocal(w);
+    const w = hipS.getWorldPosition(_v).sub(sHip0).multiplyScalar(k).add(tHip0); hipT.parent.worldToLocal(w);
     hipVals.push(w.x, w.y, w.z);
   }
   for (const pr of pairs) pr.t.quaternion.copy(pr.rest);

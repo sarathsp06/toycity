@@ -76,7 +76,7 @@ sequenceDiagram
     Note over R: relays are out of the picture from here
 
     loop 10 x per second moving, 1 x per second standing
-        A->>B: state [seq, x, y, heading, speed, name, look, mic]
+        A->>B: state [seq, x, y, heading, speed, name, look, mic, car, card, pose, up, caps]
         B->>A: state
     end
 
@@ -126,11 +126,10 @@ Worth it once more than about 15–20 people gather in the same 500 m square, or
 - About 1 in 10 networks block direct connections. Those players connect through Cloudflare's TURN relay instead (credentials from the `toycity-turn` Worker), which is slower to set up, so meeting someone can take up to half a minute.
 - The public relays are run by other people and can be slow or go down. Five are used in parallel.
 - Positions aren't checked by anyone, and mute and block are local only. Players connected directly can see each other's IP addresses.
-- Jumps aren't shared yet. Other players stay on the ground.
 
 ## Testing
 
-- `node --test tests/*.test.mjs` runs 13 tests: rooms and their hysteresis, smoothing including late and duplicate updates, heading wrap-around, the (old) voice range gate, visibility hysteresis, the volume curve, name cleaning, and the collision registry (circles, turned boxes, squares unloading, moving people).
+- `node --test tests/*.test.mjs` runs the unit tests: rooms and their hysteresis, smoothing including late and duplicate updates, heading wrap-around, visibility hysteresis, name cleaning, and the collision registry (circles, turned boxes, squares unloading, moving people, cell borders).
 - End to end: open `city.html?fakemic=1` in two tabs. `fakemic` uses a beeping tone instead of a real microphone. Tap the other player, answer in the other tab, and each tab hears the other's tone.
 - Relay-only: the Playwright scripts used during development override `RTCPeerConnection` with `iceTransportPolicy: 'relay'`, which forces the TURN path that phones on mobile networks take. Test this after any change to connection setup: it's the path that broke.
 - Headless Chrome has `navigator.share`, so a test of the meeting link has to override `Navigator.prototype.share` to read the link.

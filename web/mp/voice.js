@@ -8,7 +8,6 @@
 // p2pTransport() below reuses the presence WebRTC connections, so there is never a second link.
 import * as THREE from 'three';
 import { MP } from './config.js';
-import { VoiceGate } from './logic.js';
 
 // Voice problems are hard to see, so the voice path logs every step: filter the console on [voice].
 const log = (...a) => console.log('[voice]', ...a);
@@ -46,8 +45,8 @@ export function createVoice({ camera, player, presence, transport, params, inCal
   const unlock = () => { if (ctx.state !== 'running') ctx.resume().then(() => log('audio context resumed')).catch(e => log('resume failed', e)); };
   addEventListener('pointerdown', unlock); addEventListener('keydown', unlock);
 
-  const state = new Map();          // peer id -> { sendGate, sending, audio }
-  const st = id => state.get(id) || state.set(id, { sendGate: new VoiceGate(MP), sending: false, audio: null }).get(id);
+  const state = new Map();          // peer id -> { sending, audio }
+  const st = id => state.get(id) || state.set(id, { sending: false, audio: null }).get(id);
   let mic = null, micLevel = null;
 
   transport.onStream(function onStream(id, stream) {
@@ -78,17 +77,23 @@ export function createVoice({ camera, player, presence, transport, params, inCal
   });
   presence.onLeave(p => { const s = state.get(p.id); if (s) { stopHearing(s); state.delete(p.id); } });
 
-  function stopHearing(s) { if (!s.audio) return; log('stopped hearing a player'); s.audio.pa.disconnect(); s.audio.pa.removeFromParent(); s.audio.el.srcObject = null; s.audio = null; }
+  function stopHearing(s) { if (!s.audio) return; log('stopped hearing a player'); s.audio.pa.disconnect(); s.audio.pa.removeFromParent(); s.audio.el.srcObject = null; s.audio.level.dispose(); s.audio = null; }
 
-  async function setMic(on) {
+  // one at a time: a call that ends while the microphone permission is still open must not leave
+  // the microphone on afterwards
+  let micQ = Promise.resolve(), micWant = false;
+  const setMic = on => (micQ = micQ.then(() => setMicNow(on), () => setMicNow(on)));
+  async function setMicNow(on) {
+    micWant = on;
     if (on && !mic) {
       unlock();
-      mic = params.get('agent') === '1' ? agentMouth(ctx) : params.get('fakemic') ? fakeMic(ctx) : await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
-      micLevel = levelMeter(ctx, mic);
+      const m = params.get('agent') === '1' ? agentMouth(ctx) : params.get('fakemic') ? fakeMic(ctx) : await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      if (!micWant) { m.getTracks().forEach(t => t.stop()); return false; }
+      mic = m; micLevel = levelMeter(ctx, mic);
       log('mic on:', mic.getAudioTracks().map(t => t.label || 'track'), '; audio context', ctx.state);
     } else if (!on && mic) {
       for (const [id, s] of state) if (s.sending) { transport.stop(presence.peers.get(id) || { id }, mic); s.sending = false; }
-      mic.getTracks().forEach(t => t.stop()); mic = null; micLevel = null; log('mic off');
+      mic.getTracks().forEach(t => t.stop()); mic = null; if (micLevel) micLevel.dispose(); micLevel = null; log('mic off');
     }
     return !!mic;
   }
@@ -98,7 +103,7 @@ export function createVoice({ camera, player, presence, transport, params, inCal
     ears.quaternion.copy(ears.parent.getWorldQuaternion(_p).invert().multiply(camera.getWorldQuaternion(_q)));
     if ((logT -= dt) <= 0) {   // a summary every 5 s while anyone is near
       logT = 5;
-      const near = [...presence.peers.values()].filter(p => p.dist < MP.voiceDisconnect);
+      const near = [...presence.peers.values()].filter(p => p.dist < MP.talkReach);
       if (near.length) log('summary: context', ctx.state, '| mic', mic ? 'on, level ' + micLevel().toFixed(3) : 'off',
         '|', near.map(p => { const s = st(p.id); return `${short(p.id)} ${p.dist.toFixed(1)} m: sending ${s.sending}, hearing ${!!s.audio}${s.audio ? ', in ' + s.audio.level().toFixed(3) : ''}`; }).join('; '),
         '| out level', outLevel().toFixed(3));
@@ -106,6 +111,8 @@ export function createVoice({ camera, player, presence, transport, params, inCal
     for (const p of presence.peers.values()) {
       const s = st(p.id);
       const send = inCall(p.id);   // my voice goes only to the people I am in a call with
+      // the square whose connection carried my voice was left (we still share another): send again there
+      if (s.sending && mic && p._voiceRoom && !presence.rooms.has(p._voiceRoom.key)) { transport.stop(p, mic); s.sending = false; }
       if (send && mic && !s.sending) s.sending = transport.send(p, mic);
       if ((!send || !mic) && s.sending) { transport.stop(p, mic); s.sending = false; }
       if (s.audio) {
@@ -115,16 +122,18 @@ export function createVoice({ camera, player, presence, transport, params, inCal
     }
   }
 
-  return { _state: state, update, setMic, outLevel, get micOn() { return !!mic; }, micLevel: () => micLevel ? micLevel() : 0, listener,
-    talkingTo: () => [...state.values()].filter(s => s.sending).length, hearing: () => [...state.values()].filter(s => s.audio).length };
+  return { update, setMic, get micOn() { return !!mic; }, micLevel: () => micLevel ? micLevel() : 0, listener,
+    talking: id => (state.get(id)?.audio?.level() || 0) > 0.02 };
 }
 
 // loudness 0..1 of a stream, for the "is talking" ring and my microphone button
 function levelMeter(ctx, stream) {
   const a = ctx.createAnalyser(); a.fftSize = 512;
-  try { ctx.createMediaStreamSource(stream).connect(a); } catch { return () => 0; }   // no audio track (yet)
+  let src; try { src = ctx.createMediaStreamSource(stream); src.connect(a); } catch { return Object.assign(() => 0, { dispose() {} }); }   // no audio track (yet)
   const buf = new Float32Array(a.fftSize);
-  return () => { a.getFloatTimeDomainData(buf); let s = 0; for (const x of buf) s += x * x; return Math.sqrt(s / buf.length); };
+  const level = () => { a.getFloatTimeDomainData(buf); let s = 0; for (const x of buf) s += x * x; return Math.sqrt(s / buf.length); };
+  level.dispose = () => { src.disconnect(); a.disconnect(); };
+  return level;
 }
 
 // test aid (?fakemic=1): a soft beeping tone instead of a real microphone
@@ -140,24 +149,29 @@ function fakeMic(ctx) {
 // in the call, 16 kHz mono, until the agent takes it (window.__agentVoice.take, a WAV as base64).
 let mouth = null;
 function agentMouth(ctx) {
-  if (!mouth) mouth = ctx.createMediaStreamDestination();
+  mouth = ctx.createMediaStreamDestination();   // a new one each time: a stopped track cannot be restarted
   const v = (window.__agentVoice ||= {});
-  // plays one clip; resolves when it has finished, or as soon as the other person starts talking
-  // over it (barge-in, see agentEar): { seconds, played, interrupted }
-  v.say = async b64 => {
+  const an = ctx.createAnalyser(); an.fftSize = 512; const buf = new Float32Array(an.fftSize);
+  v.outLevel = () => { an.getFloatTimeDomainData(buf); let e = 0; for (const x of buf) e += x * x; return Math.sqrt(e / buf.length); };   // how loud I am right now
+  // plays one clip from offset seconds on; resolves when it has finished, or as soon as the other
+  // person seems to talk over it (barge-in, see agentEar): { seconds, played, interrupted }, where played
+  // is how far into the clip it got (so a false alarm can carry on from there)
+  v.say = async (b64, offset = 0) => {
     const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
     const buf = await ctx.decodeAudioData(bytes.buffer);
     if (ctx.state !== 'running') await ctx.resume().catch(() => {});
-    const src = ctx.createBufferSource(); src.buffer = buf; src.connect(mouth);
+    const src = ctx.createBufferSource(); src.buffer = buf; src.connect(mouth); src.connect(an);
     const t0 = ctx.currentTime;
     return new Promise(done => {
-      const finish = interrupted => { if (v.current !== src) return; v.current = null; v.speaking = false; v.lastEnd = performance.now(); try { src.stop(); } catch {} done({ seconds: buf.duration, played: Math.min(buf.duration, ctx.currentTime - t0), interrupted }); };
-      // starting a new turn (not the next sentence of one): 0.7 s in which I can't be stopped, so when
-      // two cut in on each other, the one who spoke last keeps the floor
-      if (performance.now() - (v.lastEnd || 0) > 1500) v.graceUntil = performance.now() + 700;
-      v.current = src; v.speaking = true; v.interrupted = false; v.stop = () => finish(true);
+      v.stop?.();   // whatever was still playing ends now (its promise resolves as interrupted)
+      const finish = interrupted => { if (v.current !== src) return; v.current = null; v.speaking = false; v.lastEnd = performance.now(); try { src.stop(); } catch {} done({ seconds: buf.duration, played: Math.min(buf.duration, offset + ctx.currentTime - t0), interrupted }); };
+      // starting a new turn (not the next sentence of one): a second in which I can't be stopped, so
+      // when two cut in on each other, the one who spoke last keeps the floor
+      if (performance.now() - (v.lastEnd || 0) > 1500) v.graceUntil = performance.now() + 1000;
+      else if (offset) v.graceUntil = performance.now() + 400;   // carrying on after a false alarm: not at once again
+      v.current = src; v.speaking = true; v.stop = () => finish(true);
       src.onended = () => finish(false);
-      src.start();
+      src.start(0, Math.min(Math.max(0, offset), buf.duration));
     });
   };
   return mouth.stream;
@@ -171,26 +185,33 @@ function agentEar(ctx, input) {
     for (let i = 0; i < out.length; i++) out[i] = Math.max(-1, Math.min(1, x[Math.floor(i * step)])) * 32767;
     chunks.push(out); n += out.length;
     while (n > MAX) n -= chunks.shift().length;   // the last two minutes at most
-    // barge-in: someone talking clearly for a third of a second while I speak stops me. (Their own
-    // browser cancels my voice from their microphone, so what arrives here is them.)
+    // barge-in: half a second of clear sound while I speak stops me. That is only a suspicion: the
+    // server then hears what it was, and carries on where I stopped when it was a noise, or my own
+    // voice coming back through their speakers (the game plays voices through Web Audio, which the
+    // browser's echo cancelling does not see). v.noBarge turns it off for the rest of a say.
     let e2 = 0; for (let i = 0; i < x.length; i++) e2 += x[i] * x[i];
     const rms = Math.sqrt(e2 / x.length), dt = x.length / ctx.sampleRate;
-    v.lastLoud = rms > 0.02 ? performance.now() : v.lastLoud || 0;
-    loud = rms > 0.035 ? loud + dt : Math.max(0, loud - dt / 2);
-    if (v.speaking && loud > 0.35 && performance.now() > (v.graceUntil || 0)) { loud = 0; v.stop?.(); }
+    // my own voice, as loud as it has been in the last ~0.7 s: what comes back from their speakers is
+    // quieter than that, so only sound clearly above it counts as someone talking
+    own[oi++ % own.length] = v.outLevel ? v.outLevel() : 0; let ownMax = 0; for (const o of own) if (o > ownMax) ownMax = o;
+    const floor = Math.max(0.02, ownMax * 0.5);   // (echo through their speakers comes back well under half my level; a voice beside it does not)
+    if (rms > floor) { v.lastLoud = performance.now(); if (!v.heardSince) v.heardSince = v.lastLoud; }
+    loud = rms > Math.max(0.035, floor) ? loud + dt : Math.max(0, loud - dt / 2);
+    if (v.speaking && !v.noBarge && loud > 0.5 && performance.now() > (v.graceUntil || 0)) { loud = 0; v.stop?.(); }
   };
-  let loud = 0;
+  let loud = 0; const own = new Float32Array(8); let oi = 0;
   const v = (window.__agentVoice ||= {});
+  v.lastLoud = 0; v.heardSince = 0;   // heardSince: when sound was first heard since the last take (0: nothing yet)
   v.take = () => {
     const pcm = new Int16Array(n); let o = 0; for (const c of chunks) { pcm.set(c, o); o += c.length; }
-    chunks.length = 0; n = 0;
+    chunks.length = 0; n = 0; v.heardSince = 0;
     let peak = 0; for (const x of pcm) peak = Math.max(peak, Math.abs(x));
     const wav = new DataView(new ArrayBuffer(44 + pcm.length * 2)), w = (o, t) => [...t].forEach((c, i) => wav.setUint8(o + i, c.charCodeAt(0)));
     w(0, 'RIFF'); wav.setUint32(4, 36 + pcm.length * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
     wav.setUint32(16, 16, true); wav.setUint16(20, 1, true); wav.setUint16(22, 1, true); wav.setUint32(24, RATE, true);
     wav.setUint32(28, RATE * 2, true); wav.setUint16(32, 2, true); wav.setUint16(34, 16, true); w(36, 'data'); wav.setUint32(40, pcm.length * 2, true);
-    for (let i = 0; i < pcm.length; i++) wav.setInt16(44 + i * 2, pcm[i], true);
-    let bin = ''; const u = new Uint8Array(wav.buffer); for (let i = 0; i < u.length; i += 0x8000) bin += String.fromCharCode(...u.subarray(i, i + 0x8000));
-    return { seconds: pcm.length / RATE, silent: peak < 300, wav: btoa(bin) };
+    const u = new Uint8Array(wav.buffer); u.set(new Uint8Array(pcm.buffer), 44);   // every browser platform is little-endian
+    const parts = []; for (let i = 0; i < u.length; i += 0x8000) parts.push(String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)));
+    return { seconds: pcm.length / RATE, silent: peak < 300, wav: btoa(parts.join('')) };
   };
 }

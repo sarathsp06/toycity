@@ -11,6 +11,7 @@
 //   - jump out while moving and the car rolls on by itself until it stops or hits something
 //   - leave it outside a parking spot and it gets a ticket on the windscreen, and the neighbours toot
 import * as THREE from 'three';
+import { hits } from './solids.js';
 
 // which end of each model (along its local x axis) is the bonnet; from the head- and taillights in cars.glb
 export const FRONT = { golf: -1, camry: 1, fiat500: 1, jeep: 1, van: 1, suv: -1, suv_wreck: -1, bike: 1 };
@@ -35,9 +36,14 @@ const DAZED = 3, DAZED_TOP = 8;                // after a crash: 30 km/h at most
 const ACCEL = 5, BRAKE = 10, ROLL = 0.9;      // m/s², and how quickly a car rolls to a stop
 const CRASH = 4.5;                             // m/s (16 km/h): a bump harder than this dents the car (and what it hit)
 const KNOCK = 1.2;                             // m/s: faster than this, a person in the way is knocked over
-export const REACH = 4;                        // how close you must be to get in
+const REACH = 4;                               // how close you must be to get in
 const PARK_OK = 2.5;                           // within this of a parking spot counts as parked
 const TICKET_AFTER = 8, TOOT_EVERY = 14, TOOTS = 3, TOOT_NEAR = 45;
+// sample points around a body as signs of (half length, half width): the four corners, then the middles
+const SAMPLES = [[1, 1], [1, -1], [-1, 1], [-1, -1], [0, 1], [0, -1], [1, 0], [-1, 0]];
+const CORNERS = SAMPLES.slice(0, 4);
+// scratch space for overlap(): the centre and four corners of each box, reused every call
+const PTS_A = Array.from({ length: 5 }, () => [0, 0]), PTS_B = Array.from({ length: 5 }, () => [0, 0]);
 
 const CABIN_TRIM = new THREE.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.75, metalness: 0 });
 const DRIVER_GLASS = new THREE.MeshStandardMaterial({ color: 0xdfe8ee, roughness: 0.05, metalness: 0.1, transparent: true, opacity: 0.08, depthWrite: false });
@@ -94,9 +100,12 @@ function ticket() {
 export function createDriving({ scene, player, models, carTiles, solids, ground, note = () => {}, onHitPerson = () => {} }) {
   const taken = new Set();
   const st = { car: null, origin: null, speed: 0, steer: 0, heading: 0, model: null, color: 0 };
-  let left = null;
-  const dented = new Map();  // parked cars someone crashed into: key -> their wrecked mesh, standing in for the instance
-  const knocked = new Map(); // person id -> seconds until they count as solid again          // the car you got out of: { mesh, x, z, heading, model, color, origin, speed, ... }
+  let left = null;           // the car you got out of: { mesh, x, z, heading, model, color, origin, speed, ... }
+  // parked cars someone crashed into: key -> their wrecked mesh, standing in for the instance. The mesh is
+  // null while that square is unloaded (the key stays, so the spot is still dented when it comes back)
+  const dented = new Map();
+  let lost = 0;              // how many of those wait for their square to reload
+  const knocked = new Map(); // person id -> seconds until they count as solid again
   let engine = null, ctx = null;
   let door = null;          // the driver's door swinging open and shut: { pivot, angle, t }
   let ignoreLeft = false;   // while the left car moves itself, it must not collide with its own footprint
@@ -146,12 +155,11 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
     let best = null, bd = REACH;
     if (left) { const d = Math.hypot(left.x - p.x, left.z - p.z); if (d < bd) { bd = d; best = { left: true }; } }
     for (const tile of carTiles) {
-      const { data, all } = tile.cars, ox = tile.group.position.x, oz = tile.group.position.z;
+      const { data, all } = tile.cars, ox = tile.group.position.x, oz = tile.group.position.z, pre = tile.i + '_' + tile.j + ':';
       for (const { k, model } of all) {
-        if (taken.has(carKey(tile, k))) continue;
         const d = Math.hypot(data[k] + ox - p.x, data[k + 2] + oz - p.z);
-        if (d < bd) { bd = d; best = { tile, k, model, x: data[k] + ox, z: data[k + 2] + oz, yaw: data[k + 3], color: data[k + 5] }; }
-        if (best?.k === k && best.tile === tile && dented.has(carKey(tile, k))) best.wreck = true;
+        if (d >= bd || taken.has(pre + k)) continue;
+        bd = d; best = { tile, k, model, x: data[k] + ox, z: data[k + 2] + oz, yaw: data[k + 3], color: data[k + 5] };
       }
     }
     return best;
@@ -172,13 +180,17 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
   // collision: how many of 8 points around the body (corners and middles, slightly inside) touch something.
   // ghost (the autopilot): only buildings, water and hedges count; parked cars and people are driven through
   let ghost = false;
+  // the moving things (other players, their cars) near the car, taken once per frame: hitsAt tests every
+  // sample point against this list instead of asking every live source again for each point
+  let live = [];
+  function snapshot(x, z) { live = solids.liveNear(x, z, 8); if (live.length && solids.ignore.size) live = live.filter(f => !(f.id && solids.ignore.has(f.id))); return live; }
   function hitsAt(x, z, h, model) {
     const { hl, hw } = sizeOf(model), c = Math.cos(h), s = Math.sin(h);
     let n = 0;
-    for (const [a, b] of [[1, 1], [1, -1], [-1, 1], [-1, -1], [0, 1], [0, -1], [1, 0], [-1, 0]]) {
+    for (const [a, b] of SAMPLES) {
       const lx = a * (hl - 0.15), lz = b * (hw - 0.1);
       const wx = x + lx * c + lz * s, wz = z - lx * s + lz * c;
-      if (ground(wx, wz) || (!ghost && solids.hit(wx, wz, 0.05))) n++;
+      if (ground(wx, wz) || (!ghost && (solids.at(wx, wz, 0.05).length || live.some(f => hits(f, wx, wz, 0.05))))) n++;
     }
     return n;
   }
@@ -197,6 +209,18 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
     const mesh = makeCar(models, w, data[k + 5]);
     mesh.position.set(data[k] + tile.group.position.x, 0, data[k + 2] + tile.group.position.z); mesh.rotation.y = data[k + 3];
     scene.add(mesh); dented.set(key, mesh);
+  }
+  // a square unloads (city.js disposeTile): its wrecks go, their keys stay so the spots are still dented
+  function release(tile) {
+    const pre = tile.i + '_' + tile.j + ':';
+    for (const [key, mesh] of dented) if (mesh && key.startsWith(pre)) { disposeCar(mesh); dented.set(key, null); lost++; }
+  }
+  // ...and when it is back, the wrecks are put back in their spots
+  function restore() {
+    for (const [key, mesh] of dented) {
+      if (mesh) continue;
+      for (const t of carTiles) if (key.startsWith(t.i + '_' + t.j + ':')) { dented.delete(key); lost--; dentParked(t, +key.split(':')[1]); break; }
+    }
   }
   // which parked cars a box at x, z (heading h) touches, as [tile, k]
   function parkedAt(x, z, h, model) {
@@ -266,17 +290,19 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
       door.pivot.rotation.y = door.angle * k;
       if (t >= 2 * OPEN_T + HOLD_T) { door.pivot.rotation.y = 0; door = null; }
     }
+    if (lost) restore();
     // rammed by another player's car: theirs arrives as a live footprint with its speed
-    if (st.car && !st.model.endsWith('_wreck')) {
+    if (st.car && !st.model.endsWith('_wreck') && snapshot(player.position.x, player.position.z).length) {
       const mine = footprintOf(st.model, player.position.x, player.position.z, st.heading);
-      for (const f of solids.liveNear(mine.x, mine.z, 6)) if ((f.v || 0) > CRASH && overlap(f, mine)) { wreckDriven(); break; }
+      for (const f of live) if ((f.v || 0) > CRASH && overlap(f, mine)) { wreckDriven(); break; }
     }
     if (!left) return;
     // a car left rolling coasts to a stop
     if (left.speed) {
       const f = FRONT[left.model] ?? 1, d = left.speed * dt;
       const x = left.x + Math.cos(left.heading) * f * d, z = left.z - Math.sin(left.heading) * f * d;
-      ignoreLeft = true; const hit = hitsAt(x, z, left.heading, left.model) > hitsAt(left.x, left.z, left.heading, left.model); ignoreLeft = false;
+      ignoreLeft = true; snapshot(left.x, left.z);
+      const hit = hitsAt(x, z, left.heading, left.model) > hitsAt(left.x, left.z, left.heading, left.model); ignoreLeft = false;
       if (hit) { if (Math.abs(left.speed) > CRASH) wreckLeft(); left.speed = 0; }
       else {
         left.x = x; left.z = z; left.mesh.position.set(x, 0, z);
@@ -304,10 +330,10 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
       const c = Math.cos(q.yaw), s = Math.sin(q.yaw), dx = p[0] - q.x, dz = p[1] - q.z;
       return Math.abs(dx * c - dz * s) < q.hx && Math.abs(dx * s + dz * c) < q.hz;
     };
-    const pts = f => { const c = Math.cos(f.yaw), s = Math.sin(f.yaw), out = [[f.x, f.z]];
-      for (const [a, b] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) out.push([f.x + a * f.hx * c + b * f.hz * s, f.z - a * f.hx * s + b * f.hz * c]);
+    const pts = (f, out) => { const c = Math.cos(f.yaw), s = Math.sin(f.yaw); out[0][0] = f.x; out[0][1] = f.z;
+      CORNERS.forEach(([a, b], i) => { out[i + 1][0] = f.x + a * f.hx * c + b * f.hz * s; out[i + 1][1] = f.z - a * f.hx * s + b * f.hz * c; });
       return out; };
-    return pts(a).some(p => inside(p, b)) || pts(b).some(p => inside(p, a));
+    return pts(a, PTS_A).some(p => inside(p, b)) || pts(b, PTS_B).some(p => inside(p, a));
   }
 
   // input: throttle -1..1, steer -1 (right) .. 1 (left), boost (Shift), ghost (see hitsAt)
@@ -331,15 +357,15 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
     // A move is fine when it touches nothing, or touches less than now: a car parked tight against its
     // neighbour starts out touching it and may always back away. Otherwise bump: bounce back a little.
     // a person in the way: faster than walking pace they are knocked flying, and the car carries on
-    if (!ghost && Math.abs(st.speed) > KNOCK) {
-      const me = footprintOf(st.model, x, z, h);
-      for (const f of solids.liveNear(x, z, 4)) {
+    if (snapshot(x, z).length && !ghost && Math.abs(st.speed) > KNOCK) {
+      const me = footprintOf(st.model, x, z, h), fx = Math.cos(h) * f0(), fz = -Math.sin(h) * f0(); let hit = false;
+      for (const f of live) {
         if (!f.id || f.hx !== undefined || knocked.has(f.id) || !overlap({ ...f, hx: f.r, hz: f.r, yaw: 0 }, me)) continue;
-        const [fx, fz] = [Math.cos(h) * f0(), -Math.sin(h) * f0()];
-        knocked.set(f.id, 3); solids.ignore.add(f.id);
+        knocked.set(f.id, 3); solids.ignore.add(f.id); hit = true;
         st.speed *= 0.8; thud();
         onHitPerson(f.id, fx * st.speed, fz * st.speed);
       }
+      if (hit) live = live.filter(f => !(f.id && knocked.has(f.id)));   // they are no longer in the way
     }
     const now = hitsAt(player.position.x, player.position.z, st.heading, st.model), next = hitsAt(x, z, h, st.model);
     if (next === 0 || next < now) { player.position.x = x; player.position.z = z; st.heading = h; }
@@ -393,7 +419,7 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
   }
 
   return {
-    nearest, enter, exit, update, tick, taken, place, dented,
+    nearest, enter, exit, update, tick, taken, place, dented, release,
     get driving() { return !!st.car; },
     get speed() { return st.speed; },
     get model() { return st.model; },

@@ -2,8 +2,8 @@
 // through the town and records frame times and missing squares; the result lands in window.__driveResult
 export async function run(c, speed, len = 2400, angle = 0) {
   await new Promise(r => setTimeout(r, 100));
-  const info = await (await fetch('regions/barendrecht/tiles.json')).json();
-  const rect = (i, j, X, Y) => Math.hypot(Math.max(i * 500 - X, 0, X - (i + 1) * 500), Math.max(j * 500 - Y, 0, Y - (j + 1) * 500));
+  const info = c.info, T = info.tile, N = info.overview?.n || 4;   // the region's own tiles.json (window.__city.info)
+  const rect = (i, j, X, Y) => Math.hypot(Math.max(i * T - X, 0, X - (i + 1) * T), Math.max(j * T - Y, 0, Y - (j + 1) * T));
   const p = c.player.position, dx = Math.cos(angle), dz = Math.sin(angle), x0 = -dx * len / 2, z0 = -dz * len / 2;
   p.set(x0, p.y, z0);
   await new Promise(r => setTimeout(r, 8000));
@@ -18,7 +18,7 @@ export async function run(c, speed, len = 2400, angle = 0) {
         for (const [i, j] of info.squares) {
           const d = rect(i, j, X, Y), tl = c.tiles.get(i + '_' + j);
           if (d < 150 && (!tl || tl.level !== 'near')) hn++;
-          const ov = c.ovTiles.get(Math.floor(i / 4) + '_' + Math.floor(j / 4));
+          const ov = c.ovTiles.get(Math.floor(i / N) + '_' + Math.floor(j / N));
           if (d < 800 && !tl && (!ov || ov === 'loading')) hf++;
           if (d < 800 && !tl) ns++;
         }

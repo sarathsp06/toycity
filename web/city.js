@@ -63,6 +63,8 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, Q.px));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.autoUpdate = false;   // redrawn when something in the shadows moved (see frame())
+let shadowDirty = true;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.85;
 document.body.appendChild(renderer.domElement);
@@ -86,7 +88,7 @@ const sky = new Sky(); sky.scale.setScalar(5000);
   u.sunPosition.value.copy(SUN_OFFSET).normalize();
   scene.add(sky);
   const pm = new THREE.PMREMGenerator(renderer), env = new THREE.Scene(); env.add(sky.clone());
-  scene.environment = pm.fromScene(env).texture; scene.environmentIntensity = 0.45;
+  scene.environment = pm.fromScene(env).texture; scene.environmentIntensity = 0.45; pm.dispose();
 }
 
 // ---------- shared materials (one per kind for the whole city) ----------
@@ -166,20 +168,26 @@ const PAINT = new THREE.Color();
 const LEAF = [0x2f5a24, 0x3a6a2a, 0x29502a, 0x456f2e, 0x355e28];
 
 // ---------- building meshes from a decoded square file ----------
-function qGeo(buf, g) {
+// every group of a square fits one sphere: the square's centre, 30 m up, with room for the buildings
+// that stick out over its edge (in quantised units, as the geometry is)
+const Q_SPHERE = new THREE.Sphere(new THREE.Vector3((T / 2 + QQ.ox) / QQ.q, (30 + QQ.oy) / QQ.q, (-T / 2 + QQ.oz) / QQ.q), T * 0.8 / QQ.q);
+function qGeo({ buf, base }, g) {
   const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(new Uint16Array(buf, g.pos[0] , g.pos[1]), 3));
-  geo.setAttribute('normal', new THREE.InterleavedBufferAttribute(new THREE.InterleavedBuffer(new Int8Array(buf, g.nrm[0], g.nrm[1]), 4), 3, 0, true));
-  if (g.uv) geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(buf, g.uv[0], g.uv[1]), 2));
-  if (g.col) geo.setAttribute('color', new THREE.InterleavedBufferAttribute(new THREE.InterleavedBuffer(new Uint8Array(buf, g.col[0], g.col[1]), 4), 3, 0, true));
-  geo.setIndex(new THREE.BufferAttribute(g.i32 ? new Uint32Array(buf, g.idx[0], g.idx[1]) : new Uint16Array(buf, g.idx[0], g.idx[1]), 1));
-  geo.computeBoundingSphere();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Uint16Array(buf, base + g.pos[0], g.pos[1]), 3));
+  geo.setAttribute('normal', new THREE.InterleavedBufferAttribute(new THREE.InterleavedBuffer(new Int8Array(buf, base + g.nrm[0], g.nrm[1]), 4), 3, 0, true));
+  if (g.uv) geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(buf, base + g.uv[0], g.uv[1]), 2));
+  if (g.col) geo.setAttribute('color', new THREE.InterleavedBufferAttribute(new THREE.InterleavedBuffer(new Uint8Array(buf, base + g.col[0], g.col[1]), 4), 3, 0, true));
+  geo.setIndex(new THREE.BufferAttribute(g.i32 ? new Uint32Array(buf, base + g.idx[0], g.idx[1]) : new Uint16Array(buf, base + g.idx[0], g.idx[1]), 1));
+  geo.boundingSphere = Q_SPHERE.clone();
   return geo;
 }
 function quantGroup() { const g = new THREE.Group(); g.position.set(-QQ.ox, -QQ.oy, -QQ.oz); g.scale.setScalar(QQ.q); return g; }
 function aerialTexture(bitmap, aniso) {
   const t = new THREE.Texture(bitmap); t.flipY = false; t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = aniso; t.needsUpdate = true; return t;
+  t.anisotropy = aniso; t.needsUpdate = true;
+  renderer.initTexture(t);   // upload now, within the square's time budget, not inside the next render
+  bitmap.close();            // the GPU has it; three.js reads the image again only on needsUpdate (or a lost context)
+  return t;
 }
 // parked cars: real models from BlendSwap (see models/CREDITS.txt), made game-ready by
 // tools/blendswap_cars.py. Each parking spot gets one model, picked by a stable hash of its position.
@@ -208,32 +216,39 @@ function openParts(root, name) {
   const inside = root.getObjectByName(name + '_interior');
   return { body: partsOf(body), doors, interior: inside ? partsOf(inside) : null };
 }
+// The models download while the first squares do (the page does not wait for them): CAR_MODELS is the
+// list, filled once carsReady settles; a square's cars are placed when both are there (see instances)
 progress(0.08, 'Parking the cars');
-const CAR_MODELS = await new GLTFLoader().loadAsync(new URL('./models/cars.glb?v=view4', import.meta.url).href,
-  e => e.total && progress(0.08 + 0.37 * e.loaded / e.total, 'Parking the cars')).then(g => {
-  const list = [];
+const CAR_MODELS = []; let CAR_W = 0, carsProg = 0;
+const carsReady = new GLTFLoader().loadAsync(new URL('./models/cars.glb?v=view4', import.meta.url).href,
+  e => { if (e.total) carsProg = Math.min(0.99, e.loaded / e.total); }).then(g => {
   for (const [name, w] of [...Object.entries(CAR_MIX), ...CAR_EXTRA.map(n => [n, 0])]) {
     const hi = g.scene.getObjectByName(name), lo = g.scene.getObjectByName(name + '_lo');
     if (!hi) continue;
-    list.push({ name, w, hi: partsOf(hi), lo: partsOf(lo || hi), open: openParts(g.scene, name) });
+    CAR_MODELS.push({ name, w, hi: partsOf(hi), lo: partsOf(lo || hi), open: openParts(g.scene, name) });
   }
-  return list;
-}).catch(e => { console.warn('cars', e); return []; });
-const CAR_W = CAR_MODELS.reduce((s, c) => s + c.w, 0);
+  CAR_W = CAR_MODELS.reduce((s, c) => s + c.w, 0);
+}).catch(e => console.warn('cars', e)).then(() => { carsProg = 1; });
 function carModelAt(x, z) {
   let r = ((Math.imul(Math.round(x * 10), 73856093) ^ Math.imul(Math.round(z * 10), 19349663)) >>> 0) / 4294967296 * CAR_W;
   for (const c of CAR_MODELS) { if ((r -= c.w) < 0) return c; }
   return CAR_MODELS[0];
 }
 const carTiles = new Set();
+const CAR_SPHERE = new THREE.Sphere(new THREE.Vector3(T / 2, 0, -T / 2), T * 0.75);   // the whole square: never recomputed
 function carMeshes(tile, parts, n) {
   return parts.map(([geo, mat, role]) => {
-    const m = new THREE.InstancedMesh(geo, mat, n); m.count = 0;
-    m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false; m.userData.paint = role === 'paint';
+    const m = new THREE.InstancedMesh(geo, mat, n); m.count = 0; m.visible = false; m.boundingSphere = CAR_SPHERE.clone();
+    m.castShadow = true; m.receiveShadow = true; m.userData.paint = role === 'paint';
     tile.group.add(m); return m;
   });
 }
 function carInstances(tile, data) {
+  const fps = footprintsOf('car', data, tile.group.position);
+  if (CAR_MODELS.length) fps.forEach((f, n) => { const m = carModelAt(data[n * 6], data[n * 6 + 2]).name; if (m === 'bike') Object.assign(f, footprintOf(m, f.x, f.z, f.yaw)); });
+  tile.carFps = fps; fps.forEach((f, n) => { if (driving?.taken.has(tile.i + '_' + tile.j + ':' + n * 6)) f.off = true; });
+  solids.add(tile, fps);
+  if (!CAR_MODELS.length) return shapeInstances(tile, 'car', data);   // no models: the simple box car
   const cars = [];
   for (let k = 0; k < data.length; k += 6) cars.push({ k, model: carModelAt(data[k], data[k + 2]) });
   const byModel = new Map();
@@ -249,38 +264,54 @@ function fill(meshes, i, data, k) {
   for (const m of meshes) { m.setMatrixAt(i, tmpO.matrix); if (m.userData.paint) m.setColorAt(i, carCol.setHex(data[k + 5])); }
 }
 function finish(meshes, n) {
-  for (const m of meshes) { m.count = n; m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true; }
+  for (const m of meshes) { m.count = n; m.visible = n > 0; m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true; }
 }
-// re-split every parked car of a square into near / mid / far by its distance to the player
+// re-split every parked car of a square into near / mid / far by its distance to the player; true when
+// anything moved between the meshes. Each car's level is kept (0 gone: driven away or a wreck stands there,
+// 1 near, 2 mid, 3 box) so an unchanged square costs one pass of distances and no uploads. A square more
+// than CAR_MID from the player is all boxes: not even that, unless a car was taken or wrecked meanwhile.
 function updateCars(tile) {
-  const { data, groups, box } = tile.cars, ox = tile.group.position.x, oz = tile.group.position.z;
+  const c = tile.cars, { data, groups, box, all } = c, ox = tile.group.position.x, oz = tile.group.position.z;
   const px = player.position.x - ox, pz = player.position.z - oz;
+  const far = Math.hypot(Math.max(-px, 0, px - T), Math.max(-T - pz, 0, pz)) > CAR_MID;
+  const gone = driving && (driving.taken.size || driving.dented.size), stamp = gone ? driving.taken.size * 65536 + driving.dented.size : 0;
+  if (far && c.far && c.stamp === stamp) return false;
+  let same = c.lv !== undefined;
+  const lv = c.lv ||= new Uint8Array(all.length);
+  for (const { k } of all) {
+    let l = 3;
+    if (!far) { const d = Math.hypot(data[k] - px, data[k + 2] - pz); l = d < CAR_NEAR ? 1 : d < CAR_MID ? 2 : 3; }
+    if (gone && (driving.taken.has(carKey(tile, k)) || driving.dented.has(carKey(tile, k)))) l = 0;
+    if (lv[k / 6] !== l) { lv[k / 6] = l; same = false; }
+  }
+  c.far = far; c.stamp = stamp;
+  if (same) return false;
   let nb = 0;
   for (const g of groups) {
     let nh = 0, nl = 0;
     for (const { k } of g.list) {
-      if (driving?.taken.has(carKey(tile, k)) || driving?.dented.has(carKey(tile, k))) continue;   // driven away, or a wreck stands there
-      const d = Math.hypot(data[k] - px, data[k + 2] - pz);
-      if (d < CAR_NEAR) fill(g.hi, nh++, data, k);
-      else if (d < CAR_MID) fill(g.lo, nl++, data, k);
-      else fill(box, nb++, data, k);
+      const l = lv[k / 6];
+      if (l === 1) fill(g.hi, nh++, data, k);
+      else if (l === 2) fill(g.lo, nl++, data, k);
+      else if (l === 3) fill(box, nb++, data, k);
     }
     finish(g.hi, nh); finish(g.lo, nl);
   }
   finish(box, nb);
+  return true;
 }
 const tmpO = new THREE.Object3D();
 const solids = createSolids();   // cars, trees, lamps, furniture and other players (see solids.js)
 let driving = null;              // set up once the player exists (see 'driving' below)
 function instances(tile, name, data) {
-  const fps = footprintsOf(name, data, tile.group.position);
-  if (name === 'car') {
-    fps.forEach((f, n) => { const m = carModelAt(data[n * 6], data[n * 6 + 2]).name; if (m === 'bike') Object.assign(f, footprintOf(m, f.x, f.z, f.yaw)); });
-    tile.carFps = fps; fps.forEach((f, n) => { if (driving?.taken.has(tile.i + '_' + tile.j + ':' + n * 6)) f.off = true; }); }
-  solids.add(tile, fps);
+  // cars wait for their models; by then the square may have gone again (the player moved on)
+  if (name === 'car') { carsReady.then(() => { if (tiles.get(tile.i + '_' + tile.j) === tile) carInstances(tile, data); }); return; }
+  solids.add(tile, footprintsOf(name, data, tile.group.position));
   if (name === 'tree') tile.trees = data;   // kept for the background sounds (more trees, more birds)
+  shapeInstances(tile, name, data);
+}
+function shapeInstances(tile, name, data) {
   const doorMeshes = name === 'door' ? [] : null;
-  if (name === 'car' && CAR_MODELS.length) return carInstances(tile, data);
   const shape = SHAPES[name]; if (!shape) return;
   const n = data.length / 6;
   for (const [geo, mat, role] of shape) {
@@ -320,6 +351,8 @@ const tiles = new Map();          // key -> { i, j, level, group, coll, meta, te
 const wanted = new Map();         // key -> desired level
 const inflight = new Map();       // key -> level being loaded
 const ready = [];                 // decoded results waiting to be applied
+const failed = new Map();         // key -> { until, wait }: a square whose download failed waits (2 s, doubling to 60 s) before another try
+let tilesRev = 0;                 // bumped whenever a square comes or goes (blockedAt keeps the square it last looked in)
 const workers = [0, 1].map(() => new Worker(new URL('./loader.worker.js', import.meta.url)));
 let reqId = 0; const pending = new Map();
 if (params.get('net')) workers.forEach(w => w.postMessage({ net: params.get('net').split(',').map(Number) }));
@@ -349,19 +382,28 @@ function requestSquare(key, level) {
   const images = { a: url(level === 'near' ? `a/${key}.jpg` : `a/${key}_s.jpg`) };
   load(files, images, (id, worker) => Object.assign(r, { id, worker }))
     .then(res => { if (inflight.get(key) === r) ready.push({ key, level, r: res, req: r }); else for (const b of Object.values(res.images)) b.close(); })
-    .catch(e => { if (inflight.get(key) === r) { if (!/cancel/.test(e.message)) console.warn(key, e); inflight.delete(key); } });
+    .catch(e => {
+      if (inflight.get(key) !== r) return;
+      inflight.delete(key);
+      if (/cancel/.test(e.message)) return;
+      console.warn(key, e);
+      const wait = Math.min((failed.get(key)?.wait || 1000) * 2, 60000); failed.set(key, { until: performance.now() + wait, wait });
+    });
 }
 
 function disposeTile(t) {
   if (!t) return;
-  carTiles.delete(t); solids.drop(t); homes.release(t);
-  t.group.traverse(o => { if (o.geometry && !o.isInstancedMesh) o.geometry.dispose(); if (o.isInstancedMesh) { o.dispose(); pools.delete(o); } });
+  carTiles.delete(t); solids.drop(t); homes.release(t); driving?.release?.(t);
+  // the ground plane and the sprites' geometry are shared by every square: those stay
+  t.group.traverse(o => { if (o.isMesh && !o.isInstancedMesh && !o.userData.ground) o.geometry.dispose(); if (o.isInstancedMesh) { o.dispose(); pools.delete(o); } });
   for (const tx of t.textures) tx.dispose();
   for (const m of t.materials) m.dispose();
   for (const s of t.sprites) { s.material.map.dispose(); s.material.dispose(); signs.delete(s); }
   scene.remove(t.group);
+  shadowDirty = true;
 }
 
+const GROUND_GEO = new THREE.PlaneGeometry(T, T).rotateX(-Math.PI / 2).translate(T / 2, 0, -T / 2);   // one for every square
 function applySquare({ key, level, r, req }) {
   if (inflight.get(key) !== req) { for (const b of Object.values(r.images)) b.close(); return; } // cancelled
   inflight.delete(key);
@@ -374,13 +416,13 @@ function applySquare({ key, level, r, req }) {
   const aerial = aerialTexture(r.images.a, near ? 8 : 2); tile.textures.push(aerial);
   // aerial photo as ground (fills anything the BGT surfaces do not cover) and on every roof
   const groundMat = new THREE.MeshLambertMaterial({ map: aerial }); tile.materials.push(groundMat);
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(T, T).rotateX(-Math.PI / 2).translate(T / 2, near ? 0.02 : 0, -T / 2), groundMat);
+  const ground = new THREE.Mesh(GROUND_GEO, groundMat); ground.position.y = near ? 0.02 : 0;
   ground.receiveShadow = near; ground.userData.ground = true; tile.group.add(ground);
   const roofMat = std({ map: aerial, roughness: 0.8 }); tile.materials.push(roofMat);
   const q = quantGroup(); tile.group.add(q);
   const add = (file, name, mat, shadow) => {
     const g = file.header.groups[name]; if (!g) return;
-    const mesh = new THREE.Mesh(qGeo(file.buf, g), mat);
+    const mesh = new THREE.Mesh(qGeo(file, g), mat);
     mesh.castShadow = shadow && !NO_SHADOW_CAST.has(name); mesh.receiveShadow = shadow;
     if (name.startsWith('wall') || name === 'roof') mesh.userData.solid = true;
     q.add(mesh);
@@ -389,9 +431,9 @@ function applySquare({ key, level, r, req }) {
     const { b, d } = r.files;
     for (const name of Object.keys(b.header.groups)) add(b, name, name === 'roof' ? roofMat : M[name], true);
     for (const name of Object.keys(d.header.groups)) if (M[name]) add(d, name, M[name], true);
-    for (const [name, [off, len]] of Object.entries(d.header.inst)) instances(tile, name, new Float32Array(d.buf, off, len));
-    tile.coll = new Uint8Array(d.buf, d.header.coll[0], d.header.coll[1]);
-    tile.low = d.header.low ? new Uint8Array(d.buf, d.header.low[0], d.header.low[1]) : null;
+    for (const [name, [off, len]] of Object.entries(d.header.inst)) instances(tile, name, new Float32Array(d.buf, d.base + off, len));
+    tile.coll = new Uint8Array(d.buf, d.base + d.header.coll[0], d.header.coll[1]);
+    tile.low = d.header.low ? new Uint8Array(d.buf, d.base + d.header.low[0], d.header.low[1]) : null;
     tile.meta = d.header.meta;
     for (const [n, k, x, y] of d.header.meta.pois.slice(0, 80)) {
       const sp = label(n, /church|place_of_worship|townhall|school/.test(k) ? '#e6ecff' : '#fff8e6');
@@ -402,7 +444,7 @@ function applySquare({ key, level, r, req }) {
     add(f, 'wall', M.farwall, false); add(f, 'roof', roofMat, false);
   }
   disposeTile(tiles.get(key));
-  tiles.set(key, tile);
+  tiles.set(key, tile); tilesRev++; failed.delete(key);
   scene.add(tile.group);
   maskOverviews();
 }
@@ -417,6 +459,7 @@ function rectDist(i, j, X, Y) {
 // (one bit per square), so there is never an empty patch while a square is still downloading.
 const OV = info.overview || null;
 const ovTiles = new Map();       // key -> { mesh, ground, uniforms } or 'loading'
+const OV_GROUND = OV && new THREE.PlaneGeometry(OV.size, OV.size).rotateX(-Math.PI / 2).translate(OV.size / 2, 0, OV.size / 2);   // one for every overview
 const ovWall = new THREE.Color(0xb9a48f);
 function ovMaterial(tex) {
   const mat = new THREE.MeshLambertMaterial({ map: tex });
@@ -444,18 +487,18 @@ function updateOverview(X, Y) {
     ovTiles.set(key, 'loading');
     load({ o: url(`o/${key}.bin`) }, { a: url(`o/${key}.jpg`) }).then(({ files: { o }, images: { a } }) => {
       if (ovTiles.get(key) !== 'loading') { a.close(); return; }
-      const h = o.header, buf = o.buf, geo = new THREE.BufferGeometry();
+      const h = o.header, buf = o.buf, base = o.base, geo = new THREE.BufferGeometry();
       const group = new THREE.Group(); group.position.set(oi * S - ORX, 0, -((oj + 1) * S - ORY));
       const tex = aerialTexture(a, 4), { mat, uniforms } = ovMaterial(tex);
       const groundMat = new THREE.MeshLambertMaterial({ map: tex });
-      const ground = new THREE.Mesh(new THREE.PlaneGeometry(S, S).rotateX(-Math.PI / 2).translate(S / 2, -0.4, S / 2), groundMat);
+      const ground = new THREE.Mesh(OV_GROUND, groundMat); ground.position.y = -0.4;
       group.add(ground);
       let mesh = null;
       if (h.count) {
         const I = h.index[2] === 'Uint32Array' ? Uint32Array : Uint16Array;
-        geo.setIndex(new THREE.BufferAttribute(new I(buf, h.index[0], h.index[1]), 1));
-        geo.setAttribute('position', new THREE.BufferAttribute(new Uint16Array(buf, h.pos[0], h.pos[1]), 3));
-        const nb = new THREE.InterleavedBuffer(new Int8Array(buf, h.nrm[0], h.nrm[1]), 4);
+        geo.setIndex(new THREE.BufferAttribute(new I(buf, base + h.index[0], h.index[1]), 1));
+        geo.setAttribute('position', new THREE.BufferAttribute(new Uint16Array(buf, base + h.pos[0], h.pos[1]), 3));
+        const nb = new THREE.InterleavedBuffer(new Int8Array(buf, base + h.nrm[0], h.nrm[1]), 4);
         geo.setAttribute('normal', new THREE.InterleavedBufferAttribute(nb, 3, 0, true));
         geo.setAttribute('sq', new THREE.InterleavedBufferAttribute(nb, 1, 3, false));
         geo.boundingSphere = new THREE.Sphere(new THREE.Vector3((S / 2 + OV.margin) / OV.q, 0, (S / 2 + OV.margin) / OV.q), S / OV.q);
@@ -517,9 +560,9 @@ function updateWanted() {
   wanted.clear(); for (const [k, v] of next) wanted.set(k, v);
   let changed = false;
   for (const [k, t] of tiles) if (!wanted.has(k)) { disposeTile(t); tiles.delete(k); changed = true; }
-  if (changed) maskOverviews();
+  if (changed) { maskOverviews(); tilesRev++; }
   for (const [k] of inflight) if (!wanted.has(k)) cancelSquare(k);
-  const todo = [...wanted].filter(([k, lv]) => tiles.get(k)?.level !== lv && !inflight.has(k)).sort((a, b) => score.get(a[0]) - score.get(b[0]));
+  const todo = [...wanted].filter(([k, lv]) => tiles.get(k)?.level !== lv && !inflight.has(k) && !(failed.get(k)?.until > now)).sort((a, b) => score.get(a[0]) - score.get(b[0]));
   for (const [k, lv] of todo) { if (inflight.size >= 4) break; requestSquare(k, lv); }
   updateOverview(X, Y);
 }
@@ -539,7 +582,9 @@ const avatar = { mixer: null, actions: null, speed: 0 };
 // the player's own look: a random person and outfit given on the first visit, kept on this device
 async function useAvatar(look) {
   const { model, clips } = await loadAvatar(new URL('./', import.meta.url), { look });
-  if (avatar.mixer) avatar.mixer.stopAllAction();
+  if (avatar.mixer) { avatar.mixer.stopAllAction(); avatar.mixer.uncacheRoot(avatar.model); }
+  // the old body's own materials (its outfit, see avatar.js dress); its geometry and textures belong to the cached model
+  avatar.model?.traverse(o => { if (o.isMesh && o.userData.own) o.material.dispose(); });
   for (const c of [...player.children]) if (!c.userData.keep) player.remove(c);   // keep the ears (voice.js)
   player.add(model);
   const mixer = new THREE.AnimationMixer(model);
@@ -782,7 +827,7 @@ function toggleCar() {
     const g = ride.player?.group, h = g ? g.rotation.y : 0;
     if (g) { player.position.x = g.position.x + Math.sin(h) * 2.2; player.position.z = g.position.z + Math.cos(h) * 2.2; }
     note('👋 Thanks for the ride, ' + (ride.name || 'friend') + '!'); ride = null; dist = walkDist; needUnstick = true;
-    carBtn(); return;
+    carBtn(true); return;
   }
   if (!driving.driving) {
     // a friend driving within reach wins over any parked car: they are waiting for you
@@ -790,7 +835,7 @@ function toggleCar() {
     if (d) {
       goal = null; marker.visible = false; jump.phase = null; jump.h = 0;
       ride = d; walkDist = dist; dist = Math.max(dist, 10); note('🚗 Riding along with ' + (d.name || 'a friend') + '. E to get out.');
-      carBtn(); return;
+      carBtn(true); return;
     }
   }
   if (driving.driving) {
@@ -803,15 +848,21 @@ function toggleCar() {
     driving.enter(car); walkDist = dist; dist = Math.max(dist, 10); pitch = firstPerson ? 0.5 : Math.min(pitch, 0.35);
   }
   for (const t of carTiles) updateCars(t);
-  carBtn(); apBtn();
+  shadowDirty = true; carBtn(true); apBtn();
 }
 const carButton = document.getElementById('carbtn');
-function carBtn() {
+const btnAt = { x: NaN, z: NaN, mode: '' };   // where, and in what, the player was at the last look at the parked cars
+function carBtn(force) {
   if (!carButton) return;
-  const friend = !driving.driving && !ride && !fly && driverNear();
-  const near = !driving.driving && !ride && !fly && driving.nearest(player.position);
-  carButton.hidden = !driving.driving && !ride && !near && !friend;
-  carButton.textContent = driving.driving || ride ? '🚶 Get out (E)' : friend ? '🙋 Ride along (E)' : '🚗 Get in (E)';
+  const p = player.position, friend = !driving.driving && !ride && !fly && driverNear();
+  const mode = (driving.driving ? 'd' : '') + (ride ? 'r' : '') + (fly ? 'f' : '') + (friend ? 'p' : '');
+  if (!force && mode === btnAt.mode && Math.hypot(p.x - btnAt.x, p.z - btnAt.z) < 0.5) return;
+  btnAt.x = p.x; btnAt.z = p.z; btnAt.mode = mode;
+  const near = !driving.driving && !ride && !fly && driving.nearest(p);
+  const hidden = !driving.driving && !ride && !near && !friend;
+  const text = driving.driving || ride ? '🚶 Get out (E)' : friend ? '🙋 Ride along (E)' : '🚗 Get in (E)';
+  if (carButton.hidden !== hidden) carButton.hidden = hidden;
+  if (carButton.textContent !== text) carButton.textContent = text;
 }
 carButton?.addEventListener('click', e => { e.stopPropagation(); toggleCar(); });
 
@@ -906,8 +957,11 @@ renderer.domElement.addEventListener('pointerup', e => {
 
 // collision against the pre-built 0.5 m bitmaps of loaded near squares
 // coll always blocks (walls, water, fences, tree trunks, lamp posts); low (hedges) blocks only on foot
+const bAt = { i: NaN, j: NaN, rev: -1, t: null };   // the square blockedAt last looked in (most tests stay in one)
 function blockedAt(x, z) {
-  const [X, Y] = toRD(x, z), i = Math.floor(X / T), j = Math.floor(Y / T), t = tiles.get(i + '_' + j);
+  const X = x + ORX, Y = ORY - z, i = Math.floor(X / T), j = Math.floor(Y / T);
+  if (i !== bAt.i || j !== bAt.j || bAt.rev !== tilesRev) { bAt.i = i; bAt.j = j; bAt.rev = tilesRev; bAt.t = tiles.get(i + '_' + j) || null; }
+  const t = bAt.t;
   if (!t || !t.coll) return false;
   const col = Math.floor((X - i * T) / 0.5), row = Math.floor((Y - j * T) / 0.5), bit = row * 1000 + col;
   if ((t.coll[bit >> 3] >> (bit & 7)) & 1) return true;
@@ -921,6 +975,54 @@ let movedThisFrame = 0;
 const blocked = (x, z) => blockedAt(x, z) || blockedAt(x + R0, z) || blockedAt(x - R0, z) || blockedAt(x, z + R0) || blockedAt(x, z - R0)
   || (!fly && solids.hit(x, z, PERSON.r));
 let stuck = 0, needUnstick = true;
+// An agent walks round what is in its way, as a person does: when the straight line to its goal is
+// blocked, a way is found over the 0.5 m collision grid (A*, within about 50 m) and pulled straight
+// where the view is clear; the points are walked one by one (detour). A few tries per goal, then it gives up.
+let detour = null, detourQ = [], detours = 0;
+const lineClear = (x0, z0, x1, z1) => { const n = Math.ceil(Math.hypot(x1 - x0, z1 - z0) / 0.4) || 1; for (let s = 1; s <= n; s++) if (blocked(x0 + (x1 - x0) * s / n, z0 + (z1 - z0) * s / n)) return false; return true; };
+function localPath(x0, z0, x1, z1) {
+  const S = 0.5, M = 16, minX = Math.min(x0, x1) - M, minZ = Math.min(z0, z1) - M;
+  const W = Math.min(240, Math.ceil((Math.abs(x1 - x0) + 2 * M) / S)), H = Math.min(240, Math.ceil((Math.abs(z1 - z0) + 2 * M) / S)), N = W * H;
+  const g = new Float32Array(N).fill(Infinity), from = new Int32Array(N).fill(-1), pass = new Int8Array(N), open = [];   // pass: 0 unknown, 1 clear, 2 blocked
+  const cell = (x, z) => Math.min(H - 1, Math.max(0, Math.round((z - minZ) / S))) * W + Math.min(W - 1, Math.max(0, Math.round((x - minX) / S)));
+  const wx = i => minX + (i % W) * S, wz = i => minZ + ((i / W) | 0) * S;
+  const ok = i => (pass[i] || (pass[i] = blocked(wx(i), wz(i)) ? 2 : 1)) === 1;
+  const a = cell(x0, z0); let b = cell(x1, z1);
+  if (!ok(b)) {   // the goal itself is in something: the nearest clear cell next to it
+    let best = -1, bd = 9; const bx = b % W, bz = (b / W) | 0;
+    for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) { const jx = bx + dx, jz = bz + dz; if (jx < 0 || jz < 0 || jx >= W || jz >= H) continue; const j = jz * W + jx, d = dx * dx + dz * dz; if (d < bd && ok(j)) { bd = d; best = j; } }
+    if (best < 0) return null; b = best;
+  }
+  const h = i => { const dx = Math.abs(i % W - b % W), dz = Math.abs(((i / W) | 0) - ((b / W) | 0)); return Math.max(dx, dz) + 0.414 * Math.min(dx, dz); };
+  const push = (f, i) => { open.push([f, i]); let k = open.length - 1; while (k) { const q = (k - 1) >> 1; if (open[q][0] <= open[k][0]) break; [open[q], open[k]] = [open[k], open[q]]; k = q; } };
+  const pop = () => { const top = open[0], last = open.pop(); if (open.length) { open[0] = last; let k = 0; for (;;) { const l = 2 * k + 1, r = l + 1; let m = k; if (l < open.length && open[l][0] < open[m][0]) m = l; if (r < open.length && open[r][0] < open[m][0]) m = r; if (m === k) break; [open[m], open[k]] = [open[k], open[m]]; k = m; } } return top; };
+  g[a] = 0; push(h(a), a);
+  for (let n = 0; open.length && n < 40000; n++) {
+    const [, i] = pop(); if (i === b) break;
+    const ix = i % W, iz = (i / W) | 0;
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+      if (!dx && !dz) continue; const jx = ix + dx, jz = iz + dz; if (jx < 0 || jz < 0 || jx >= W || jz >= H) continue;
+      const j = jz * W + jx; if (!ok(j) || (dx && dz && (!ok(iz * W + jx) || !ok(jz * W + ix)))) continue;   // no cutting corners
+      const c = g[i] + (dx && dz ? 1.414 : 1); if (c < g[j]) { g[j] = c; from[j] = i; push(c + h(j), j); }
+    }
+  }
+  if (from[b] < 0) return null;
+  const cells = []; for (let i = b; i >= 0; i = from[i]) cells.push(i); cells.reverse();
+  const out = []; let k = 0;   // pull the string: the farthest cell still in clear view of the last kept one
+  while (k < cells.length - 1) {
+    let m = cells.length - 1; for (; m > k + 1; m--) if (lineClear(wx(cells[k]), wz(cells[k]), wx(cells[m]), wz(cells[m]))) break;
+    out.push([wx(cells[m]), wz(cells[m])]); k = m;
+  }
+  if (out.length) out[out.length - 1] = [x1, z1]; else out.push([x1, z1]);
+  return out;
+}
+function sidestep() {   // a way round, from here: false when there is none (or too many were needed)
+  if (++detours > 3) return false;
+  const p = player.position, path = localPath(p.x, p.z, goal.x, goal.z);
+  if (!path) return false;
+  detourQ = path; detour = new THREE.Vector3(...[detourQ[0][0], 0.15, detourQ[0][1]]); detourQ = detourQ.slice(1);
+  return true;
+}
 // an address point sits inside its building: once that square is loaded, stand on the address's
 // own street at the closest point, facing the house; otherwise step to the nearest open spot
 let arriveStreet = info.start ? info.start.label.split(',')[0].replace(/\s+\d+\s*\w?$/, '') : null;
@@ -1048,6 +1150,7 @@ function applyTime(name) {
   M.winlit.emissiveIntensity = 1.3 * nightK; M.lamphead.emissiveIntensity = 4 * nightK; M.pool.opacity = 0.75 * nightK;
   M.chargerLight.emissiveIntensity = 0.6 + 2 * nightK;
   for (const p of pools) p.visible = nightK > 0.02;
+  shadowDirty = true;
 }
 document.getElementById('tod').onchange = e => applyTime(e.target.value);
 document.getElementById('quality').onchange = e => { const u = new URL(location.href); u.searchParams.set('quality', e.target.value); location.href = u.href; };
@@ -1108,7 +1211,7 @@ if (localStorage.getItem('toycity.map') === '1') document.readyState === 'comple
 
 // ---------- frame loop ----------
 const place = document.getElementById('place'), perf = params.get('perf') ? document.getElementById('perf') : {};   // numbers only with ?perf=1
-let last = performance.now(), placeT = 0, wantT = 0, signT = 0, frames = 0, fpsT = performance.now(), loaded = false;
+let last = performance.now(), placeT = 0, wantT = 0, signT = 0, frames = 0, fpsT = performance.now(), loaded = false, placeText = '';
 // first-person view (V or the eye button): the camera sits at the eyes and looks where you face;
 // dragging still turns and tilts the head, and your own body is hidden
 function setFirstPerson(on) {
@@ -1149,23 +1252,36 @@ function chaseCam() {
   for (const c of player.children) c.visible = c.userData.card !== undefined ? !ride && !homes.inside : ride || homes.inside ? false : !driving.driving || !!c.userData.car || driving.rider;   // in a car you see the car, not the person (and your card, if you have one)
   cracks(false);
   const pe = pitch + Math.max(0, 1.2 - pitch) * THREE.MathUtils.smoothstep(dist, 30, 300);
-  const off = new THREE.Vector3(Math.sin(yaw) * Math.cos(pe), Math.sin(pe), Math.cos(yaw) * Math.cos(pe)).multiplyScalar(dist);
-  camera.position.lerp(player.position.clone().add(off), 0.18);
+  camera.position.lerp(tmpC.set(Math.sin(yaw) * Math.cos(pe), Math.sin(pe), Math.cos(yaw) * Math.cos(pe)).multiplyScalar(dist).add(player.position), 0.18);
   camera.lookAt(player.position.x, player.position.y + 1.6, player.position.z);
+}
+// scratch vectors for the frame loop (nothing is made per frame)
+const tmpC = new THREE.Vector3(), tmpF = new THREE.Vector3(), tmpR = new THREE.Vector3(), tmpM = new THREE.Vector3();
+const camAt = new THREE.Vector3(), camQ = new THREE.Quaternion();
+// someone else (or their car) within 100 m: their shadow moves
+function peerNear() {
+  const peers = social?.presence?.peers; if (!peers) return false;
+  for (const q of peers.values()) { const g = q.player?.group.position; if (g && Math.hypot(g.x - player.position.x, g.z - player.position.z) < 100) return true; }
+  return false;
 }
 function frame(now) {
   const dt = Math.min((now - last) / 1000, AGENT ? 0.1 : 0.05); last = now;
+  solids.beginFrame();
 
-  // apply decoded squares within a small per-frame time budget
-  const t0 = performance.now();
-  while (ready.length && performance.now() - t0 < 6) applySquare(ready.shift());
+  // apply decoded squares within a small per-frame time budget: one near square (the big one) per frame,
+  // far squares as the budget allows
+  const t0 = performance.now(); let nearDone = false;
+  for (let k = 0; k < ready.length && performance.now() - t0 < 6;) {
+    if (ready[k].level === 'near') { if (nearDone) { k++; continue; } nearDone = true; }
+    applySquare(ready.splice(k, 1)[0]);
+  }
   // loading screen: the second half of the bar is the streets around the start position; it goes away
   // once all of those are in (or after 25 s, so a slow square never keeps the player out)
   if (!loaded) {
     let need = 0, have = 0;
     for (const [k, lv] of wanted) if (lv === 'near') { need++; if (tiles.get(k)?.level === 'near') have++; }
-    if (need) progress(0.45 + 0.55 * have / need, `Building the streets ${have} of ${need}`);
-    if ((need && have === need) || now > 25000) {
+    if (need) progress(0.08 + 0.37 * carsProg + 0.55 * have / need, carsProg < 1 ? 'Parking the cars' : `Building the streets ${have} of ${need}`);
+    if ((need && have === need && carsProg >= 1) || now > 25000) {
       loaded = true; progress(1, 'Ready');
       const el = document.getElementById('loading'); el.classList.add('done'); setTimeout(() => el.remove(), 450);
     }
@@ -1207,7 +1323,7 @@ function frame(now) {
   else if (flingStep(dt)) chaseCam();
   else if (homes.busy || homes.inside) { homes.update(dt, false); chaseCam(); }
   else {
-    const fwd = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)), right = new THREE.Vector3(-fwd.z, 0, fwd.x), v = new THREE.Vector3();
+    const fwd = tmpF.set(-Math.sin(yaw), 0, -Math.cos(yaw)), right = tmpR.set(-fwd.z, 0, fwd.x), v = tmpM.set(0, 0, 0);
     if (keys['w'] || keys['arrowup']) v.add(fwd); if (keys['s'] || keys['arrowdown']) v.sub(fwd);
     if (keys['a'] || keys['arrowleft']) v.sub(right); if (keys['d'] || keys['arrowright']) v.add(right);
     const jm = Math.hypot(joy.x, joy.y);
@@ -1216,10 +1332,10 @@ function frame(now) {
     // walk, or run with Shift or the joystick pushed to its edge; click-to-go speeds up for long trips
     let speed = keys['shift'] || jm > 0.9 ? 6 : jm > 0.15 ? 1.2 + 0.8 * jm : 1.8;
     if (goal) {
-      const to = goal.clone().sub(player.position); to.y = 0; const d = to.length();
+      const to = (detour || goal).clone().sub(player.position); to.y = 0; const d = to.length();
       // a person's click-to-go speeds up on long trips; an agent walks (1.8 m/s) or runs (6 m/s) like anyone on foot
       const boost = AGENT ? (AGENT.run ? 6 : 1.8) : Math.max(speed, d / 2.5);
-      if (d < 0.4) { goal = null; marker.visible = false; } else { v.copy(to); speed = Math.min(boost * dt, d) / dt; }
+      if (d < 0.4) { if (detour) { const q = detourQ.shift(); detour = q ? new THREE.Vector3(q[0], 0.15, q[1]) : null; } else { goal = null; marker.visible = false; } } else { v.copy(to); speed = Math.min(boost * dt, d) / dt; }
       marker.material.opacity = 0.5 + 0.4 * Math.sin(now / 150);
     }
     if (v.lengthSq() > 0) {
@@ -1228,7 +1344,7 @@ function frame(now) {
       if (!blocked(p0.x, p0.z) && blocked(p0.x + v.x, p0.z + v.z)) {
         if (!blocked(p0.x + v.x, p0.z)) v.z = 0; else if (!blocked(p0.x, p0.z + v.z)) v.x = 0; else v.set(0, 0, 0);
       }
-      if (goal && v.lengthSq() < 1e-6) { if ((stuck += dt) > 0.6) { goal = null; marker.visible = false; stuck = 0; } } else stuck = 0;
+      if (goal && v.lengthSq() < 1e-6) { if ((stuck += dt) > (AGENT ? 0.3 : 0.6)) { stuck = 0; if (!(AGENT && sidestep())) { goal = detour = null; marker.visible = false; } } } else stuck = 0;
       player.position.add(v);
       movedThisFrame = Math.hypot(v.x, v.z);
       if (v.lengthSq() > 1e-8) {
@@ -1241,8 +1357,13 @@ function frame(now) {
     chaseCam();
   }
   if (!homes.busy && !homes.inside) homes.update(dt, !driving.driving && !ride && !fly && !fling.on);
-  if ((wantT += dt) > 0.3) { wantT = 0; updateWanted(); for (const t of carTiles) updateCars(t); }
-  if ((placeT += dt) > 0.5) { placeT = 0; place.textContent = (driving.driving ? Math.round(Math.abs(driving.speed) * 3.6) + ' km/h  ·  ' + (autopilot.active ? apLine() : '') : '') + nearestPlace(); carBtn(); }
+  if ((wantT += dt) > 0.3) { wantT = 0; updateWanted(); for (const t of carTiles) if (updateCars(t)) shadowDirty = true; }
+  if ((placeT += dt) > 0.5) {
+    placeT = 0;
+    const s = (driving.driving ? Math.round(Math.abs(driving.speed) * 3.6) + ' km/h  ·  ' + (autopilot.active ? apLine() : '') : '') + nearestPlace();
+    if (s !== placeText) place.textContent = placeText = s;
+    carBtn();
+  }
 
   // only the 12 nearest signs, rescaled with distance
   if ((signT += dt) > 0.25) {
@@ -1280,8 +1401,15 @@ function frame(now) {
   // sharp shadows that follow the player
   const R = 40 + Math.min(dist, 150) * 0.9;
   sun.target.position.copy(player.position); sun.position.copy(player.position).add(SUN_OFFSET);
-  if (sc.right !== R) { sc.left = -R; sc.right = R; sc.top = R; sc.bottom = -R; sc.updateProjectionMatrix(); }
+  if (sc.right !== R) { sc.left = -R; sc.right = R; sc.top = R; sc.bottom = -R; sc.updateProjectionMatrix(); shadowDirty = true; }
   scene.fog.near = 300 + dist; scene.fog.far = (OV ? Q.horizon : Q.far) + dist;
+  // the shadow map is redrawn when something in it moved: the camera (the map follows it), me, a car,
+  // a door, someone nearby; a square or the time of day changing sets shadowDirty where it happens.
+  // Standing still, it is kept as it is.
+  if (!camera.position.equals(camAt) || !camera.quaternion.equals(camQ) || driving.driving || ride || fling.on || jump.phase
+    || homes.busy || avatar.speed > 0.02 || peerNear()) shadowDirty = true;
+  camAt.copy(camera.position); camQ.copy(camera.quaternion);
+  if (shadowDirty) { renderer.shadowMap.needsUpdate = true; shadowDirty = false; }
 
   // an agent's headless browser draws only when the agent asks to see (rendering there is slow, and
   // a slow frame rate would make it slower than a person on foot)
@@ -1292,26 +1420,29 @@ function frame(now) {
     let nNear = 0, nFar = 0; for (const t of tiles.values()) t.level === 'near' ? nNear++ : nFar++;
     const ri = renderer.info.render;
     perf.textContent = `${fps.toFixed(0)} fps · ${ri.calls} draw calls · ${(ri.triangles / 1e6).toFixed(2)} M triangles · squares ${nNear} near / ${nFar} far · ${inflight.size} loading`;
-    window.__stats = { fps, calls: ri.calls, tris: ri.triangles, nNear, nFar, loading: inflight.size, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures };
+    window.__city.stats = { fps, calls: ri.calls, tris: ri.triangles, nNear, nFar, loading: inflight.size, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures };
   }
   requestAnimationFrame(frame);
 }
-// render cost without the browser's frame pacing: n frames, each finished on the GPU
-function bench(n = 30) {
-  const gl = renderer.getContext(), t0 = performance.now();
-  for (let k = 0; k < n; k++) { renderer.render(scene, camera); gl.finish(); }
-  return +((performance.now() - t0) / n).toFixed(2);
-}
 // the agent's handle (tools/mcp/toycity-mcp): only human-sized moves
 if (AGENT) window.__agent = {
-  walkTo(x, z, run) { if (driving.driving || ride || fly || homes.inside) return false; AGENT.run = !!run; goal = new THREE.Vector3(x, 0.15, z); marker.position.set(x, 0.35, z); marker.visible = true; return true; },
-  stop() { goal = null; marker.visible = false; },
+  // (the same goal again, as a follower sends every few hundred ms, keeps a detour in progress)
+  walkTo(x, z, run) {
+    if (driving.driving || ride || fly || homes.inside) return false;
+    AGENT.run = !!run; const same = goal && Math.hypot(goal.x - x, goal.z - z) < 0.5; goal = new THREE.Vector3(x, 0.15, z); marker.position.set(x, 0.35, z); marker.visible = true;
+    if (!same) { detour = null; detourQ = []; detours = 0; const p = player.position; if (!lineClear(p.x, p.z, x, z)) sidestep(); }   // round the hedges from the start
+    return true;
+  },
+  stop() { goal = detour = null; detourQ = []; marker.visible = false; },
   get walking() { return !!goal; },
+  get riding() { return ride ? ride.name || 'a friend' : null; },   // riding along in someone's car
   get stuck() { return stuck; },
   face(y) { yaw = y; },
+  jump() { if (jump.phase || fly || driving.driving || ride || homes.inside) return false; jump.phase = 'crouch'; jump.t = 0; return true; },
   draw(n = 3) { AGENT.draw = n; },   // render the next few frames (for a screenshot)
+  get drawing() { return AGENT.draw > 0; },
 };
-window.__city = { ovTiles, solids, driving, knockDown, card, fling, homes, health, nearestPlace, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, bench, blocked, jump, toRD, ORX, ORY, get stats() { return window.__stats; } };
+window.__city = { ovTiles, solids, driving, knockDown, card, fling, homes, health, nearestPlace, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, jump, toRD, rdToWgs, ORX, ORY, info, stats: null };
 // ---------- social layer: other people, voice and background sounds (web/mp/, ?mp=0 turns it off) ----------
 // It only reads the player's position and the trees and parked cars around it; nothing here depends on it.
 let social = null;

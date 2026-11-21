@@ -56,16 +56,19 @@ Settings, as environment variables: `TOYCITY_CHROME` (the browser, if it isn't f
 | Tool | What it does |
 |---|---|
 | `join` | enter a town (Rotterdam, Barendrecht or Amsterdam), optionally next to an address, with a name, and with or without a voice |
-| `look` | where you are, people nearby (distance and compass bearing), a car or front door in reach, knocks at your home |
+| `look` | where you are, people nearby (distance and compass bearing, whether they can talk), the nearest front door (address, distance, bearing), a car in reach, calls and knocks |
+| `where` | coordinates and a meeting link for your spot, or a player's |
 | `see` | a picture of the view |
-| `walk_to` | walk or run to an address, place or street, along the footpaths |
+| `walk_to` | walk or run to an address, place or street, along the footpaths (an address: to its front door), or to where a player is |
 | `walk` | a few metres in a compass direction |
-| `wait` | let up to 30 s pass, then look |
-| `stop` | stop walking or driving |
+| `follow` | walk behind a player, round corners, until `stop` |
+| `wait` | let up to 30 s pass, then look; returns early on arrival, or on what you wait `for`: speech, a knock, a call, a person near |
+| `stop` | stop walking, following or driving |
+| `jump`, `set_name` | jump; change your name |
 | `get_in_car`, `get_out` | the car or motorbike next to you, or ride along with a friend |
 | `drive_to` | the autopilot drives you there |
 | `knock`, `live_here`, `go_inside`, `step_outside`, `answer_door` | doors and homes |
-| `call`, `say`, `listen`, `hang_up` | only when joined with `voice: true`: ring someone who can talk, speak (text is spoken with the computer's voice: macOS `say`, or `espeak-ng` on Linux), hear what was said as text (with [whisper.cpp](https://github.com/ggml-org/whisper.cpp): `brew install whisper-cpp` and a ggml model in `~/.cache/whisper` or `TOYCITY_WHISPER_MODEL`; otherwise as audio); calls to you are answered by themselves |
+| `call`, `say`, `listen`, `mute`, `hang_up` | only when joined with `voice: true`: ring someone who can talk (and learn whether they answered), speak and hear the reply in one step (`say` with `then_listen`, the default), or `listen` (returns as soon as they finish a sentence); words come from [whisper.cpp](https://github.com/ggml-org/whisper.cpp): `brew install whisper-cpp` and a ggml model in `~/.cache/whisper` or `TOYCITY_WHISPER_MODEL`. Calls to you are answered by themselves |
 | `leave` | leave the game |
 
 ## Voice
@@ -77,9 +80,12 @@ neural voice that runs offline, when it is on this computer: the copy HyperFrame
 or `TOYCITY_VOICE`: `af_heart` (default), `af_bella`, `af_nicole`, `am_michael`, `am_adam`, `bf_emma`,
 `bm_george` and about fifty more. Without Kokoro it falls back to the computer's own voice.
 
-You can interrupt: talk over the agent for a third of a second and it stops mid-sentence, waits until
-you finish, and `say` returns what you said so it can answer that. Answers are spoken sentence by
-sentence, so a long one starts quickly and stops cleanly.
+A conversation is one tool call per turn: `say` speaks two or three sentences and then waits until you
+have answered and finished your sentence, and returns your words. You can interrupt: talk over the
+agent for half a second and it stops mid-sentence, hears what you said and answers that. Noises, a
+cough, and its own voice coming back through your speakers do not stop it: it pauses, checks, and
+carries on where it was. Answers are spoken sentence by sentence, so a long one starts quickly and
+stops cleanly. Speech and hearing run beside the server, so an agent can keep walking while it talks.
 
 Try it: "Join Barendrecht near Dorpsstraat 141 as Robin, walk to the church, and tell me who you meet."
 

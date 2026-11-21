@@ -1,7 +1,7 @@
 // node --test tests/*.test.mjs   (multiplayer logic: rooms, smoothing, voice range, visibility)
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { roomsFor, Track, VoiceGate, visible, voiceGain, cleanName } from '../web/mp/logic.js';
+import { roomsFor, Track, visible, cleanName } from '../web/mp/logic.js';
 import { MP } from '../web/mp/config.js';
 
 test('player in the middle of a square is in one room', () => {
@@ -33,23 +33,10 @@ test('heading interpolates the short way round', () => {
   assert.ok(Math.abs(Math.abs(h) - Math.PI) < 0.05, 'goes through pi, not through 0: ' + h);
 });
 
-test('voice gate connects inside range and survives boundary wobble', () => {
-  const g = new VoiceGate({ voiceConnect: 4, voiceDisconnect: 6, voiceLinger: 3 });
-  assert.equal(g.update(5, 0.1), false);
-  assert.equal(g.update(3.9, 0.1), true);
-  for (let k = 0; k < 20; k++) assert.equal(g.update(k % 2 ? 6.5 : 5.5, 0.1), true, 'wobbling around 6 m keeps the line');
-  g.update(5, 0.1);                               // back inside: the out-of-range clock resets
-  let on = true; for (let k = 0; k < 29; k++) on = g.update(7, 0.1);
-  assert.equal(on, true, 'not yet after 2.9 s');
-  assert.equal(g.update(7, 0.2), false, 'off after 3 s out of range');
-});
 test('visibility has hysteresis', () => {
   assert.equal(visible(false, 11, 10, 12), false);
   assert.equal(visible(false, 9, 10, 12), true);
   assert.equal(visible(true, 11, 10, 12), true);
   assert.equal(visible(true, 12.5, 10, 12), false);
-});
-test('voice volume: full to 1 m, silent at 3 m', () => {
-  assert.equal(voiceGain(0.5, 1, 3), 1); assert.equal(voiceGain(2, 1, 3), 0.5); assert.equal(voiceGain(3.5, 1, 3), 0);
 });
 test('names are cleaned', () => { assert.equal(cleanName('  <b>Sarath</b>\n'), 'bSarath/b'); assert.equal(cleanName('x'.repeat(40)).length, 24); });

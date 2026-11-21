@@ -20,11 +20,4 @@ export const MP = {
   talkReach: 15,                  // people this close get a 'Talk to …' button
   interpDelay: 0.15,              // remote players are drawn this far in the past, for smoothness
   peerTimeout: 5,                 // forget a player not heard from for this long
-  // Voice is call-only now (see docs/multiplayer.md): these ranges belong to the old proximity
-  // voice. They are kept for VoiceGate in logic.js, its test, and the [voice] log summary.
-  voiceConnect: 10,               // start sending my microphone to a player inside this distance
-  voiceDisconnect: 12,            // stop beyond this distance ...
-  voiceLinger: 3,                 // ... after this many seconds out of range
-  voiceFull: 2,                   // full volume inside this distance
-  voiceSilent: 10,                // fades to nothing here
 };

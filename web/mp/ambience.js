@@ -44,17 +44,23 @@ export function createAmbience({ ctx, surroundings }) {
     o.start(t); o.stop(t + n * 0.12 + 0.1);
   }
 
+  let wasOn = null;
   function update(dt) {
     if (!started) return;
     const t = ctx.currentTime;
-    out.gain.setTargetAtTime(on ? 0.6 : 0, t, 0.3);
+    // the volume levels are set when something changes, not every frame: each setTargetAtTime is an
+    // event the audio thread has to keep, and a few hundred a second make it stutter
+    if (on !== wasOn) { wasOn = on; out.gain.setTargetAtTime(on ? 0.6 : 0, t, 0.3); envT = 0; }
     if (!on) return;
-    if ((envT -= dt) <= 0) { envT = 0.5; Object.assign(env, surroundings()); }
-    // in a car the windows are shut: no birds or rustling leaves, the street only faintly
+    if ((envT -= dt) <= 0) {
+      envT = 0.5; Object.assign(env, surroundings());
+      // in a car the windows are shut: no birds or rustling leaves, the street only faintly
+      const car = env.inCar ? 1 : 0;
+      leaves.g.gain.setTargetAtTime(car ? 0 : 0.004 + 0.012 * env.green, t, car ? 0.2 : 1);
+      traffic.g.gain.setTargetAtTime((0.02 + 0.12 * env.street) * (car ? 0.3 : 1), t, 1);
+      wind.g.gain.setTargetAtTime(car ? 0.008 : 0.025, t, car ? 0.2 : 1);
+    }
     const car = env.inCar ? 1 : 0;
-    leaves.g.gain.setTargetAtTime(car ? 0 : 0.004 + 0.012 * env.green, t, car ? 0.2 : 1);
-    traffic.g.gain.setTargetAtTime((0.02 + 0.12 * env.street) * (car ? 0.3 : 1), t, 1);
-    wind.g.gain.setTargetAtTime(car ? 0.008 : 0.025, t, car ? 0.2 : 1);
     if ((birdT -= dt) <= 0) { birdT = 2 + Math.random() * (10 - 6 * env.green); if (!car && Math.random() < 0.2 + 0.4 * env.green) chirp(t + 0.05); }
   }
 

@@ -23,6 +23,9 @@ const LANE = { car: 1.5, bike: 1.1, foot: 0 };       // metres right of the road
 const VALHALLA = 'https://valhalla1.openstreetmap.de/route';
 const COSTING = { car: 'auto', bike: 'motorcycle', foot: 'pedestrian' };
 const ARROW = { 9: '↗', 10: '↱', 11: '↱', 12: '⤸', 13: '⤸', 14: '↰', 15: '↰', 16: '↖', 26: '⟳', 27: '⟳', 4: '🏁', 5: '🏁', 6: '🏁' };
+const GRACE = 2500;                         // ms to wait for the online router before planning here
+const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));   // an angle into -pi..pi
+const after = ms => new Promise(res => setTimeout(res, ms));
 
 // Valhalla's shapes: Google's polyline encoding with six decimals -> [[lat, lon], ...]
 function decode(str) {
@@ -82,28 +85,40 @@ export function createAutopilot({ roadsUrl, fromRD, fromWGS, toWGS, inside }) {
       }
       return -1;
     };
-    return (graph = { xs, zs, out, nearest });
+    // the search's working arrays, kept with the graph and wiped per search (see astar)
+    const cost = new Float64Array(N), from = new Int32Array(N), done = new Uint8Array(N);
+    return (graph = { xs, zs, out, nearest, cost, from, done, hk: new Float64Array(4096), hi: new Int32Array(4096) });
   }
   // A* on travel time: length / speed limit, only along segments open to this vehicle and in the
-  // allowed direction. A small binary heap keeps it quick on 100,000 nodes.
+  // allowed direction. A flat binary heap (keys and node ids side by side) keeps it quick on 100,000 nodes.
   function astar(g, a, b, bit) {
-    const N = g.xs.length, cost = new Float64Array(N).fill(Infinity), from = new Int32Array(N).fill(-1), done = new Uint8Array(N);
-    const h = n => Math.hypot(g.xs[n] - g.xs[b], g.zs[n] - g.zs[b]) / 36;   // 130 km/h: never more than the truth
-    const heap = [[h(a), a]]; cost[a] = 0;
-    const push = it => { heap.push(it); let i = heap.length - 1; while (i) { const p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
-    const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l][0] < heap[m][0]) m = l; if (r < heap.length && heap[r][0] < heap[m][0]) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
-    while (heap.length) {
-      const [, n] = pop(); if (done[n]) continue; done[n] = 1;
-      if (n === b) break;
-      const o = g.out[n];
+    const { xs, zs, cost, from, done } = g; cost.fill(Infinity); from.fill(-1); done.fill(0);
+    const h = n => Math.hypot(xs[n] - xs[b], zs[n] - zs[b]) / 36;   // 130 km/h: never more than the truth
+    let hk = g.hk, hi = g.hi, n = 0;   // the heap holds n entries; it grows when a search needs more
+    const push = (key, id) => {
+      if (n === hk.length) { const k2 = new Float64Array(n * 2), i2 = new Int32Array(n * 2); k2.set(hk); i2.set(hi); hk = g.hk = k2; hi = g.hi = i2; }
+      let i = n++; while (i) { const p = (i - 1) >> 1; if (hk[p] <= key) break; hk[i] = hk[p]; hi[i] = hi[p]; i = p; }
+      hk[i] = key; hi[i] = id;
+    };
+    const pop = () => {   // take the top, then sift the last entry down from the root
+      const top = hi[0], key = hk[--n], id = hi[n]; if (!n) return top;
+      let i = 0; for (;;) { const l = 2 * i + 1; if (l >= n) break; const m = l + 1 < n && hk[l + 1] < hk[l] ? l + 1 : l; if (hk[m] >= key) break; hk[i] = hk[m]; hi[i] = hi[m]; i = m; }
+      hk[i] = key; hi[i] = id;
+      return top;
+    };
+    cost[a] = 0; push(h(a), a);
+    while (n) {
+      const u = pop(); if (done[u]) continue; done[u] = 1;
+      if (u === b) break;
+      const o = g.out[u];
       for (let k = 0; k < o.length; k += 2) {
         const m = o[k], f = o[k + 1]; if (!(f & bit)) continue;
-        const c = cost[n] + Math.hypot(g.xs[m] - g.xs[n], g.zs[m] - g.zs[n]) / ((f >> 4) / 3.6);
-        if (c < cost[m]) { cost[m] = c; from[m] = n; push([c + h(m), m]); }
+        const c = cost[u] + Math.hypot(xs[m] - xs[u], zs[m] - zs[u]) / ((f >> 4) / 3.6);
+        if (c < cost[m]) { cost[m] = c; from[m] = u; push(c + h(m), m); }
       }
     }
     if (from[b] < 0 && a !== b) return null;
-    const out = []; for (let n = b; n >= 0; n = from[n]) out.push([g.xs[n], g.zs[n]]);
+    const out = []; for (let v = b; v >= 0; v = from[v]) out.push([xs[v], zs[v]]);
     return out.reverse();
   }
   async function local(car, to, vehicle) {
@@ -139,19 +154,47 @@ export function createAutopilot({ roadsUrl, fromRD, fromWGS, toWGS, inside }) {
     return { path: out, s, steps: steps.map(st => ({ ...st, s: s[map[Math.min(st.at, map.length - 1)]] })) };
   }
 
-  async function start(car, to, label, vehicle = 'car') {
-    const r = (await online(car, to, vehicle)) || (await local(car, to, vehicle));
-    if (!r) return null;
+  // Ask the online router and load the local graph at the same time. The online route wins when it
+  // answers within GRACE; after that the local one is used as soon as it is ready, and `late` gets the
+  // online route if it still arrives (start swaps it in while that is safe). Null: no route at all.
+  async function pick(car, to, vehicle, late = () => {}) {
+    const web = online(car, to, vehicle), loc = local(car, to, vehicle).catch(() => null);
+    const first = await Promise.race([web, after(GRACE)]);   // undefined: no answer yet
+    if (first) return first;
+    if (first === null) return loc;   // the router said no (unreachable, or it leaves town)
+    const r = await loc;
+    if (!r) return web;               // nothing local either: the online one is the last hope
+    web.then(o => o && late(o));
+    return r;
+  }
+  function build(r, car, to, label, vehicle) {
     r.pts.unshift([car.x, car.z]); r.pts.push([to.x, to.z]);
     r.steps.forEach(st => st.at++);   // the car's own position went in front
     const { path, s, steps } = lanePath(r.pts, LANE[vehicle] ?? 1.5, r.steps);
-    route = { path, s, steps, i: 1, label, length: s[s.length - 1], stuck: 0, back: 0, tries: 0, lastGood: 0, t: 0, source: r.source };
+    return { path, s, steps, i: 1, label, length: s[s.length - 1], stuck: 0, back: 0, tries: 0, lastGood: 0, t: 0, source: r.source };
+  }
+  // every start (and stop) counts up: a route that arrives for an older request is thrown away
+  let gen = 0;
+  async function start(car, to, label, vehicle = 'car') {
+    const my = ++gen;
+    // the online route arriving after the local one: take it over while the car is still near the start
+    // (both routes begin there), picking up from the new path's nearest point; later on it stays as is
+    const late = o => {
+      const old = route; if (my !== gen || !old) return;
+      const at = old.car || car; if (Math.hypot(at.x - car.x, at.z - car.z) > 12) return;
+      const nr = build(o, car, to, label, vehicle), P = nr.path; let bi = 1, bd = Infinity;
+      for (let k = 1; k < P.length; k++) { const d = Math.hypot(P[k][0] - at.x, P[k][1] - at.z); if (d < bd) { bd = d; bi = k; } }
+      nr.i = bi; nr.t = old.t; nr.lastGood = old.t; nr.car = old.car; route = nr;
+    };
+    const r = await pick(car, to, vehicle, late);
+    if (!r || my !== gen) return null;   // no route, or stopped / started again meanwhile
+    route = build(r, car, to, label, vehicle);
     return { length: route.length, source: r.source };
   }
-  const stop = () => { route = null; };
+  const stop = () => { route = null; gen++; };
   // just the route, for someone walking it (vehicle 'foot'): [[x, z], ...] from here to there, or null
   async function plan(from, to, vehicle = 'foot') {
-    const r = (await online(from, to, vehicle)) || (vehicle === 'foot' ? null : await local(from, to, vehicle));
+    const r = vehicle === 'foot' ? await online(from, to, vehicle) : await pick(from, to, vehicle);
     if (!r) return null;
     r.pts.unshift([from.x, from.z]); r.pts.push([to.x, to.z]);
     return lanePath(r.pts, LANE[vehicle] ?? 0, []).path;
@@ -169,7 +212,7 @@ export function createAutopilot({ roadsUrl, fromRD, fromWGS, toWGS, inside }) {
     r.t += dt; r.car = car;
     const P = r.path, end = P[P.length - 1];
     const left = Math.hypot(end[0] - car.x, end[1] - car.z);
-    if (left < ARRIVE || r.i >= P.length) return { throttle: car.speed > 0.3 ? -1 : 0, steer: 0, ghost: true, arrived: Math.abs(car.speed) < 0.3 };
+    if (left < ARRIVE) return { throttle: car.speed > 0.3 ? -1 : 0, steer: 0, ghost: true, arrived: Math.abs(car.speed) < 0.3 };
     // move on along the route once a point is close, or already behind us
     while (r.i < P.length - 1) {
       const [px, pz] = P[r.i], d = Math.hypot(px - car.x, pz - car.z), ahead = (px - car.x) * car.fx + (pz - car.z) * car.fz;
@@ -179,7 +222,6 @@ export function createAutopilot({ roadsUrl, fromRD, fromWGS, toWGS, inside }) {
     const look = Math.max(6, Math.abs(car.speed) * 1.1);
     let tx = P[r.i][0], tz = P[r.i][1], acc = Math.hypot(tx - car.x, tz - car.z);
     for (let k = r.i; k < P.length - 1 && acc < look; k++) { tx = P[k + 1][0]; tz = P[k + 1][1]; acc += Math.hypot(P[k + 1][0] - P[k][0], P[k + 1][1] - P[k][1]); }
-    const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
     const diff = wrap(Math.atan2(-(tz - car.z), tx - car.x) - Math.atan2(-car.fz, car.fx));
     // how much the route bends in the next 25 m (more at speed): slow down for it
     let bend = 0, d0 = 0;
@@ -188,7 +230,8 @@ export function createAutopilot({ roadsUrl, fromRD, fromWGS, toWGS, inside }) {
       bend = Math.max(bend, Math.abs(wrap(a2 - a1))); d0 += Math.hypot(P[k + 1][0] - P[k][0], P[k + 1][1] - P[k][1]);
     }
     // cruise at the speed the router expects on this stretch, or 50 km/h (30 on the local route)
-    const at = progress(car), step = [...r.steps].reverse().find(st => st.s <= at + 1);
+    const at = progress(car); let step = null;   // the last manoeuvre that has begun
+    for (let k = r.steps.length - 1; k >= 0; k--) if (r.steps[k].s <= at + 1) { step = r.steps[k]; break; }
     const cruise = Math.min(TOP, step?.speed ? step.speed * 1.1 : r.source === 'osm' ? 14 : 11);
     let target = Math.max(BEND, cruise - (cruise - BEND) * Math.min(1, Math.max(bend, Math.abs(diff)) / 1.2));
     target = Math.min(target, 2 + left * 0.5);   // ease into the destination
@@ -209,7 +252,6 @@ export function createAutopilot({ roadsUrl, fromRD, fromWGS, toWGS, inside }) {
     start, stop, drive, plan,
     get active() { return !!route; },
     get label() { return route?.label; },
-    get source() { return route?.source; },
     // what is left of the trip, in metres
     get remaining() { const r = route; return r && r.car ? Math.max(0, r.length - progress(r.car)) : r ? r.length : 0; },
     // the next turn on the online route: { text: '↱ Turn right onto Rietgors.', in: metres }

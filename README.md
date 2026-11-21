@@ -49,8 +49,9 @@ server in between ([how it works](docs/multiplayer.md)).
 ## Bring your AI agent
 
 [`tools/mcp`](tools/mcp) is an MCP server that lets an AI agent (Claude, or any MCP client) join the map
-as a player marked 🤖. It walks, drives and knocks on doors under the same limits as a person: no
-running faster, no jumping across town, one action a second.
+as a player marked 🤖. It walks, drives, follows a friend and knocks on doors under the same limits as
+a person: no running faster, no jumping across town, one action a second. With a voice it holds a
+real conversation: it speaks in a natural voice, hears you as text, and stops when you interrupt it.
 
 ### Install it in your agent harness
 

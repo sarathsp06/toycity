@@ -40,22 +40,7 @@ export class Track {
   }
 }
 
-// Voice range for one peer, with hysteresis so walking along the boundary does not reconnect:
-// on inside `connect`, off only after being beyond `disconnect` for `linger` seconds.
-export class VoiceGate {
-  constructor({ voiceConnect, voiceDisconnect, voiceLinger }) { Object.assign(this, { on: false, out: 0, c: voiceConnect, d: voiceDisconnect, l: voiceLinger }); }
-  update(dist, dt) {
-    if (!this.on) { if (dist <= this.c) { this.on = true; this.out = 0; } return this.on; }
-    this.out = dist > this.d ? this.out + dt : 0;
-    if (this.out >= this.l) { this.on = false; this.out = 0; }
-    return this.on;
-  }
-}
-
-// Visibility with the same idea; a function so a camera-frustum test can replace it later.
+// Visibility with hysteresis; a function so a camera-frustum test can replace it later.
 export function visible(wasVisible, dist, show, hide) { return wasVisible ? dist <= hide : dist <= show; }
-
-// Linear fade between full and silent distance, the same curve the Web Audio panner uses.
-export function voiceGain(dist, full, silent) { return dist <= full ? 1 : dist >= silent ? 0 : 1 - (dist - full) / (silent - full); }
 
 export function cleanName(s) { return String(s || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 24); }

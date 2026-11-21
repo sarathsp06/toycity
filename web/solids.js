@@ -7,8 +7,11 @@
 //   const solids = createSolids();
 //   solids.add(owner, [footprints])    static things, e.g. the cars of one square
 //   solids.drop(owner)                 when that square unloads
-//   solids.live(fn)                    fn() returns footprints that move (asked on every test)
+//   solids.live(fn)                    fn() returns footprints that move (asked once per frame)
+//   solids.beginFrame()                once per animation frame: the live footprints are asked again
 //   solids.hit(x, z, r)                does a circle of radius r at (x, z) touch anything solid?
+//   solids.hitStatic(x, z, r)          the same for the static things only (no allocation)
+//   solids.at(x, z, r)                 the static footprints that circle touches
 
 // footprint of each kind of placed object, by its instance name, for a scale of 1
 export const FOOTPRINTS = {
@@ -45,9 +48,12 @@ export function footprintsOf(name, data, origin) {
   return out;
 }
 
+// a footprint is filed in every grid cell within its reach plus the largest query radius (hit(x, z, r)
+// looks in the cell of (x, z) only), so a car just across a cell border still blocks
+const SLACK = 0.35;
 export function createSolids() {
   const grid = new Map(), owned = new Map(), live = [];
-  const reach = f => f.r ?? Math.hypot(f.hx, f.hz);
+  const reach = f => (f.r ?? Math.hypot(f.hx, f.hz)) + SLACK;
   function cells(f, each) {
     const e = reach(f);
     for (let i = Math.floor((f.x - e) / CELL); i <= Math.floor((f.x + e) / CELL); i++)
@@ -62,20 +68,34 @@ export function createSolids() {
     owned.set(owner, [...(owned.get(owner) || []), ...list]);
     for (const f of list) cells(f, k => (grid.get(k) || grid.set(k, []).get(k)).push(f));
   }
+  // the moving footprints, asked of the live functions once per frame (many tests share a frame);
+  // without beginFrame() ever called (tests, tools) they are asked on every test as before
+  let frame = 0, cacheFrame = -1, liveFps = [];
+  function beginFrame() { frame++; }
+  function moving() {
+    if (frame && cacheFrame === frame) return liveFps;
+    cacheFrame = frame; liveFps = [];
+    for (const fn of live) for (const f of fn()) liveFps.push(f);
+    return liveFps;
+  }
   function hit(x, z, r) {
     for (const f of grid.get(cellOf(x, z)) || []) if (hits(f, x, z, r)) return true;
-    for (const fn of live) for (const f of fn()) if (!(f.id && ignore.has(f.id)) && hits(f, x, z, r)) return true;
+    for (const f of moving()) if (!(f.id && ignore.has(f.id)) && hits(f, x, z, r)) return true;
     return false;
   }
-  // the static footprints touching a circle, e.g. the parked car you just drove into
+  // the static things only (no people, no moving cars): does a circle touch one, and which ones
+  function hitStatic(x, z, r) {
+    for (const f of grid.get(cellOf(x, z)) || []) if (hits(f, x, z, r)) return true;
+    return false;
+  }
   function at(x, z, r) { return (grid.get(cellOf(x, z)) || []).filter(f => hits(f, x, z, r)); }
   // people (live footprints with an id) that are not solid for now: someone knocked over a moment ago
   const ignore = new Set();
   // moving things (other players, their cars) within r of a point, for checks beyond 'is it solid'
   function liveNear(x, z, r) {
     const out = [];
-    for (const fn of live) for (const f of fn()) if (Math.hypot(f.x - x, f.z - z) < r) out.push(f);
+    for (const f of moving()) if (Math.hypot(f.x - x, f.z - z) < r) out.push(f);
     return out;
   }
-  return { add, drop, hit, at, liveNear, ignore, live: fn => live.push(fn) };
+  return { add, drop, hit, hitStatic, at, liveNear, ignore, beginFrame, live: fn => live.push(fn) };
 }

@@ -1,5 +1,6 @@
 // Background loader: downloads, un-gzips and parses square files and decodes aerial photos off the
 // main thread, then hands over the raw buffers without copying. The page only creates GPU buffers.
+// A square file is one buffer: the header's blob offsets count from `base`, the end of the header.
 // development aid: city.html?net=<latency ms>,<Mbit/s> makes every download behave like a slower connection
 let NET = null, line = 0;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -35,7 +36,7 @@ async function loadBin(url, signal) {
   const buf = await new Response(res.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
   const hl = new DataView(buf).getUint32(0, true);
   const header = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, hl)));
-  return { header, buf: buf.slice(4 + hl) }; // blob offsets are relative to the end of the header
+  return { header, buf, base: 4 + hl };   // the header is padded, so base keeps every blob 4-byte aligned
 }
 async function loadImage(url, signal) {
   const res = await get(url, signal);

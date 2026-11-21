@@ -11,7 +11,7 @@ import { PERSON } from '../solids.js';
 import { footprintOf } from '../vehicle.js';
 import * as THREE from 'three';
 
-export async function start({ scene, camera, player, toRD, fromRD, slug, params, hud, surroundings, useAvatar, view, goToRD, solids, vehicle, body, knockDown, homes }) {
+export async function start({ scene, camera, player, toRD, fromRD, slug, params, hud, surroundings, view, goToRD, solids, vehicle, body, knockDown, homes }) {
   hud.innerHTML = `<button id="mpname" title="Change your name"></button>
     <button id="mpview" title="Switch between seeing through your eyes and from behind (V)"></button>
     <button id="mpsound" title="Birds, wind and traffic"></button>
@@ -76,6 +76,7 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
     call = null; settle();
   }
   presence.onCall((m, from) => {
+    if (m.t === 'invite' && !Array.isArray(m.members ?? [])) return;
     if (m.t === 'invite' && !myCaps().includes('v')) {
       presence.sendTo(from, { t: 'decline', call: m.call, novoice: 1 });   // an older game may still ring me
       (window.__agentCalls ||= []).push(nameOf(from));
@@ -107,6 +108,8 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
   window.__agentCall = {
     ring: name => { const p = [...presence.peers.values()].filter(p => canTalk(p) && p.dist < 60).find(p => (p.name || '').toLowerCase().includes(String(name).toLowerCase())); if (!p) return null; ring(p.id); return p.name; },
     leave: () => leave(),
+    mute: on => call?.members.size ? setMic(!on).then(renderCall) : Promise.resolve(), get muted() { return !voice.micOn; },
+    canTalk: id => canTalk(presence.peers.get(id)),
     get members() { return call ? [...call.members].map(nameOf) : []; },
     get ringing() { return call ? [...call.ringing.keys()].map(nameOf) : []; },
   };
@@ -115,11 +118,11 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
   function renderCall() {
     // rebuilt only when something visible changed, so a button is never swapped out under a finger
     const nearIds = [...presence.peers.values()].filter(p => p.dist <= MP.talkReach).map(p => p.id + p.name).sort();
-    const sig = JSON.stringify([call && [...call.members].map(id => [id, nameOf(id), (voice._state.get(id)?.audio?.level() || 0) > 0.02]), call && [...call.ringing.keys()], voice.micOn, nearIds]);
+    const sig = JSON.stringify([call && [...call.members].map(id => [id, nameOf(id), voice.talking(id)]), call && [...call.ringing.keys()], voice.micOn, nearIds]);
     if (sig === callSig) return; callSig = sig;
     // in a call: who is in it (lit while talking), who is being rung, Mute and Leave
     if (call) {
-      const items = [...call.members].map(id => pill(nameOf(id), 'who' + ((voice._state.get(id)?.audio?.level() || 0) > 0.02 ? ' talking' : '')));
+      const items = [...call.members].map(id => pill(nameOf(id), 'who' + (voice.talking(id) ? ' talking' : '')));
       for (const id of call.ringing.keys()) items.push(pill(`ringing ${nameOf(id)}…`, 'who ringing'));
       const mute = document.createElement('button'); mute.className = 'mute';
       mute.textContent = voice.micOn ? '🎙️ Mute' : '🔇 Muted'; mute.disabled = !call.members.size;

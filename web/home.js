@@ -36,11 +36,12 @@ export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note,
 
   // ---------- the doors around you ----------
   // a door: [x, y (its middle), z, yaw, scale, colour] in its square; outside is +z turned by yaw
-  function doorsNear(r) {
-    const out = [], p = player.position;
+  function doorsNear(r, p = player.position) {
+    const out = [];
     for (const t of tiles.values()) {
       if (!t.doors) continue;
       const d = t.doors, ox = t.group.position.x, oz = t.group.position.z;
+      if (Math.abs(p.x - ox) > T + r || Math.abs(p.z - oz) > T + r) continue;   // a square too far off to have one
       for (let k = 0; k < d.length; k += 6) {
         const x = d[k] + ox, z = d[k + 2] + oz, dist = Math.hypot(x - p.x, z - p.z);
         if (dist < r) out.push({ tile: t, n: k / 6, x, y: d[k + 1] - 1.1, z, yaw: d[k + 3], color: d[k + 5], dist });
@@ -48,7 +49,11 @@ export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note,
     }
     return out.sort((a, b) => a.dist - b.dist);
   }
+  // a door's name in its square (for the pool), and in the world (RD metres, for knock rooms and the saved home)
+  const keyOf = d => d.tile.i + '_' + d.tile.j + ':' + d.n;
   const idOf = d => { const [X, Y] = toRD(d.x, d.z); return Math.round(X) + ',' + Math.round(Y); };
+  // is this door your own front door?
+  const mine = d => { const h = homeDoor(); return !!h && Math.hypot(h.x - d.x, h.z - d.z) < 0.5; };
   // the address of a door: the nearest address point of its square, within 15 m
   function addressOf(d) {
     const [X, Y] = toRD(d.x, d.z); let best = 225, label = null;
@@ -81,13 +86,15 @@ export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note,
     r.group.removeFromParent(); r.group.traverse(o => { if (o.isMesh) [].concat(o.material).forEach(m => m.userData.own && m.dispose()); });
     hideFlat(r.d, false); pool.delete(id);
   }
-  function refreshPool() {
+  function refreshPool(doors) {   // doors: the nearest first (doorsNear)
     if (!model) return;
-    const want = new Map(doorsNear(30).slice(0, POOL).map(d => [idOf(d), d]));
+    const want = new Map(doors.slice(0, POOL).map(d => [keyOf(d), d]));
     for (const id of [...pool.keys()]) if (!want.has(id) && pool.get(id).angle < 0.01) dropDoor(id);
     for (const [id, d] of want) if (!pool.has(id) && d.tile.doorMesh) { pool.set(id, realDoor(d)); hideFlat(d, true); }
   }
   const swing = (id, open) => { const r = pool.get(id); if (r) r.want = open ? OPEN : 0; };
+  // the real door standing at x, z (your own, when you go in or out), by its pool key
+  function keyAt(x, z) { for (const [id, r] of pool) if (Math.hypot(r.d.x - x, r.d.z - z) < 0.5) return id; return null; }
 
   // ---------- sounds ----------
   let ctx = null;
@@ -108,26 +115,32 @@ export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note,
   }
 
   // ---------- knocking ----------
+  const knocks = new Map();   // door id -> { ch, timer, answered }: a knock room stays open 30 s, knock again and it is reused
   async function knock(d) {
-    if (!d) return;
-    knockSound(); swing(idOf(d), false);
+    if (!d || mine(d)) return;   // your own door: go in instead (L)
+    knockSound(); swing(keyOf(d), false);
     const label = addressOf(d);
     if (!presence) { note(`🚪 You knock at ${label}. Nobody answers.`); return; }
     note(`🚪 You knock at ${label}…`);
-    const ch = presence.channel('home:' + idOf(d));
-    let answered = false;
-    ch.onMessage(m => {
-      if (!m || typeof m !== 'object') return;
-      const who = String(m.name || 'Someone').slice(0, 40);
-      if (m.t === 'coming') { answered = true; note(`🏠 ${who} heard you and is coming to the door.`); }
-      if (m.t === 'away') { answered = true; note(`🏠 ${who} can't come to the door right now.`); }
-    });
+    const id = idOf(d); let k = knocks.get(id);
+    if (!k) {
+      k = { ch: presence.channel('home:' + id), timer: 0, answered: false }; knocks.set(id, k);
+      k.ch.onMessage(m => {
+        if (!m || typeof m !== 'object') return;
+        const who = String(m.name || 'Someone').slice(0, 40);
+        if (m.t === 'coming') { k.answered = true; note(`🏠 ${who} heard you and is coming to the door.`); }
+        if (m.t === 'away') { k.answered = true; note(`🏠 ${who} can't come to the door right now.`); }
+      });
+    }
+    clearTimeout(k.timer); k.timer = setTimeout(() => { k.ch.leave(); knocks.delete(id); }, 30000);
+    k.answered = false;
+    const ch = k.ch;
     // wait for the residents' browsers to connect, then knock (again for any who join a little later)
     for (let i = 0; i < 12 && !ch.peers().length; i++) await new Promise(r => setTimeout(r, 500));
+    if (knocks.get(id) !== k) return;   // the room closed meanwhile
     const msg = { t: 'knock', name: presence.name, at: label };
-    ch.send(msg); setTimeout(() => ch.send(msg), 2500);
-    setTimeout(() => { if (!answered) note(`🚪 Nobody answers at ${label}.`); }, 15000);
-    setTimeout(() => ch.leave(), 30000);
+    ch.send(msg); setTimeout(() => { if (knocks.get(id) === k) ch.send(msg); }, 2500);
+    setTimeout(() => { if (!k.answered) note(`🚪 Nobody answers at ${label}.`); }, 15000);
   }
 
   // ---------- your home ----------
@@ -166,7 +179,7 @@ export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note,
   function goIn() {
     const d = homeDoor(); if (!d || inside || walk) return;
     walk = { d, from: out(d, 1.2), to: out(d, -1.0), t: 0, dir: 'in' }; look(d.yaw);
-    swing(home.id, true);
+    swing(keyAt(d.x, d.z), true);
   }
   function comeOut() {
     if (walk) return;
@@ -174,7 +187,7 @@ export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note,
     if (!d) { if (home) location.href = `city.html?region=${encodeURIComponent(home.slug)}&meet=${home.rd[0].toFixed(1)},${home.rd[1].toFixed(1)}&home=out`; return; }
     if (!inside) { player.position.x = out(d, -1.0)[0]; player.position.z = out(d, -1.0)[1]; inside = true; }
     walk = { d, from: out(d, -1.0), to: out(d, 1.6), t: 0, dir: 'out' }; look(d.yaw);
-    swing(home.id, true);
+    swing(keyAt(d.x, d.z), true);
   }
 
   // ---------- the buttons at a door ----------
@@ -183,8 +196,8 @@ export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note,
   function button(text, fn) { const b = document.createElement('button'); b.textContent = text; b.onclick = e => { e.stopPropagation(); fn(); }; return b; }
   let shown = '';
   function ui() {
-    const mine = near && home && idOf(near) === home.id;
-    const key = inside ? 'inside' : near ? (mine ? 'mine:' : 'door:') + idOf(near) : '';
+    const own = !!near && mine(near);
+    const key = inside ? 'inside' : near ? (own ? 'mine:' : 'door:') + keyOf(near) : '';
     if (key === shown) return; shown = key;
     bar.replaceChildren(); panel.replaceChildren();
     bar.hidden = !near || inside; panel.hidden = !inside;
@@ -195,22 +208,25 @@ export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note,
       return;
     }
     if (!near) return;
-    if (mine) bar.append(button('🏠 Go inside (L)', goIn));
+    if (own) bar.append(button('🏠 Go inside (L)', goIn));
     else bar.append(button('🚪 Knock (K)', () => knock(near)), button('🏠 Live here (L)', () => liveHere(near)));
     // the same in the hint line at the top, in case the buttons are covered
-    note(mine ? `🏠 Your home, ${home.label}: L or the button to go inside` : `🚪 ${addressOf(near)}: K to knock, L to live here`);
+    note(own ? `🏠 Your home, ${home.label}: L or the button to go inside` : `🚪 ${addressOf(near)}: K to knock, L to live here`);
   }
   addEventListener('keydown', e => {
-    if (e.target.tagName === 'INPUT' || e.repeat) return;
-    const k = e.key.toLowerCase();
-    if (k === 'k' && near && !inside) knock(near);
-    if (k === 'l' && near && !inside) { if (home && idOf(near) === home.id) goIn(); else liveHere(near); }   // L: live here, or go in
+    if (e.target.tagName === 'INPUT' || e.repeat || !near || inside) return;
+    const k = e.key.toLowerCase(), own = mine(near);
+    if (k === 'k' && !own) knock(near);                           // K: knock (not on your own door)
+    if (k === 'l') { if (own) goIn(); else liveHere(near); }      // L: live here, or go in
   });
 
   // ---------- every frame ----------
   let poolT = 0;
   function update(dt, onFoot) {
-    if ((poolT -= dt) <= 0) { poolT = 0.3; refreshPool(); near = onFoot && !walk ? doorsNear(NEAR)[0] || null : null; ui(); }
+    if ((poolT -= dt) <= 0) {   // one scan for both: the real doors around you, and the one you stand at
+      poolT = 0.3; const doors = doorsNear(30); refreshPool(doors);
+      near = onFoot && !walk && doors.length && doors[0].dist < NEAR ? doors[0] : null; ui();
+    }
     for (const r of pool.values()) if (r.shutIn !== undefined && (r.shutIn -= dt) <= 0) { r.want = 0; delete r.shutIn; }
     for (const r of pool.values()) if (r.angle !== r.want) {
       const s = Math.sign(r.want - r.angle);
@@ -224,7 +240,7 @@ export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note,
     player.rotation.y = w.dir === 'in' ? w.d.yaw + Math.PI : w.d.yaw;
     if (w.dir === 'out' && w.t > 0.3) inside = false;
     if (w.t > 1.7) {
-      walk = null; swing(home.id, false);
+      walk = null; swing(keyAt(w.d.x, w.d.z), false);
       if (w.dir === 'in') { inside = true; note(`🏠 You're home. Knocks at ${home.label} will reach you.`); }
       else note('👋 You step outside.');
       shown = ''; ui();
@@ -244,7 +260,6 @@ export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note,
 
   return {
     update, openNear,
-    get openDoors() { return [...pool.values()].filter(r => r.angle > 0.1).length; },
     get inside() { return inside; },
     get busy() { return !!walk; },
     get home() { return home; },
@@ -253,5 +268,8 @@ export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note,
     release(tile) { for (const [id, r] of [...pool]) if (r.tile === tile) dropDoor(id); tile.doors = tile.doorMesh = null; },
     connect(p) { presence = p; listen(); },
     knock: () => knock(near), goIn, comeOut, liveHere: () => near && liveHere(near),
+    // for agents (tools/mcp): the doors within r metres of a point, a door's address, and the spot k
+    // metres out in front of it; NEAR is how close you must be to knock
+    doorsNear, addressOf, outside: out, NEAR,
   };
 }
