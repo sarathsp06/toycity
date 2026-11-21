@@ -122,4 +122,8 @@ full list is in [CREDITS.txt](web/models/CREDITS.txt).
 - Birds, wind, leaves and traffic are synthesised in the browser with the Web Audio API. There are
   no sound files to credit.
 
+## Licence
+
+The code is [MIT](LICENSE). Map data and models keep their own licences, listed above.
+
 <div align="center"><sub>Made with stroopwafels and an unreasonable love for hedges. 🌳</sub></div>
