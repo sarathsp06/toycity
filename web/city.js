@@ -183,7 +183,8 @@ function aerialTexture(bitmap, aniso) {
 // tools/blendswap_cars.py. Each parking spot gets one model, picked by a stable hash of its position.
 // Three levels by distance to the player, re-sorted a few times a second:
 //   near (< CAR_NEAR m): about 30k triangles, mid (< CAR_MID m): about 5k, beyond: the simple box car.
-const CAR_MIX = { golf: 5, camry: 4, fiat500: 3, jeep: 3, van: 1.5 };
+// bump the ?v= on cars.glb when the models change: the file is cached for a day
+const CAR_MIX = { golf: 5, camry: 4, fiat500: 3, jeep: 3, suv: 3, van: 1.5 };
 const CAR_NEAR = 25, CAR_MID = 70;
 function partsOf(obj) {
   const parts = []; obj.updateMatrixWorld(true);
@@ -191,7 +192,7 @@ function partsOf(obj) {
   return parts;
 }
 progress(0.08, 'Parking the cars');
-const CAR_MODELS = await new GLTFLoader().loadAsync(new URL('./models/cars.glb', import.meta.url).href,
+const CAR_MODELS = await new GLTFLoader().loadAsync(new URL('./models/cars.glb?v=suv1', import.meta.url).href,
   e => e.total && progress(0.08 + 0.37 * e.loaded / e.total, 'Parking the cars')).then(g => {
   const list = [];
   for (const [name, w] of Object.entries(CAR_MIX)) {

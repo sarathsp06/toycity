@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 
 // which end of each model (along its local x axis) is the bonnet; from the head- and taillights in cars.glb
-export const FRONT = { golf: -1, camry: 1, fiat500: 1, jeep: 1, van: 1 };
+export const FRONT = { golf: -1, camry: 1, fiat500: 1, jeep: 1, van: 1, suv: -1 };
 const HALF_L = 2.15, HALF_W = 0.88;           // the parked-car footprint in solids.js
 const WHEELBASE = 2.6, MAX_STEER = 0.55;
 const TOP = 14, BOOST = 28, REVERSE = 5;      // m/s: 50 km/h, 100 km/h with Shift, 18 km/h backwards

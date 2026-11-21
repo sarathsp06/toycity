@@ -31,13 +31,19 @@ CARS = {
     "fiat500": ("13817/x/fiat500blandswap.blend", (3.55, 1.49), "Plane.001"),
     "jeep": ("25471/a.blend", (4.25, 1.63), "Jeep"),
     "van": ("19228/x/VAN.blend", (5.2, 2.0), "van_body"),
+    # the file holds a clean SUV at the origin and a wrecked copy 6 m away; the anchor keeps the clean one
+    "suv": ("29795/suv.blend", (4.55, 1.72), "UCR_GENSUV_ZYX0_2SBD.001"),
 }
+# per car: extra object names to drop (snow cover, the bonus driver, interior) and material names to pin
+EXTRA_DROP = {"suv": ("_snow", "_man", "_int_", "zyx0_006", "zyx0_1sbd")}
+MAT_PIN = {"suv": {"x_ucr_light": "headlight", "x_ucr_leather": "trim", "x_ucr_grey": "trim", "x_ucr_plastic_grey": "trim"}}
 CREDITS = {
     "golf": "Volkswagen VW Golf MK4 by Jay-Artist, CC-BY, https://blendswap.com/blend/3976",
     "camry": "Toyota Camry 2001 by abdulsalamnaqeeb, CC-BY, https://blendswap.com/blend/23001",
     "fiat500": "Fiat500Abarth by Pierallard, CC-BY, https://blendswap.com/blend/13817",
     "jeep": "Jeep Cherokee with rig by koumis, CC0, https://blendswap.com/blend/25471",
     "van": "BEAMNG VAN by BlenderBach, CC-BY, https://blendswap.com/blend/19228",
+    "suv": "Generic SUV ZYX0 by 1DInc, CC0, https://blendswap.com/blend/29795",
 }
 
 DROP_OBJ = ("interior", "seat", "steer", "gauge", "dash", "brake", "caliper", "coilover", "floor", "studio",
@@ -100,7 +106,7 @@ def convert(name, path, length, body):
     mats = materials()   # after opening: loading a file replaces all data blocks
     scene = bpy.context.scene
     objs = [o for o in scene.objects if o.type in ("MESH", "CURVE") and not o.hide_render
-            and not any(k in o.name.lower() for k in DROP_OBJ)]
+            and not any(k in o.name.lower() for k in DROP_OBJ + EXTRA_DROP.get(name, ()))]
     for o in objs:                      # subdivision off: the cages are already smooth enough here
         for m in o.modifiers:
             if m.type == "SUBSURF":
@@ -150,7 +156,7 @@ def convert(name, path, length, body):
             mat = me.materials[f.material_index] if f.material_index < len(me.materials) else None
             if mat is not None and any(k in mat.name.lower() for k in DROP_MAT):
                 cats.append("_drop"); continue
-            c = category(mat)
+            c = MAT_PIN.get(name, {}).get((mat.name if mat else "").lower()) or category(mat)
             if c is None:
                 c = "?" + (mat.name if mat else "")
             cats.append(c)
@@ -275,8 +281,10 @@ def main():
         bpy.ops.export_scene.gltf(filepath=tmp, export_format="GLB", use_selection=True, export_yup=True,
                                   export_apply=True, export_materials="EXPORT")
         built.append(tmp)
-    # merge the per-car files into one
+    # merge the per-car files into one: every car built so far, so one car can be rebuilt on its own
     bpy.ops.wm.read_factory_settings(use_empty=True)
+    built = [os.path.join(HERE, "data", "blendswap", f"_{n}.glb") for n in CARS
+             if os.path.exists(os.path.join(HERE, "data", "blendswap", f"_{n}.glb"))]
     for f in built:
         before = set(bpy.data.objects)
         bpy.ops.import_scene.gltf(filepath=f)

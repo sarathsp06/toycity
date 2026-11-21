@@ -144,6 +144,7 @@ you play, except for the minimap tiles.
 | [Fiat 500 Abarth](https://blendswap.com/blend/13817) | Pierallard | CC BY |
 | [Jeep Cherokee](https://blendswap.com/blend/25471) | koumis | CC0 |
 | [BeamNG van](https://blendswap.com/blend/19228) | BlenderBach | CC BY |
+| [Generic SUV ZYX0](https://blendswap.com/blend/29795) | 1DInc | CC0 |
 | Zuri (persona), from [BlenderKit](https://www.blenderkit.com) | Richie Kirui | CC0 |
 | Xbot (the classic figure and the shared walk, run and idle animations) | from the [three.js examples](https://github.com/mrdoob/three.js/tree/dev/examples/models/gltf) | as distributed with three.js |
 
