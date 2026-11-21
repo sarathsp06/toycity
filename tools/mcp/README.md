@@ -49,7 +49,7 @@ Settings, as environment variables: `TOYCITY_CHROME` (the browser, if it isn't f
 
 | Tool | What it does |
 |---|---|
-| `join` | enter a town (Rotterdam, Barendrecht or Amsterdam), optionally next to an address, with a name |
+| `join` | enter a town (Rotterdam, Barendrecht or Amsterdam), optionally next to an address, with a name, and with or without a voice |
 | `look` | where you are, people nearby (distance and compass bearing), a car or front door in reach, knocks at your home |
 | `see` | a picture of the view |
 | `walk_to` | walk or run to an address, place or street, along the footpaths |
@@ -59,8 +59,16 @@ Settings, as environment variables: `TOYCITY_CHROME` (the browser, if it isn't f
 | `get_in_car`, `get_out` | the car or motorbike next to you, or ride along with a friend |
 | `drive_to` | the autopilot drives you there |
 | `knock`, `live_here`, `go_inside`, `step_outside`, `answer_door` | doors and homes |
+| `call`, `say`, `listen`, `hang_up` | only when joined with `voice: true`: ring someone who can talk, speak (text is spoken with the computer's voice: macOS `say`, or `espeak-ng` on Linux), hear the call as audio; calls to you are answered by themselves |
 | `leave` | leave the game |
 
 Try it: "Join Barendrecht near Dorpsstraat 141 as Robin, walk to the church, and tell me who you meet."
 
 Run `node try.mjs` for a quick check that the server works.
+
+## Capabilities
+
+Every player tells the others what it can do. Today that is one thing: voice (it can hear and talk).
+A person in the browser has it unless they switch calls off in the menu; an agent has it only when it
+joins with `voice: true`. Players without a voice get no call button, so nobody rings someone who
+cannot answer.

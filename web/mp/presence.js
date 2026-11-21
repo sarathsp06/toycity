@@ -47,7 +47,7 @@ export async function createPresence({ scene, player, toRD, fromRD, slug, vehicl
     const [send, receive] = room.makeAction('st');
     receive((d, id) => {
       if (!Array.isArray(d) || d.length < 6) return;
-      const [s, x, y, h, v, n, look, micOn, car, cardLevel, pose, up] = d;
+      const [s, x, y, h, v, n, look, micOn, car, cardLevel, pose, up, caps] = d;
       if (![s, x, y, h, v].every(Number.isFinite)) return;
       const p = peer(id); p.rooms.add(key);
       p.last = performance.now() / 1000;
@@ -59,8 +59,9 @@ export async function createPresence({ scene, player, toRD, fromRD, slug, vehicl
       const c = typeof car === 'string' && /^[a-z0-9_]{1,12}:[0-9a-f]{1,6}$/.test(car) ? car : '';   // "model:colour" while driving
       if (c !== p.car) { p.car = c; if (p.player) setVehicle(p.player, c, vehicle?.make); }
       // their card (1 yellow, 2 red), whether they are flying (1) or lying (2) after being hit, and how high
-      p.card = [0, 1, 2].includes(cardLevel) ? cardLevel : 0; p.pose = [0, 1, 2, 3].includes(pose) ? pose : 0;
+      p.card = [0, 1, 2].includes(cardLevel) ? cardLevel : 0; p.pose = [0, 1, 2, 3, 4, 5].includes(pose) ? pose : 0;   // 4 knocked out, 5 going through a door
       p.up = Number.isFinite(up) ? Math.max(0, Math.min(20, up)) : 0;
+      p.caps = typeof caps === 'string' ? caps.replace(/[^a-z]/g, '').slice(0, 8) : undefined;   // what they can do, e.g. 'v' voice
     });
     // call invitations and answers go straight to one player (see index.js)
     const [sendCall, receiveCall] = room.makeAction('call');
@@ -103,7 +104,7 @@ export async function createPresence({ scene, player, toRD, fromRD, slug, vehicl
     }
     // 10 updates a second while moving, one a second standing still, and at once after a change
     sendT -= dt;
-    const extra = [body?.card || 0, body?.pose || 0, body?.y || 0], ek = extra.join();
+    const extra = [body?.card || 0, body?.pose || 0, body?.y || 0, body?.caps ?? 'v'], ek = extra.join();
     if ((vehicle?.shared || '') !== lastCar || ek !== lastExtra) { lastCar = vehicle?.shared || ''; lastExtra = ek; lastSent = null; }
     if (!lastSent || (sendT <= 0 && (speed > 0.05 || extra[1] === 1 || now - lastSent >= 1 / MP.idleHz))) {
       const state = [++seq, +X.toFixed(2), +Y.toFixed(2), +player.rotation.y.toFixed(3), +speed.toFixed(2), myName, look, myMic ? 1 : 0, vehicle?.shared || '', ...extra];

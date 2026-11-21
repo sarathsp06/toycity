@@ -141,8 +141,9 @@ export function setCard(p, level, pose) {
   if (p.card) p.card.position.y = p.carMesh ? 2.3 : 2.6;
   if (p.model && !p.riding && !p.carMesh) {
     p.spin = pose === 1 ? (p.spin || 0) + 0.15 : 0;
-    p.model.rotation.x = pose === 1 ? -p.spin : pose === 2 ? -Math.PI / 2 : 0;
-    p.model.position.y = pose === 2 ? 0.12 : 0;
+    p.model.rotation.x = pose === 1 ? -p.spin : pose === 2 || pose === 4 ? -Math.PI / 2 : 0;
+    p.model.position.y = pose === 2 || pose === 4 ? 0.12 : 0;
+    p.ko = pose === 4;
   }
 }
 

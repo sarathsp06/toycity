@@ -211,6 +211,7 @@ export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note,
   let poolT = 0;
   function update(dt, onFoot) {
     if ((poolT -= dt) <= 0) { poolT = 0.3; refreshPool(); near = onFoot && !walk ? doorsNear(NEAR)[0] || null : null; ui(); }
+    for (const r of pool.values()) if (r.shutIn !== undefined && (r.shutIn -= dt) <= 0) { r.want = 0; delete r.shutIn; }
     for (const r of pool.values()) if (r.angle !== r.want) {
       const s = Math.sign(r.want - r.angle);
       r.angle = s > 0 ? Math.min(r.want, r.angle + dt * 2.6) : Math.max(r.want, r.angle - dt * 2.6); r.leaf.rotation.y = r.angle;
@@ -233,8 +234,17 @@ export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note,
 
   if (new URLSearchParams(location.search).get('home') === 'out') setTimeout(() => { if (homeDoor()) comeOut(); }, 2500);
 
+  // someone else going in or out of a house (pose 5 in their state): open the real door next to
+  // them for a moment, so people at the door see it happen
+  function openNear(x, z) {
+    let best = null, bd = 2.6;
+    for (const r of pool.values()) { const d = Math.hypot(r.d.x - x, r.d.z - z); if (d < bd) { bd = d; best = r; } }
+    if (best) { best.want = OPEN; best.shutIn = 1.6; }
+  }
+
   return {
-    update,
+    update, openNear,
+    get openDoors() { return [...pool.values()].filter(r => r.angle > 0.1).length; },
     get inside() { return inside; },
     get busy() { return !!walk; },
     get home() { return home; },

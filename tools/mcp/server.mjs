@@ -17,6 +17,9 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { chromium } from 'playwright-core';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const SITE = process.env.TOYCITY_URL || 'https://toycity.pages.dev/';
 const MIN_GAP = 1000;           // ms between actions: no faster than a person clicking
@@ -31,7 +34,7 @@ function chromePath() {
   const win = ['C:/Program Files/Google/Chrome/Application/chrome.exe'];
   return [...mac, ...linux, ...win].find(p => fs.existsSync(p));
 }
-let browser = null, page = null, last = 0, me = null;
+let browser = null, page = null, last = 0, me = null, hasVoice = false;
 
 async function pace() {   // the one-action-a-second rule
   const wait = last + MIN_GAP - Date.now();
@@ -50,7 +53,8 @@ async function state() {
       const g = q.player.group.position, dx = g.x - p.x, dz = g.z - p.z;
       return { name: q.name || 'Visitor', metres: Math.round(Math.hypot(dx, dz)), bearing: Math.round(((Math.atan2(dx, -dz) * 180 / Math.PI) + 360) % 360),
         doing: q.player.inside ? 'riding in a car' : q.car ? (q.car.startsWith('bike') ? 'on a motorbike' : 'driving') : q.pose === 2 ? 'lying on the ground' : q.speed > 2.5 ? 'running' : q.speed > 0.3 ? 'walking' : 'standing',
-        card: q.card === 2 ? 'red card' : q.card === 1 ? 'yellow card' : undefined };
+        card: q.card === 2 ? 'red card' : q.card === 1 ? 'yellow card' : undefined,
+        can_talk: q.caps === undefined ? !(q.name || '').startsWith('🤖') : q.caps.includes('v') };
     }).sort((a, b) => a.metres - b.metres);
     const car = !d.driving && d.nearest(p);
     const door = [...c.tiles.values()].flatMap(t => {
@@ -65,11 +69,14 @@ async function state() {
         : c.fling.on ? 'knocked over' : window.__agent.walking ? 'walking' : 'standing',
       facing: Math.round(((Math.atan2(-Math.sin(c.player.rotation.y), -Math.cos(c.player.rotation.y)) * 180 / Math.PI) * -1 + 360) % 360),
       home: h.home ? h.home.label : null,
-      people: ps,
+      people: ps,   // each with can_talk: whether they have a voice (you can call them)
       car_nearby: car ? `a parked ${car.model?.name === 'bike' ? 'motorbike' : 'car'} ${Math.round(Math.hypot(car.x - p.x, car.z - p.z))} m away` : null,
       front_door: door !== undefined ? `${door} m away` : null,
       at_door: !!document.getElementById('doorbar') && !document.getElementById('doorbar').hidden,
       card: c.card.level === 2 ? 'red' : c.card.level === 1 ? 'yellow' : null,
+      missed_calls: (window.__agentCalls || []).splice(0),   // people who tried to call you while you had no voice
+      in_call_with: window.__agentCall?.members || [],
+      calling: window.__agentCall?.ringing || [],
       knocks: [...document.querySelectorAll('#mptoasts .toast')].map(t => t.firstChild?.textContent).filter(t => /knocking/.test(t || '')),
       last_message: document.getElementById('hint')?.classList.contains('gone') ? null : document.getElementById('hint')?.textContent,
     };
@@ -83,16 +90,18 @@ const server = new McpServer({ name: 'toycity', version: '0.1.0' }, {
 });
 
 server.tool('join', 'Enter Toy City as a player. Start in a town (rotterdam, barendrecht or amsterdam), optionally next to an address or place in it. You can only choose where to start; after that you move like everyone else.',
-  { town: z.enum(['rotterdam', 'barendrecht', 'amsterdam']).default('barendrecht'), near: z.string().max(80).optional().describe('an address or place to start next to, e.g. "Dorpsstraat 141"'), name: z.string().min(1).max(20).describe('your name in the game') },
-  async ({ town, near, name }) => {
+  { town: z.enum(['rotterdam', 'barendrecht', 'amsterdam']).default('barendrecht'), near: z.string().max(80).optional().describe('an address or place to start next to, e.g. "Dorpsstraat 141"'), name: z.string().min(1).max(20).describe('your name in the game'),
+    voice: z.boolean().default(false).describe('join with a voice: you can take and make calls, speak with say and hear with listen. Leave it off if you will not listen; people then get no call button for you') },
+  async ({ town, near, name, voice }) => {
     if (page) return text('Already in Toy City. Call leave first to start again.');
     const exe = chromePath();
-    browser = await chromium.launch({ headless: true, ...(exe ? { executablePath: exe } : {}), args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--mute-audio'] });
+    browser = await chromium.launch({ headless: true, ...(exe ? { executablePath: exe } : {}), args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader', '--autoplay-policy=no-user-gesture-required', ...(voice ? [] : ['--mute-audio'])] });
+    hasVoice = voice;
     const ctx = await browser.newContext({ viewport: { width: 960, height: 600 } });
     me = '🤖 ' + name.replace(/[\u0000-\u001f<>]/g, '').slice(0, 20);
     await ctx.addInitScript(n => { localStorage.setItem('toycity.name', n); localStorage.setItem('toycity.view', 'chase'); }, me);
     page = await ctx.newPage();
-    await page.goto(`${SITE}city.html?place=${town}&agent=1&quality=low`);
+    await page.goto(`${SITE}city.html?place=${town}&agent=1&quality=low${voice ? '&voice=1' : ''}`);
     await page.waitForFunction(() => document.getElementById('loading')?.classList.contains('done') && window.__agent, null, { timeout: 120000 });
     if (near) {   // the one jump allowed: where you start
       const hit = await inPage(q => window.__city.findPlace(q), near);
@@ -203,6 +212,44 @@ server.tool('answer_door', 'Someone is knocking at your home (look lists knocks)
     await page.waitForTimeout(come ? 2500 : 500);
     return text(come ? 'You came to the door.\n' + describe(await state()) : 'You told them not now.');
   });
+
+// ---------- voice: only for an agent that joined with voice: true ----------
+function speak(text) {   // text to a WAV file with the computer's own speech: macOS say, or espeak-ng / espeak
+  const f = path.join(os.tmpdir(), `toycity-say-${process.pid}.wav`);
+  if (process.platform === 'darwin') execFileSync('say', ['-o', f, '--data-format=LEI16@22050', text]);
+  else { let ok = false; for (const c of ['espeak-ng', 'espeak']) { try { execFileSync(c, ['-w', f, text]); ok = true; break; } catch { /* next */ } } if (!ok) throw new Error('no text-to-speech here: install espeak-ng, or pass your own audio'); }
+  const b = fs.readFileSync(f).toString('base64'); fs.rmSync(f, { force: true }); return b;
+}
+const needVoice = () => { need(); if (!hasVoice) throw new Error('You joined without a voice: leave and join again with voice: true.'); };
+
+server.tool('call', 'Ring someone near you who can talk (look shows can_talk). They hear you once they answer.',
+  { name: z.string().max(40).describe('their name, or part of it') },
+  async ({ name }) => { needVoice(); await pace(); const who = await inPage(n => window.__agentCall?.ring(n), name); return text(who ? `Ringing ${who}…` : `Nobody called "${name}" who can talk is near you.`); });
+
+server.tool('say', 'Speak in your call (calls to you are answered by themselves when you have a voice). Text is spoken with a computer voice; or pass your own WAV audio.',
+  { text: z.string().max(500).optional(), wav_base64: z.string().max(4_000_000).optional() },
+  async ({ text: t, wav_base64 }) => {
+    needVoice(); await pace();
+    if (!t && !wav_base64) return text('Give text or wav_base64.');
+    const inCall = await inPage(() => window.__agentCall?.members.length || 0);
+    if (!inCall) return text('You are not in a call: nobody would hear you. Use call, or wait for someone to call you.');
+    const secs = await inPage(b => window.__agentVoice.say(b), wav_base64 || speak(t));
+    await page.waitForTimeout(Math.min(30, secs) * 1000);
+    return text(`Said it (${secs.toFixed(1)} s).`);
+  });
+
+server.tool('listen', 'What you heard in your call since you last listened (up to two minutes), as audio. Wait a little first if you just spoke.',
+  { seconds: z.number().min(0).max(30).default(0).describe('listen this much longer first') },
+  async ({ seconds }) => {
+    needVoice(); if (seconds) await page.waitForTimeout(seconds * 1000);
+    const r = await inPage(() => window.__agentVoice?.take?.() || null);
+    if (!r || r.seconds < 0.2) return text('Nothing heard yet.');
+    if (r.silent) return text(`${r.seconds.toFixed(0)} s of silence.`);
+    return { content: [{ type: 'text', text: `${r.seconds.toFixed(1)} s of call audio:` }, { type: 'audio', data: r.wav, mimeType: 'audio/wav' }] };
+  });
+
+server.tool('hang_up', 'Leave your call.', {},
+  async () => { needVoice(); await pace(); await inPage(() => window.__agentCall?.leave()); return text('You left the call.'); });
 
 server.tool('leave', 'Leave Toy City.', {},
   async () => { if (browser) await browser.close().catch(() => {}); browser = page = null; clearInterval(walker); return text('You left Toy City.'); });

@@ -39,7 +39,10 @@ If the `toycity` MCP tools (`join`, `look`, `walk_to`, …) are not available ye
    - farther: walk to a parked car, `get_in_car`, `drive_to` the place, `wait`, then `get_out`
 4. At a front door: `knock`, or `live_here` to make it your home, then `go_inside`. If `look` shows a
    knock at your home, use `answer_door`.
-5. `leave` when done, and tell the user what you saw and who you met.
+5. Talking: join with `voice: true` only if you will listen and answer. Calls to you are answered by
+   themselves; then `listen` (the call as audio) and `say` (text, spoken aloud) in turns. `call`
+   someone near you whose `can_talk` is true; `hang_up` when done. Without a voice nobody can call you.
+6. `leave` when done, and tell the user what you saw and who you met.
 
 ## Rules
 

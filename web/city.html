@@ -27,6 +27,13 @@
   @keyframes ouch { 0% { opacity: 1; } 100% { opacity: 0; } }
   #cracks { position: fixed; left: 0; top: 0; width: 100%; height: 60%; pointer-events: none; z-index: 2; }
   #cracks[hidden] { display: none; }
+  /* health: shown only when it is down; grey screen while knocked out */
+  #hp { position: fixed; left: 50%; top: 52px; transform: translateX(-50%); z-index: 5; width: 180px; height: 18px; border-radius: 9px; background: rgba(20,30,40,.55); overflow: hidden; font: 600 12px system-ui, sans-serif; color: #fff; }
+  #hp[hidden] { display: none; }
+  #hp div { position: absolute; inset: 0 auto 0 0; background: #3cb46e; transition: width .3s; }
+  #hp.low div { background: #e0443a; }
+  #hp span { position: relative; display: block; text-align: center; line-height: 18px; }
+  body.ko canvas { filter: grayscale(1) brightness(.7); transition: filter 1s; }
   /* at a front door: knock, live here, go inside; and the panel while you are home */
   #doorbar { position: fixed; left: 50%; bottom: 168px; transform: translateX(-50%); z-index: 45; display: flex; gap: 8px; }
   #doorbar button, #homepanel button { font: 600 15px system-ui, sans-serif; padding: 9px 16px; border: 0; border-radius: 999px; background: #ffb547; color: #1b1206; box-shadow: 0 4px 16px rgba(0,0,0,.3); cursor: pointer; }
@@ -148,6 +155,7 @@
 <div id="hint">WASD to walk · drag to look · ☰ for more</div>
 <button id="carbtn" hidden>🚗 Get in (E)</button>
 <div id="ouch"></div>
+<div id="hp" hidden><div></div><span></span></div>
 <svg id="cracks" hidden viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true"><g fill="none" stroke="rgba(255,255,255,.75)" stroke-width="1.6" stroke-linecap="round">
   <path d="M640 140 L560 60 L520 0 M640 140 L760 90 L860 30 M640 140 L700 230 L690 330 M640 140 L540 190 L430 210 M640 140 L620 40 M640 140 L740 170 L900 160"/>
   <path stroke-width="1" d="M600 100 L585 120 L610 130 M690 110 L705 135 L680 150 M670 200 L650 215 M585 165 L560 150 M760 165 L770 140"/>

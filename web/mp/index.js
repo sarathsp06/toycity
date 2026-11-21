@@ -15,6 +15,7 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
   hud.innerHTML = `<button id="mpname" title="Change your name"></button>
     <button id="mpview" title="Switch between seeing through your eyes and from behind (V)"></button>
     <button id="mpsound" title="Birds, wind and traffic"></button>
+    <button id="mpcalls" title="Whether others can call you (switch off to never be rung)"></button>
     <button id="mpmeet" title="Share a link to where you are standing; whoever opens it arrives here">📍 Meeting link</button>
     <button id="mppeople">Looking for people nearby…</button><div id="mplist" hidden></div>`;
   // the call panel and invitations sit at the bottom of the screen, where thumbs are
@@ -53,7 +54,15 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
     if (want !== voice.micOn) setMic(want);
     renderCall();
   }
+  // AI agents (tools/mcp, names start with 🤖) have no voice: they are not offered for calls, and an
+  // agent's game turns down a call at once instead of leaving the caller ringing
+  // Capabilities: each player tells the others what it can do (presence: caps). 'v' = voice, it can hear
+  // and talk. A browser has it unless calls are switched off in the menu; an AI agent only if it joined
+  // with a voice. Players without it are never offered for a call.
+  const canTalk = p => !!p && (p.caps === undefined ? !(p.name || '').startsWith('🤖') : p.caps.includes('v'));
+  const myCaps = () => (body?.caps ?? 'v');
   function ring(id) {
+    if (!canTalk(presence.peers.get(id))) return;
     if (call?.members.has(id) || call?.ringing.has(id)) return;
     call ||= { id: Math.random().toString(36).slice(2), members: new Set(), ringing: new Map() };
     presence.sendTo(id, { t: 'invite', call: call.id, members: [...call.members] });
@@ -67,7 +76,15 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
     call = null; settle();
   }
   presence.onCall((m, from) => {
-    if (m.t === 'invite') {
+    if (m.t === 'invite' && !myCaps().includes('v')) {
+      presence.sendTo(from, { t: 'decline', call: m.call, novoice: 1 });   // an older game may still ring me
+      (window.__agentCalls ||= []).push(nameOf(from));
+    } else if (m.t === 'invite' && body?.autoAnswer) {   // a voice agent picks up by itself
+      if (call && call.id !== m.call) leave();
+      call = { id: m.call, members: new Set([from, ...(m.members || []).filter(id => presence.peers.has(id))]), ringing: new Map() };
+      for (const id of call.members) presence.sendTo(id, { t: 'join', call: call.id });
+      settle();
+    } else if (m.t === 'invite') {
       const t = toast(`📞 ${nameOf(from)} wants to talk`, [
         ['Answer', () => {
           if (call && call.id !== m.call) leave();
@@ -80,12 +97,19 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
       t.classList.add('ring'); t.dataset.call = m.call;
     } else if (call?.id === m.call) {
       if (m.t === 'join') { stopRinging(from); call.members.add(from); }
-      else if (m.t === 'decline') { stopRinging(from); toast(`${nameOf(from)} can't talk right now`, [], 4000); }
+      else if (m.t === 'decline') { stopRinging(from); toast(m.novoice || m.agent ? `${nameOf(from)} can't talk: no voice.` : `${nameOf(from)} can't talk right now`, [], 4000); }
       else if (m.t === 'leave') { stopRinging(from); if (call.members.delete(from)) toast(`${nameOf(from)} left the call`, [], 4000); }
       settle();
     } else if (m.t === 'leave') toasts.querySelectorAll(`.ring[data-call="${m.call}"]`).forEach(t => t.remove());   // they hung up before I answered
   });
   presence.onLeave(p => { if (call) { stopRinging(p.id); call.members.delete(p.id); settle(); } });
+  // for an AI agent with a voice (tools/mcp): call someone by name, hang up, and who is in the call
+  window.__agentCall = {
+    ring: name => { const p = [...presence.peers.values()].filter(p => canTalk(p) && p.dist < 60).find(p => (p.name || '').toLowerCase().includes(String(name).toLowerCase())); if (!p) return null; ring(p.id); return p.name; },
+    leave: () => leave(),
+    get members() { return call ? [...call.members].map(nameOf) : []; },
+    get ringing() { return call ? [...call.ringing.keys()].map(nameOf) : []; },
+  };
   const pill = (text, cls) => Object.assign(document.createElement('span'), { className: cls, textContent: text });
   let callSig = '';
   function renderCall() {
@@ -104,7 +128,7 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
       callBox.replaceChildren('📞 ', ...items, mute, end);
     } else callBox.replaceChildren();
     // the people close to me that I could talk to, as buttons
-    const near = [...presence.peers.values()].filter(p => p.dist <= MP.talkReach && !call?.members.has(p.id) && !call?.ringing.has(p.id))
+    const near = [...presence.peers.values()].filter(p => p.dist <= MP.talkReach && canTalk(p) && myCaps().includes('v') && !call?.members.has(p.id) && !call?.ringing.has(p.id))
       .sort((a, b) => a.dist - b.dist).slice(0, 3);
     for (const p of near) { const b = document.createElement('button'); b.className = 'talk'; b.textContent = `📞 Talk to ${p.name || 'Visitor'}`; b.onclick = () => ring(p.id); callBox.append(b); }
     callBox.hidden = !callBox.childNodes.length;
@@ -126,7 +150,7 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
     }
     if (!best) return;
     e.stopImmediatePropagation();       // a tap on a person is not a "walk there"
-    if (call?.members.has(best.id)) return;
+    if (call?.members.has(best.id) || !canTalk(best) || !myCaps().includes('v')) return;
     ring(best.id);
   }, true);
   const ambience = createAmbience({ ctx: voice.listener.context, surroundings });
@@ -135,6 +159,7 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
     $('#mpname').textContent = '👤 ' + presence.name;
     $('#mpview').textContent = view?.eyes ? '🎥 From behind' : '👁️ My eyes';
     $('#mpsound').textContent = ambience.on ? '🔊 Sounds' : '🔈 Sounds off';
+    $('#mpcalls').textContent = myCaps().includes('v') ? '📞 Calls on' : '📵 Calls off';
     const ps = [...presence.peers.values()], near = ps.filter(p => p.dist <= MP.nearby).length;
     if (!$('#mplist').hidden) list();
     $('#mppeople').textContent = !ps.length ? '👥 Nobody around yet'
@@ -158,8 +183,9 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
       const row = document.createElement('div'), go = document.createElement('button');
       row.textContent = `${p.name || 'Visitor'}${p.mic ? '' : ' 🔇'} · ${p.dist < 1000 ? Math.round(p.dist) + ' m' : (p.dist / 1000).toFixed(1) + ' km'} `;
       go.textContent = 'Go'; go.onclick = () => { const s = p.track.sample(performance.now() / 1000); if (s && goToRD) goToRD(s.x, s.y); };
-      const talk = document.createElement('button'); talk.textContent = call?.members.has(p.id) ? 'In call' : '📞 Talk'; talk.disabled = !!call?.members.has(p.id); talk.onclick = () => ring(p.id);
-      row.append(go, talk); return row;
+      row.append(go);
+      if (canTalk(p) && myCaps().includes('v')) { const talk = document.createElement('button'); talk.textContent = call?.members.has(p.id) ? 'In call' : '📞 Talk'; talk.disabled = !!call?.members.has(p.id); talk.onclick = () => ring(p.id); row.append(talk); }
+      return row;
     }) : [Object.assign(document.createElement('div'), { textContent: 'Nobody in this area yet. Share the link with a friend!' })]));
   }
   // a meeting link: this page, plus where I stand. Opening it puts you a few metres from that spot.
@@ -177,6 +203,7 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
   $('#mpview').onclick = e => { if (view) view.eyes = !view.eyes; e.target.blur(); render(); };
   addEventListener('toycity:view', render);
   $('#mpsound').onclick = () => { ambience.toggle(); render(); };
+  $('#mpcalls').onclick = () => { body?.setVoice?.(!myCaps().includes('v')); if (!myCaps().includes('v')) leave(); render(); renderCall(); };
   render();
 
   let hudT = 0, last = 0;

@@ -22,6 +22,7 @@ Wander the street you grew up on, send a friend a link, and meet them there. No 
 - 🙋 **Ride along**: press `E` next to a friend who is driving and sit in their passenger seat; the driver sees you beside them
 - 🚪 **Knock on doors** (`K`) or **make a house your home**: go inside, hear it when someone knocks wherever you are, and step out to meet them
 - 💥 **Mind the paintwork**: crash and both cars show it; park on the pavement and you get a ticket
+- ❤️ **Health**: every hit by a car costs some; after twenty-odd hits you are knocked out for 30 seconds
 - 🟨 **Drive carefully**: hit someone and they go flying, and you get a yellow card everyone can see (red if you do it again)
 - 👋 **Meet people**: everyone nearby walks around as themselves. Tap someone to call them, and hear them from where they stand
 - 📍 **Send a meeting link**: friends who open it arrive right next to you

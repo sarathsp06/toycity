@@ -41,6 +41,7 @@ export function createVoice({ camera, player, presence, transport, params, inCal
   const outBuf = new Float32Array(out.fftSize);
   const outLevel = () => { out.getFloatTimeDomainData(outBuf); let s = 0; for (const x of outBuf) s += x * x; return Math.sqrt(s / outBuf.length); };
   log('audio context', ctx.state, ctx.sampleRate + ' Hz');
+  if (params.get('agent') === '1' && params.get('voice') === '1') agentEar(ctx, listener.getInput());
   ctx.addEventListener('statechange', () => log('audio context', ctx.state));
   const unlock = () => { if (ctx.state !== 'running') ctx.resume().then(() => log('audio context resumed')).catch(e => log('resume failed', e)); };
   addEventListener('pointerdown', unlock); addEventListener('keydown', unlock);
@@ -82,7 +83,7 @@ export function createVoice({ camera, player, presence, transport, params, inCal
   async function setMic(on) {
     if (on && !mic) {
       unlock();
-      mic = params.get('fakemic') ? fakeMic(ctx) : await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      mic = params.get('agent') === '1' ? agentMouth(ctx) : params.get('fakemic') ? fakeMic(ctx) : await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
       micLevel = levelMeter(ctx, mic);
       log('mic on:', mic.getAudioTracks().map(t => t.label || 'track'), '; audio context', ctx.state);
     } else if (!on && mic) {
@@ -132,4 +133,44 @@ function fakeMic(ctx) {
   o.frequency.value = 440; lfo.frequency.value = 1.5; g.gain.value = 0;
   lfo.connect(g.gain); o.connect(g).connect(dst); o.start(); lfo.start();
   return dst.stream;
+}
+
+// ---------- an AI agent's voice (tools/mcp, ?agent=1&voice=1) ----------
+// Its mouth is a stream it speaks WAV clips into (window.__agentVoice.say); its ear keeps what it heard
+// in the call, 16 kHz mono, until the agent takes it (window.__agentVoice.take, a WAV as base64).
+let mouth = null;
+function agentMouth(ctx) {
+  if (!mouth) mouth = ctx.createMediaStreamDestination();
+  const v = (window.__agentVoice ||= {});
+  v.say = async b64 => {
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const buf = await ctx.decodeAudioData(bytes.buffer);
+    const src = ctx.createBufferSource(); src.buffer = buf; src.connect(mouth); src.start();
+    return buf.duration;
+  };
+  return mouth.stream;
+}
+function agentEar(ctx, input) {
+  const RATE = 16000, MAX = RATE * 120, chunks = []; let n = 0;
+  const tap = ctx.createScriptProcessor(4096, 1, 1), step = ctx.sampleRate / RATE;
+  input.connect(tap); tap.connect(ctx.destination);   // (it outputs silence; it only listens)
+  tap.onaudioprocess = e => {
+    const x = e.inputBuffer.getChannelData(0), out = new Int16Array(Math.floor(x.length / step));
+    for (let i = 0; i < out.length; i++) out[i] = Math.max(-1, Math.min(1, x[Math.floor(i * step)])) * 32767;
+    chunks.push(out); n += out.length;
+    while (n > MAX) n -= chunks.shift().length;   // the last two minutes at most
+  };
+  const v = (window.__agentVoice ||= {});
+  v.take = () => {
+    const pcm = new Int16Array(n); let o = 0; for (const c of chunks) { pcm.set(c, o); o += c.length; }
+    chunks.length = 0; n = 0;
+    let peak = 0; for (const x of pcm) peak = Math.max(peak, Math.abs(x));
+    const wav = new DataView(new ArrayBuffer(44 + pcm.length * 2)), w = (o, t) => [...t].forEach((c, i) => wav.setUint8(o + i, c.charCodeAt(0)));
+    w(0, 'RIFF'); wav.setUint32(4, 36 + pcm.length * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
+    wav.setUint32(16, 16, true); wav.setUint16(20, 1, true); wav.setUint16(22, 1, true); wav.setUint32(24, RATE, true);
+    wav.setUint32(28, RATE * 2, true); wav.setUint16(32, 2, true); wav.setUint16(34, 16, true); w(36, 'data'); wav.setUint32(40, pcm.length * 2, true);
+    for (let i = 0; i < pcm.length; i++) wav.setInt16(44 + i * 2, pcm[i], true);
+    let bin = ''; const u = new Uint8Array(wav.buffer); for (let i = 0; i < u.length; i += 0x8000) bin += String.fromCharCode(...u.subarray(i, i + 0x8000));
+    return { seconds: pcm.length / RATE, silent: peak < 300, wav: btoa(bin) };
+  };
 }

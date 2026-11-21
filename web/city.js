@@ -705,13 +705,34 @@ function hitPerson(id, vx, vz) {
 }
 // someone drove into you: fly, land, lie there a moment, get up (only when on foot)
 const fling = { on: false, vx: 0, vz: 0, vy: 0, h: 0, down: 0, spin: 0 };
+// Health: 100, a hit takes 3 to 6 by its speed (so some twenty to thirty hits), and it comes back by
+// 1 every 4 s. At 0 you are knocked out: flat on the ground, screen grey, 30 s before you get up again.
+const HEALTH = 100, OUT_FOR = 30;
+const health = { hp: HEALTH, out: 0, hitT: 0 };
+const hpBar = document.getElementById('hp');
+function showHealth() {
+  if (!hpBar) return;
+  hpBar.hidden = health.hp >= HEALTH && !health.out;
+  hpBar.firstElementChild.style.width = health.hp + '%';
+  hpBar.classList.toggle('low', health.hp < 30);
+  hpBar.lastElementChild.textContent = health.out ? `Knocked out · back in ${Math.ceil(health.out)} s` : `❤️ ${Math.round(health.hp)}`;
+  document.body.classList.toggle('ko', health.out > 0);
+}
 function knockDown({ vx, vz, by }) {
-  if (driving.driving || ride || fly || fling.on) return;
+  if (driving.driving || ride || fly) return;
+  const who = typeof by === 'string' && by ? by.slice(0, 40) : 'Someone';
+  if (!health.out && performance.now() - health.hitT > 400) {   // one hit counts once, even if the car lingers
+    health.hitT = performance.now();
+    health.hp = Math.max(0, health.hp - Math.min(6, 3 + Math.hypot(vx, vz) * 0.25));
+    if (!health.hp) { health.out = OUT_FOR; note(`💫 ${who} knocked you out. You'll be back in ${OUT_FOR} seconds.`); }
+    showHealth();
+  }
+  if (fling.on) return;
   const sp = Math.min(14, Math.hypot(vx, vz) || 3), k = sp / (Math.hypot(vx, vz) || 1);
   Object.assign(fling, { on: true, vx: vx * k * 0.7, vz: vz * k * 0.7, vy: 3 + sp * 0.35, h: 0, down: 0, spin: 0 });
   goal = null; marker.visible = false; jump.phase = null; jump.h = 0;
   const f = document.getElementById('ouch'); if (f) { f.classList.remove('on'); void f.offsetWidth; f.classList.add('on'); }
-  note(`🤕 Ouch! ${typeof by === 'string' && by ? by.slice(0, 40) : 'Someone'} ran you over.`);
+  if (!health.out) note(`🤕 Ouch! ${who} ran you over. Health ${Math.round(health.hp)}/${HEALTH}.`);
 }
 // one frame of flying or lying down; returns true while it runs (no walking meanwhile)
 function flingStep(dt) {
@@ -728,6 +749,7 @@ function flingStep(dt) {
     // flat on the back for 2.5 s, then up again over half a second
     const up = THREE.MathUtils.smoothstep(fling.down, 2.5, 3.0);
     if (m) m.rotation.x = -Math.PI / 2 * (1 - up);
+    if (health.out) { if (m) m.rotation.x = -Math.PI / 2; return true; }   // knocked out: stay down until the time is up
     if (fling.down > 3.0) { fling.on = false; if (m) m.rotation.x = 0; needUnstick = true; }
   }
   return true;
@@ -754,6 +776,7 @@ function seat(p, out) {
   return out.set(g.position.x + lx * Math.cos(h) + lz * Math.sin(h), 0.15, g.position.z - lx * Math.sin(h) + lz * Math.cos(h));
 }
 function toggleCar() {
+  if (health.out) return;   // knocked out
   if (fly) toggleFly();
   if (ride) {
     const g = ride.player?.group, h = g ? g.rotation.y : 0;
@@ -859,6 +882,7 @@ let goal = null;
 // ?agent=1: an AI agent plays (tools/mcp). It moves only through what a person can do, at a person's speed:
 // walking or running to a point, the car and its autopilot, doors. It cannot jump to a place once in.
 const AGENT = params.get('agent') === '1' ? { run: false, draw: 0 } : null;
+let voiceCap = AGENT ? params.get('voice') === '1' : localStorage.getItem('toycity.calls') !== 'off';
 const marker = new THREE.Mesh(new THREE.RingGeometry(0.8, 1.2, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffd23f, transparent: true, opacity: 0.9, depthTest: false }));
 marker.visible = false; marker.renderOrder = 10; scene.add(marker);
 renderer.domElement.addEventListener('pointerup', e => {
@@ -1240,6 +1264,15 @@ function frame(now) {
   avatar.dip = 0;
   animateAvatar(dt, jump.phase === 'air' ? 0 : movedThisFrame); movedThisFrame = 0;
   social?.update(dt, driving.driving ? Math.abs(driving.speed) : ride ? ride.speed || 0 : fling.on && !fling.down ? Math.hypot(fling.vx, fling.vz) : avatar.speed);
+  if (health.out) {
+    if ((health.out -= dt) <= 0) { health.out = 0; health.hp = HEALTH; fling.down = Math.max(fling.down, 2.5); note('🌅 You come round. Full health again.'); }
+    showHealth();
+  } else if (health.hp < HEALTH) { health.hp = Math.min(HEALTH, health.hp + dt / 4); if ((health.showT = (health.showT || 0) + dt) > 1) { health.showT = 0; showHealth(); } }
+  // other people going in or out of a house: their door opens here too
+  if ((health.doorT = (health.doorT || 0) + dt) > 0.25) {
+    health.doorT = 0;
+    for (const q of social?.presence.peers.values() || []) if (q.pose === 5 && q.player) homes.openNear(q.player.group.position.x, q.player.group.position.z);
+  }
   if (card.level && (card.t -= dt) <= 0) { card.level = 0; note('Card gone. Thanks for driving carefully.'); }
   showCard(player, card.level, driving.driving ? 2.3 : 2.25);
   driving.tick(dt, player.position);
@@ -1278,7 +1311,7 @@ if (AGENT) window.__agent = {
   face(y) { yaw = y; },
   draw(n = 3) { AGENT.draw = n; },   // render the next few frames (for a screenshot)
 };
-window.__city = { ovTiles, solids, driving, knockDown, card, fling, homes, nearestPlace, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, bench, blocked, jump, toRD, ORX, ORY, get stats() { return window.__stats; } };
+window.__city = { ovTiles, solids, driving, knockDown, card, fling, homes, health, nearestPlace, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, bench, blocked, jump, toRD, ORX, ORY, get stats() { return window.__stats; } };
 // ---------- social layer: other people, voice and background sounds (web/mp/, ?mp=0 turns it off) ----------
 // It only reads the player's position and the trees and parked cars around it; nothing here depends on it.
 let social = null;
@@ -1298,7 +1331,11 @@ if (params.get('mp') !== '0') import('./mp/index.js').then(m => m.start({
     get mine() { return driving.driving ? { model: driving.model, x: player.position.x, z: player.position.z, h: player.rotation.y } : null; } }, view: { get eyes() { return firstPerson; }, set eyes(v) { setFirstPerson(v); } },
   hud: document.getElementById('mp'), knockDown, homes,
   // what others see of you besides where you are: your card, lying flat or flying, and how high you are
-  body: { get card() { return card.level; }, get pose() { return homes.inside ? 3 : fling.on ? (fling.down ? 2 : 1) : 0; }, get y() { return fling.on ? +fling.h.toFixed(2) : 0; } },
+  // caps: what I can do, told to everyone ('v' = can hear and talk). On by default in a browser,
+  // off with the 📞 Calls button; an agent (?agent=1) has a voice only if it joined with one (&voice=1)
+  body: { get caps() { return voiceCap ? 'v' : ''; }, setVoice(on) { voiceCap = on; if (!AGENT) localStorage.setItem('toycity.calls', on ? 'on' : 'off'); },
+    get autoAnswer() { return !!AGENT && voiceCap; },
+    get card() { return card.level; }, get pose() { return homes.inside ? 3 : homes.busy ? 5 : health.out ? 4 : fling.on ? (fling.down ? 2 : 1) : 0; }, get y() { return fling.on ? +fling.h.toFixed(2) : 0; } },
 })).then(s => { social = s; window.__city.social = s; }).catch(e => { console.warn('multiplayer unavailable', e); document.getElementById('mp').textContent = 'Multiplayer unavailable right now'; });
 
 setFirstPerson(localStorage.getItem('toycity.view') === 'eyes');
