@@ -184,7 +184,7 @@ function aerialTexture(bitmap, aniso) {
 // Three levels by distance to the player, re-sorted a few times a second:
 //   near (< CAR_NEAR m): about 30k triangles, mid (< CAR_MID m): about 5k, beyond: the simple box car.
 // bump the ?v= on cars.glb when the models change: the file is cached for a day
-const CAR_MIX = { golf: 5, camry: 4, fiat500: 3, jeep: 3, suv: 3, van: 1.5 };
+const CAR_MIX = { suv: 1 };   // one model in many paints (tools/blendswap_cars.py IN_GAME)
 const CAR_NEAR = 25, CAR_MID = 70;
 function partsOf(obj) {
   const parts = []; obj.updateMatrixWorld(true);
@@ -205,7 +205,7 @@ function openParts(root, name) {
   return { body: partsOf(body), doors };
 }
 progress(0.08, 'Parking the cars');
-const CAR_MODELS = await new GLTFLoader().loadAsync(new URL('./models/cars.glb?v=doors1', import.meta.url).href,
+const CAR_MODELS = await new GLTFLoader().loadAsync(new URL('./models/cars.glb?v=suvonly1', import.meta.url).href,
   e => e.total && progress(0.08 + 0.37 * e.loaded / e.total, 'Parking the cars')).then(g => {
   const list = [];
   for (const [name, w] of Object.entries(CAR_MIX)) {

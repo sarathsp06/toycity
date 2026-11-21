@@ -139,16 +139,11 @@ you play, except for the minimap tiles.
 
 | Model | Author | Licence |
 |---|---|---|
-| [Volkswagen Golf MK4](https://blendswap.com/blend/3976) | Jay-Artist | CC BY |
-| [Toyota Camry 2001](https://blendswap.com/blend/23001) | abdulsalamnaqeeb | CC BY |
-| [Fiat 500 Abarth](https://blendswap.com/blend/13817) | Pierallard | CC BY |
-| [Jeep Cherokee](https://blendswap.com/blend/25471) | koumis | CC0 |
-| [BeamNG van](https://blendswap.com/blend/19228) | BlenderBach | CC BY |
 | [Generic SUV ZYX0](https://blendswap.com/blend/29795) | 1DInc | CC0 |
 | Zuri (persona), from [BlenderKit](https://www.blenderkit.com) | Richie Kirui | CC0 |
 | Xbot (the classic figure and the shared walk, run and idle animations) | from the [three.js examples](https://github.com/mrdoob/three.js/tree/dev/examples/models/gltf) | as distributed with three.js |
 
-The cars were simplified and packed into one file by `tools/`, and Zuri's Rigify skeleton was
+Every parked car is this one SUV in a different paint, so the car file is 1.8 MB and every car you drive opens its door; the Golf, Camry, Fiat 500, Jeep and van conversions are still in `tools/blendswap_cars.py` (`IN_GAME`) if variety is wanted back. The car was simplified by `tools/`, and Zuri's Rigify skeleton was
 renamed to Mixamo bones by `tools/personas.py`, so every person shares the same animations. The
 full list is in [CREDITS.txt](web/models/CREDITS.txt).
 

@@ -35,6 +35,9 @@ CARS = {
     # the file holds a clean SUV at the origin and a wrecked copy 6 m away; the anchor keeps the clean one
     "suv": ("29795/suv.blend", (4.55, 1.72), "UCR_GENSUV_ZYX0_2SBD.001"),
 }
+# the cars that go into the game; the others can still be built and switched back in here.
+# Only the SUV (2026-11-21): one model in many paints loads in a tenth of the time and every car opens its doors.
+IN_GAME = ["suv"]
 # per car: extra object names to drop (snow cover, the bonus driver, interior) and material names to pin
 EXTRA_DROP = {"suv": ("_snow", "_man", "_int_", "zyx0_006", "zyx0_1sbd")}
 # cars whose doors are separate parts in the source: each door is a list of objects, exported on its own as
@@ -322,7 +325,7 @@ def main():
         built.append(tmp)
     # merge the per-car files into one: every car built so far, so one car can be rebuilt on its own
     bpy.ops.wm.read_factory_settings(use_empty=True)
-    built = [os.path.join(HERE, "data", "blendswap", f"_{n}.glb") for n in CARS
+    built = [os.path.join(HERE, "data", "blendswap", f"_{n}.glb") for n in IN_GAME
              if os.path.exists(os.path.join(HERE, "data", "blendswap", f"_{n}.glb"))]
     for f in built:
         before = set(bpy.data.objects)
@@ -340,7 +343,7 @@ def main():
     bpy.ops.export_scene.gltf(filepath=OUT, export_format="GLB", export_yup=True, export_apply=True)
     with open(os.path.join(HERE, "web", "models", "CREDITS.txt"), "w") as fh:
         fh.write("Car models from BlendSwap (licence as declared by the uploader):\n")
-        for n in CARS:
+        for n in IN_GAME:
             fh.write(f"- {CREDITS[n]}\n")
         fh.write("Person: Xbot from the three.js examples, dressed with tools/dress_person.py.\n")
     print("WROTE", OUT, os.path.getsize(OUT))
