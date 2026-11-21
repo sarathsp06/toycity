@@ -226,6 +226,17 @@ changes by speed × tan(steer) / wheelbase), with less steering at speed. Collis
 of eight points around the body touch the bitmap or a footprint: a move must touch nothing, or less
 than now, so a car parked bumper to bumper can always back out but never drive into a hedge. Other
 players receive `model:colour` in the state message and draw the car instead of the person.
+A passenger sends `ride:0`: others hide them, and their own game seats them in the driver's car.
+
+The autopilot (`web/autopilot.js`) drives along the region's streets. `tools/roadgraph.mjs` turns
+every drivable OpenStreetMap way into a graph (`regions/<slug>/roads.json`: nodes in RD half-metres
+and their links, about 100,000 nodes for Rotterdam, loaded the first time you use it). A destination
+comes from the region's search index (every address, place and street), then OpenStreetMap's
+Nominatim search for anything else, or a click on the map. The route is an A* search over the graph;
+the car steers towards a point a few metres further along it (pure pursuit) and slows down where the
+route bends. On autopilot only buildings, water and hedges stop the car, not parked cars or people.
+When it is stuck it backs up with the wheel the other way, and after a few tries it hops to the next
+point of the route, so a trip always finishes. Any steering or throttle takes the wheel back.
 
 ## 10. Phones
 

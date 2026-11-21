@@ -12,6 +12,7 @@ import * as TX from './textures.js';
 import { loadAvatar, myLook } from './avatar.js';
 import { createSolids, footprintsOf, PERSON } from './solids.js';
 import { createDriving, makeCar, carKey, footprintOf, FRONT } from './vehicle.js';
+import { createAutopilot } from './autopilot.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 const params = new URLSearchParams(location.search);
@@ -207,7 +208,7 @@ function openParts(root, name) {
   return { body: partsOf(body), doors, interior: inside ? partsOf(inside) : null };
 }
 progress(0.08, 'Parking the cars');
-const CAR_MODELS = await new GLTFLoader().loadAsync(new URL('./models/cars.glb?v=bike1', import.meta.url).href,
+const CAR_MODELS = await new GLTFLoader().loadAsync(new URL('./models/cars.glb?v=bike2', import.meta.url).href,
   e => e.total && progress(0.08 + 0.37 * e.loaded / e.total, 'Parking the cars')).then(g => {
   const list = [];
   for (const [name, w] of [...Object.entries(CAR_MIX), ...CAR_EXTRA.map(n => [n, 0])]) {
@@ -669,9 +670,45 @@ function note(text) {
 }
 driving = createDriving({ scene, player, models: CAR_MODELS, carTiles, solids, ground: (x, z) => blockedAt(x, z), note });
 let walkDist = dist;
+// ---------- riding along: get into a friend's car as a passenger ----------
+// E next to someone who is driving puts you in their passenger seat; you move with their car until E again.
+// Others see you as "ride:0" (hidden, you are inside the car). The driver's own game does the driving.
+let ride = null;   // the peer whose car you are in
+function driverNear() {
+  const peers = window.__city?.social?.presence?.peers; if (!peers) return null;
+  let best = null, bd = 4;
+  for (const p of peers.values()) {
+    if (!p.car || p.car.startsWith('ride') || !p.player) continue;
+    const g = p.player.group.position, d = Math.hypot(g.x - player.position.x, g.z - player.position.z);
+    if (d < bd) { bd = d; best = p; }
+  }
+  return best;
+}
+// the passenger seat: beside the driver (front right), or behind the rider on a motorbike
+function seat(p, out) {
+  const [name] = p.car.split(':'), f = FRONT[name] ?? 1, g = p.player.group, h = g.rotation.y;
+  const [lx, lz] = name === 'bike' ? [-0.6 * f, 0] : [0.2 * f, -0.38 * -f];
+  return out.set(g.position.x + lx * Math.cos(h) + lz * Math.sin(h), 0.15, g.position.z - lx * Math.sin(h) + lz * Math.cos(h));
+}
 function toggleCar() {
   if (fly) toggleFly();
+  if (ride) {
+    const g = ride.player?.group, h = g ? g.rotation.y : 0;
+    if (g) { player.position.x = g.position.x + Math.sin(h) * 2.2; player.position.z = g.position.z + Math.cos(h) * 2.2; }
+    note('👋 Thanks for the ride, ' + (ride.name || 'friend') + '!'); ride = null; dist = walkDist; needUnstick = true;
+    carBtn(); return;
+  }
+  if (!driving.driving) {
+    // a friend driving within reach wins over any parked car: they are waiting for you
+    const d = driverNear();
+    if (d) {
+      goal = null; marker.visible = false; jump.phase = null; jump.h = 0;
+      ride = d; walkDist = dist; dist = Math.max(dist, 10); note('🚗 Riding along with ' + (d.name || 'a friend') + '. E to get out.');
+      carBtn(); return;
+    }
+  }
   if (driving.driving) {
+    stopAuto();
     const spot = driving.exit();
     player.position.x = spot.x; player.position.z = spot.z; dist = walkDist; needUnstick = false;
   } else {
@@ -680,16 +717,51 @@ function toggleCar() {
     driving.enter(car); walkDist = dist; dist = Math.max(dist, 10); pitch = Math.min(pitch, 0.35);
   }
   for (const t of carTiles) updateCars(t);
-  carBtn();
+  carBtn(); apBtn();
 }
 const carButton = document.getElementById('carbtn');
 function carBtn() {
   if (!carButton) return;
-  const near = !driving.driving && !fly && driving.nearest(player.position);
-  carButton.hidden = !driving.driving && !near;
-  carButton.textContent = driving.driving ? '🚶 Get out (E)' : '🚗 Get in (E)';
+  const friend = !driving.driving && !ride && !fly && driverNear();
+  const near = !driving.driving && !ride && !fly && driving.nearest(player.position);
+  carButton.hidden = !driving.driving && !ride && !near && !friend;
+  carButton.textContent = driving.driving || ride ? '🚶 Get out (E)' : friend ? '🙋 Ride along (E)' : '🚗 Get in (E)';
 }
 carButton?.addEventListener('click', e => { e.stopPropagation(); toggleCar(); });
+
+// ---------- autopilot: in a car or on the bike, name a place (or click the map) and lean back ----------
+// The route follows the region's OpenStreetMap streets (autopilot.js); W/A/S/D, the joystick or getting
+// out takes the wheel back.
+const autopilot = createAutopilot({ roadsUrl: new URL('roads.json', base).href, fromRD: (X, Y) => [X - ORX, ORY - Y] });
+const apButton = document.getElementById('apbtn'), apForm = document.getElementById('apform'), apInput = document.getElementById('apq');
+async function autoTo(x, z, label) {
+  note('🧭 Planning a route to ' + label + '…');
+  const [fx, fz] = driving.forward;
+  const r = await autopilot.start({ x: player.position.x, z: player.position.z, fx, fz }, { x, z }, label).catch(() => null);
+  if (!r) { note('🧭 No road there from here, sorry.'); return; }
+  note(`🧭 Autopilot to ${label}: ${(r.length / 1000).toFixed(1)} km. Steer to take over.`);
+  apBtn();
+}
+function stopAuto(why) { if (!autopilot.active) return; autopilot.stop(); if (why) note(why); apBtn(); }
+function apBtn() {
+  if (!apButton) return;
+  apButton.hidden = !driving.driving;
+  apButton.textContent = autopilot.active ? '✋ Stop autopilot' : '🧭 Autopilot';
+  if (!driving.driving) apForm.hidden = true;
+}
+apButton?.addEventListener('click', e => {
+  e.stopPropagation();
+  if (autopilot.active) return stopAuto('🧭 Autopilot off. Your wheel.');
+  apForm.hidden = !apForm.hidden; if (!apForm.hidden) { apInput.value = ''; apInput.focus(); }
+});
+apForm?.addEventListener('submit', async e => {
+  e.preventDefault(); const q = apInput.value.trim(); if (!q) return;
+  apInput.blur(); apForm.hidden = true;
+  const hit = await findPlace(q);
+  if (!hit) return note('🧭 Could not find "' + q + '" here.');
+  autoTo(hit[0] - ORX, -(hit[1] - ORY), hit[2]);
+});
+apInput?.addEventListener('keydown', e => { if (e.key === 'Escape') { apForm.hidden = true; apInput.blur(); } });
 const keys = {};
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
@@ -813,15 +885,37 @@ function nearestPlace() {
 
 // ---------- search: lazy-loaded index of every address, place and street ----------
 let searchIndex = null;
-async function goTo(q) {
+// an address, a place or a street -> [X, Y (RD metres), name, street], or null. First the region's own index
+// (every BAG address, OpenStreetMap place and street); failing that, OpenStreetMap's Nominatim search
+// inside the region, which knows landmarks, shops and alternative spellings.
+async function findPlace(q) {
   searchIndex ||= await (await fetch(new URL('search.json', base))).json();
   const norm = s => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
   const nq = norm(q), m = nq.match(/^(.*?)[ ,]+(\d+\s*[a-z]?)$/);
-  let hit = null;
-  if (m) { const a = searchIndex.addr.find(([s, n]) => norm(s) === norm(m[1]) && norm(n).replace(/\s/g, '') === m[2].replace(/\s/g, '')); if (a) { hit = [a[2], a[3], a[0] + ' ' + a[1]]; arriveStreet = a[0]; } }
-  if (!hit) { const p = searchIndex.pois.find(([n]) => norm(n) === nq) || searchIndex.pois.find(([n]) => norm(n).includes(nq)); if (p) hit = [p[1], p[2], p[0]]; }
-  if (!hit) { const s = Object.entries(searchIndex.streets).find(([n]) => norm(n) === nq) || Object.entries(searchIndex.streets).find(([n]) => norm(n).includes(nq)); if (s) hit = [s[1][0], s[1][1], s[0]]; }
+  if (!nq) return null;
+  if (m) { const a = searchIndex.addr.find(([s, n]) => norm(s) === norm(m[1]) && norm(n).replace(/\s/g, '') === m[2].replace(/\s/g, '')); if (a) return [a[2], a[3], a[0] + ' ' + a[1], a[0]]; }
+  // a chain has many shops of one name: take the nearest
+  const [PX, PY] = toRD(player.position.x, player.position.z), near = l => l.sort((a, b) => Math.hypot(a[1] - PX, a[2] - PY) - Math.hypot(b[1] - PX, b[2] - PY))[0];
+  const p = near(searchIndex.pois.filter(([n]) => norm(n) === nq)) || near(searchIndex.pois.filter(([n]) => norm(n).includes(nq))); if (p) return [p[1], p[2], p[0]];
+  const s = Object.entries(searchIndex.streets).find(([n]) => norm(n) === nq) || Object.entries(searchIndex.streets).find(([n]) => norm(n).includes(nq)); if (s) return [s[1][0], s[1][1], s[0]];
+  try {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const [i, j] of info.squares) { x0 = Math.min(x0, i * T); y0 = Math.min(y0, j * T); x1 = Math.max(x1, (i + 1) * T); y1 = Math.max(y1, (j + 1) * T); }
+    const [la0, lo0] = rdToWgs(x0, y0), [la1, lo1] = rdToWgs(x1, y1);
+    const u = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&bounded=1&countrycodes=nl'
+      + `&viewbox=${lo0},${la1},${lo1},${la0}&q=` + encodeURIComponent(q);
+    for (const r of await (await fetch(u, { headers: { Accept: 'application/json' } })).json()) {
+      const [X, Y] = wgsToRd(+r.lat, +r.lon);
+      if (HAVE.has(Math.floor(X / T) + '_' + Math.floor(Y / T))) return [X, Y, r.name || r.display_name.split(',')[0]];
+    }
+  } catch { /* offline or rate-limited: not found */ }
+  return null;
+}
+async function goTo(q) {
+  const hit = await findPlace(q);
   if (!hit) { place.textContent = 'not found: ' + q; return; }
+  if (hit[3]) arriveStreet = hit[3];
+  if (driving.driving) return autoTo(hit[0] - ORX, -(hit[1] - ORY), hit[2]);   // in a car: drive there
   if (fly) toggleFly();
   goal = null; marker.visible = false;
   player.position.set(hit[0] - ORX, 0.15, -(hit[1] - ORY));
@@ -882,6 +976,7 @@ function initMap() {
   mini.on('click', e => {
     const [X, Y] = wgsToRd(e.latlng.lat, e.latlng.lng);
     if (!HAVE.has(Math.floor(X / T) + '_' + Math.floor(Y / T))) return;
+    if (driving.driving) return autoTo(X - ORX, -(Y - ORY), 'the spot on the map');   // in a car: drive there
     if (fly) toggleFly();
     const far = Math.hypot(X - ORX - player.position.x, -(Y - ORY) - player.position.z) > 600;
     if (far) { player.position.set(X - ORX, 0.15, -(Y - ORY)); goal = null; marker.visible = false; updateWanted(); return; } // jump, then stream in
@@ -921,7 +1016,10 @@ function setFirstPerson(on) {
 function chaseCam() {
   if (firstPerson) {
     const look = 0.42 - pitch;                     // drag up and down to look up and down
-    if (driving.driving) {
+    if (ride) {
+      camera.position.set(player.position.x, 1.22, player.position.z);
+      for (const c of player.children) c.visible = false;
+    } else if (driving.driving) {
       // from the driver's seat: you see the dashboard, the steering wheel and the bonnet (or the handlebars)
       driving.eyes(camera.position);
       for (const c of player.children) c.visible = !!c.userData.car;
@@ -932,7 +1030,7 @@ function chaseCam() {
     camera.lookAt(camera.position.x - Math.sin(yaw) * Math.cos(look), camera.position.y + Math.sin(look), camera.position.z - Math.cos(yaw) * Math.cos(look));
     return;
   }
-  for (const c of player.children) c.visible = !driving.driving || !!c.userData.car || driving.rider;   // in a car you see the car, not the person
+  for (const c of player.children) c.visible = ride ? false : !driving.driving || !!c.userData.car || driving.rider;   // in a car you see the car, not the person
   const pe = pitch + Math.max(0, 1.2 - pitch) * THREE.MathUtils.smoothstep(dist, 30, 300);
   const off = new THREE.Vector3(Math.sin(yaw) * Math.cos(pe), Math.sin(pe), Math.cos(yaw) * Math.cos(pe)).multiplyScalar(dist);
   camera.position.lerp(player.position.clone().add(off), 0.18);
@@ -958,12 +1056,32 @@ function frame(now) {
 
   if (needUnstick && unstick()) needUnstick = false;
   if (fly) orbit.update();
+  else if (ride) {
+    // the driver's car carries you; if they get out or leave, so do you
+    if (!ride.player || !ride.car || ride.car.startsWith('ride') || !window.__city.social.presence.peers.has(ride.id)) toggleCar();
+    else {
+      seat(ride, player.position); player.rotation.y = ride.player.group.rotation.y;
+      const h = ride.player.group.rotation.y, f = FRONT[ride.car.split(':')[0]] ?? 1, behind = Math.atan2(-Math.cos(h) * f, Math.sin(h) * f);
+      if (!dragging) { let d = behind - yaw; d = Math.atan2(Math.sin(d), Math.cos(d)); yaw += d * Math.min(1, dt * 2.5); }
+    }
+    chaseCam();
+  }
   else if (driving.driving) {
     // W/S or the joystick forward/back: throttle and brake; A/D or sideways: steer; Shift: faster
     const jx = Math.abs(joy.x) > 0.15 ? joy.x : 0, jy = Math.abs(joy.y) > 0.15 ? -joy.y : 0;
     const throttle = THREE.MathUtils.clamp((keys['w'] || keys['arrowup'] ? 1 : 0) - (keys['s'] || keys['arrowdown'] ? 1 : 0) + jy, -1, 1);
     const steer = THREE.MathUtils.clamp((keys['a'] || keys['arrowleft'] ? 1 : 0) - (keys['d'] || keys['arrowright'] ? 1 : 0) - jx, -1, 1);
-    driving.update(dt, { throttle, steer, boost: keys['shift'] || Math.hypot(joy.x, joy.y) > 0.95 });
+    let cmd = { throttle, steer, boost: keys['shift'] || Math.hypot(joy.x, joy.y) > 0.95 };
+    if (autopilot.active) {
+      if (throttle || steer) stopAuto('🧭 Autopilot off. Your wheel.');
+      else {
+        const [fx, fz] = driving.forward, a = autopilot.drive(dt, { x: player.position.x, z: player.position.z, fx, fz, speed: driving.speed });
+        if (a.hop) { driving.place(a.hop[0], a.hop[1], a.toward[0], a.toward[1]); }
+        if (a.arrived) stopAuto('🏁 You have arrived: ' + autopilot.label + '.');
+        else cmd = a;
+      }
+    }
+    driving.update(dt, cmd);
     // the camera swings round behind the car while it moves, unless you are looking around
     const [fx, fz] = driving.forward, behind = Math.atan2(-fx, -fz);
     if ((Math.abs(driving.speed) > 0.5 || firstPerson) && !dragging) { let d = behind - yaw; d = Math.atan2(Math.sin(d), Math.cos(d)); yaw += d * Math.min(1, dt * (firstPerson ? 10 : 2.5)); }
@@ -1002,7 +1120,7 @@ function frame(now) {
     chaseCam();
   }
   if ((wantT += dt) > 0.3) { wantT = 0; updateWanted(); for (const t of carTiles) updateCars(t); }
-  if ((placeT += dt) > 0.5) { placeT = 0; place.textContent = (driving.driving ? Math.round(Math.abs(driving.speed) * 3.6) + ' km/h  ·  ' : '') + nearestPlace(); carBtn(); }
+  if ((placeT += dt) > 0.5) { placeT = 0; place.textContent = (driving.driving ? Math.round(Math.abs(driving.speed) * 3.6) + ' km/h  ·  ' + (autopilot.active ? `🧭 ${(autopilot.remaining / 1000).toFixed(1)} km to ${autopilot.label}  ·  ` : '') : '') + nearestPlace(); carBtn(); }
 
   // only the 12 nearest signs, rescaled with distance
   if ((signT += dt) > 0.25) {
@@ -1023,7 +1141,7 @@ function frame(now) {
   }
   avatar.dip = 0;
   animateAvatar(dt, jump.phase === 'air' ? 0 : movedThisFrame); movedThisFrame = 0;
-  social?.update(dt, driving.driving ? Math.abs(driving.speed) : avatar.speed);
+  social?.update(dt, driving.driving ? Math.abs(driving.speed) : ride ? ride.speed || 0 : avatar.speed);
   driving.tick(dt, player.position);
   player.position.y = 0.15 + jump.h - avatar.dip;
   // sharp shadows that follow the player
@@ -1049,7 +1167,7 @@ function bench(n = 30) {
   for (let k = 0; k < n; k++) { renderer.render(scene, camera); gl.finish(); }
   return +((performance.now() - t0) / n).toFixed(2);
 }
-window.__city = { ovTiles, solids, driving, toggleCar, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, bench, blocked, jump, toRD, ORX, ORY, get stats() { return window.__stats; } };
+window.__city = { ovTiles, solids, driving, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, bench, blocked, jump, toRD, ORX, ORY, get stats() { return window.__stats; } };
 // ---------- social layer: other people, voice and background sounds (web/mp/, ?mp=0 turns it off) ----------
 // It only reads the player's position and the trees and parked cars around it; nothing here depends on it.
 let social = null;
@@ -1065,7 +1183,7 @@ function surroundings() {
 }
 if (params.get('mp') !== '0') import('./mp/index.js').then(m => m.start({
   scene, camera, player, toRD, fromRD: (X, Y) => [X - ORX, ORY - Y], slug, params, surroundings, useAvatar, solids, goToRD: arriveNear,
-  vehicle: { get shared() { return driving.shared; }, make: (name, color) => makeCar(CAR_MODELS, name, color) }, view: { get eyes() { return firstPerson; }, set eyes(v) { setFirstPerson(v); } },
+  vehicle: { get shared() { return ride ? 'ride:0' : driving.shared; }, make: (name, color) => makeCar(CAR_MODELS, name, color) }, view: { get eyes() { return firstPerson; }, set eyes(v) { setFirstPerson(v); } },
   hud: document.getElementById('mp'),
 })).then(s => { social = s; window.__city.social = s; }).catch(e => { console.warn('multiplayer unavailable', e); document.getElementById('mp').textContent = 'Multiplayer unavailable right now'; });
 

@@ -27,6 +27,7 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
     .map(p => {
       const g = p.player.group.position;
       // someone driving is as big as their car, and carries its speed (a fast one wrecks a car it hits)
+      if (p.car?.startsWith('ride')) return { x: 1e9, z: 1e9, r: 0 };   // a passenger is inside a car, not in the way
       return p.car ? { ...footprintOf(p.car.split(':')[0], g.x, g.z, p.player.group.rotation.y), v: p.speed || 0 } : { x: g.x, z: g.z, r: PERSON.r };
     }));
   // Calls. The people near you are listed as "📞 Talk to …" buttons at the bottom of the screen; tapping

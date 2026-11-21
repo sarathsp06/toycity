@@ -22,6 +22,7 @@ export const footprintOf = (m, x, z, yaw) => { const s = sizeOf(m); return { x, 
 const EYES = { suv: [0.2, 1.22, 0.38], suv_wreck: [0.2, 1.22, 0.38], bike: [-0.35, 1.55, 0] };
 const MAX_STEER = 0.55;
 const TOP = 14, BOOST = 28, REVERSE = 5;      // m/s: 50 km/h, 100 km/h with Shift, 18 km/h backwards
+const DAZED = 3, DAZED_TOP = 8;                // after a crash: 30 km/h at most for 3 s, then full speed again
 const ACCEL = 5, BRAKE = 10, ROLL = 0.9;      // m/s², and how quickly a car rolls to a stop
 const CRASH = 7;                               // m/s (25 km/h): a bump harder than this wrecks the car
 export const REACH = 4;                        // how close you must be to get in
@@ -138,14 +139,16 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
     on ? taken.add(key) : taken.delete(key);
     for (const t of tiles) if (t.carFps && key.startsWith(t.i + '_' + t.j + ':')) { const f = t.carFps[+key.split(':')[1] / 6]; if (f) f.off = on; }
   }
-  // collision: how many of 8 points around the body (corners and middles, slightly inside) touch something
+  // collision: how many of 8 points around the body (corners and middles, slightly inside) touch something.
+  // ghost (the autopilot): only buildings, water and hedges count; parked cars and people are driven through
+  let ghost = false;
   function hitsAt(x, z, h, model) {
     const { hl, hw } = sizeOf(model), c = Math.cos(h), s = Math.sin(h);
     let n = 0;
     for (const [a, b] of [[1, 1], [1, -1], [-1, 1], [-1, -1], [0, 1], [0, -1], [1, 0], [-1, 0]]) {
       const lx = a * (hl - 0.15), lz = b * (hw - 0.1);
       const wx = x + lx * c + lz * s, wz = z - lx * s + lz * c;
-      if (ground(wx, wz) || solids.hit(wx, wz, 0.05)) n++;
+      if (ground(wx, wz) || (!ghost && solids.hit(wx, wz, 0.05))) n++;
     }
     return n;
   }
@@ -155,7 +158,7 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
     const w = wreckOf(st.model); if (!w) return;
     disposeCar(st.car); door = null;
     st.car = makeCar(models, w, st.color, true); st.car.position.y = -0.15; player.add(st.car);
-    st.model = w; crunch(); note('💥 Crash! That will leave a mark.');
+    st.model = w; st.dazed = DAZED; crunch(); note('💥 Crash! That will leave a mark.');
   }
   function wreckLeft() {
     const w = wreckOf(left.model); if (!w) return;
@@ -254,11 +257,14 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
     return pts(a).some(p => inside(p, b)) || pts(b).some(p => inside(p, a));
   }
 
-  // input: throttle -1..1, steer -1 (right) .. 1 (left), boost (Shift)
-  function update(dt, { throttle, steer, boost }) {
+  // input: throttle -1..1, steer -1 (right) .. 1 (left), boost (Shift), ghost (see hitsAt)
+  function update(dt, { throttle, steer, boost, ghost: g = false }) {
     if (!st.car) return;
+    ghost = g;
     const wrecked = st.model.endsWith('_wreck'), { wb } = sizeOf(st.model);
-    const top = wrecked ? 8 : boost ? BOOST : TOP;   // a wreck limps along at 30 km/h
+    // a wreck keeps its dents, but only limps for a moment right after the crash
+    st.dazed = Math.max(0, (st.dazed || 0) - dt);
+    const top = st.dazed ? DAZED_TOP : boost ? BOOST : TOP;
     if (throttle > 0) st.speed = st.speed < 0 ? Math.min(0, st.speed + BRAKE * dt) : Math.min(top, st.speed + ACCEL * throttle * dt);
     else if (throttle < 0) st.speed = st.speed > 0 ? Math.max(0, st.speed - BRAKE * dt) : Math.max(-REVERSE, st.speed + ACCEL * throttle * dt);
     else st.speed -= Math.sign(st.speed) * Math.min(Math.abs(st.speed), (ROLL + 0.02 * st.speed * st.speed) * dt);
@@ -276,19 +282,21 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
     else {
       const impact = Math.abs(st.speed);
       st.speed *= -0.25;
-      if (impact > CRASH && !wrecked) wreckDriven();
+      if (impact > CRASH && !wrecked && !ghost) wreckDriven();
       // arcade help for tight spots: blocked, you can still turn a little on the spot to wiggle out
       const turn = st.heading + steer * 0.6 * dt;
       if (steer && hitsAt(player.position.x, player.position.z, turn, st.model) <= now) st.heading = turn;
     }
-    player.rotation.y = st.heading;
+    player.rotation.y = st.heading; ghost = false;
     // a motorbike leans into the turn
     if (st.model === 'bike') st.car.rotation.x = THREE.MathUtils.clamp(-st.speed * Math.tan(st.steer) * 0.12, -0.5, 0.5) * f;
     if (engine) {
       const s = Math.abs(st.speed), gear = s % 7 / 7;   // pitch climbs within each "gear"
       const base = st.model === 'bike' ? 70 : 38;
       engine.osc.frequency.setTargetAtTime(base + s * 2.2 + gear * 30, engine.ctx.currentTime, 0.1);
-      engine.gain.gain.setTargetAtTime(0.035 + Math.min(0.04, Math.abs(throttle) * 0.03 + s * 0.001), engine.ctx.currentTime, 0.1);
+      // heard only when you start or press the accelerator; cruising and standing still are quiet
+      const on = throttle !== 0 && (Math.sign(throttle) === Math.sign(st.speed) || Math.abs(st.speed) < 0.5);
+      engine.gain.gain.setTargetAtTime(on ? 0.03 + Math.min(0.03, s * 0.001) : 0, engine.ctx.currentTime, on ? 0.08 : 0.35);
     }
   }
   // a soft engine hum: a sawtooth through a low-pass filter
@@ -297,7 +305,10 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
     const osc = a.createOscillator(), filt = a.createBiquadFilter(), gain = a.createGain();
     osc.type = 'sawtooth'; osc.frequency.value = 38; filt.type = 'lowpass'; filt.frequency.value = 380; gain.gain.value = 0;
     osc.connect(filt).connect(gain).connect(a.destination); osc.start();
-    gain.gain.setTargetAtTime(0.035, a.currentTime, 0.2);
+    gain.gain.setTargetAtTime(0.04, a.currentTime, 0.05);          // a short start-up rev, then quiet
+    osc.frequency.setValueAtTime(38, a.currentTime); osc.frequency.linearRampToValueAtTime(75, a.currentTime + 0.35);
+    osc.frequency.linearRampToValueAtTime(42, a.currentTime + 0.8);
+    gain.gain.setTargetAtTime(0, a.currentTime + 0.7, 0.25);
     engine = { ctx: a, osc, gain };
   }
   function stopEngine() {
@@ -306,8 +317,16 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
     engine = null;
   }
 
+  // put the car you drive at x, z facing the point tx, tz (the autopilot's last resort when it is stuck)
+  function place(x, z, tx, tz) {
+    if (!st.car) return;
+    const f = FRONT[st.model] ?? 1, a = Math.atan2(-(tz - z), tx - x);
+    player.position.x = x; player.position.z = z; st.heading = f > 0 ? a : a - Math.PI; st.speed = 0;
+    player.rotation.y = st.heading;
+  }
+
   return {
-    nearest, enter, exit, update, tick, taken,
+    nearest, enter, exit, update, tick, taken, place,
     get driving() { return !!st.car; },
     get speed() { return st.speed; },
     get model() { return st.model; },

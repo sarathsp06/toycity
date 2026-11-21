@@ -24,6 +24,8 @@ OUT = os.path.join(HERE, "web", "models", "cars.glb")
 HI_TRIS, LO_TRIS = 30000, 5000
 HI_LIMIT = {"fiat500": 15000, "bike": 20000}
 NO_LO = {"fiat500"}
+# narrow and tall by nature: never "turned upright" by the cars' height-versus-width check
+UPRIGHT = {"bike"}
 
 # name: (file under data/blendswap, real length in metres, body object = the anchor for what belongs to the car)
 CARS = {
@@ -44,6 +46,11 @@ IN_GAME = ["suv", "suv_wreck", "bike"]
 # per car: extra object names to drop (snow cover, the bonus driver, interior) and material names to pin
 EXTRA_DROP = {"suv": ("_snow", "_man", "_int_", "zyx0_006", "zyx0_1sbd")}
 EXTRA_DROP["suv_wreck"] = EXTRA_DROP["suv"]
+EXTRA_DROP["bike"] = ("cube.006", "plane.046", "beziercircle.001")   # hidden helpers at the file origin
+# how far around the anchor a part may sit (share of its size) and whether a part wider than it is dropped.
+# The bike's anchor is the lower fairing: the tank, the screen and the mirrors stand well above it.
+REACH = {"bike": 0.4}
+LOOSE = {"bike"}
 # cars whose doors are separate parts in the source: each door is a list of objects, exported on its own as
 # <name>_door<i> with its origin on the hinge (the front edge), next to <name>_body (the car without them).
 # FRONT_END: which end of the finished car (along x) is the bonnet, to find each door's front edge.
@@ -158,12 +165,16 @@ def convert(name, path, length, body):
     keep = []
     for me, b0, b1, _ in sized:
         c = (b0 + b1) / 2
-        inside = all(a0[i] - 0.12 * span <= c[i] <= a1[i] + 0.12 * span for i in range(3))
+        reach = REACH.get(name, 0.12)
+        inside = all(a0[i] - reach * span <= c[i] <= a1[i] + reach * span for i in range(3))
         d = b1 - b0
         flat_sheet = min(d) < 0.005 * span and sorted(d)[1] > 0.3 * span     # backdrops, blueprints
-        too_wide = any(d[i] > (a1[i] - a0[i]) * 1.08 + 0.02 * span for i in range(3))
+        too_wide = name not in LOOSE and any(d[i] > (a1[i] - a0[i]) * 1.08 + 0.02 * span for i in range(3))
         if inside and not flat_sheet and not too_wide and d.length <= 1.05 * span:
             keep.append((me, _))
+        elif os.environ.get("DEBUG_DROPS"):
+            print("  DROPPED", name, _, "inside" if inside else "outside", "flat" if flat_sheet else "", "wide" if too_wide else "",
+                  [round(v, 2) for v in d], [round(v, 2) for v in c])
             if (b1.y - b0.y) > (a1.y - a0.y) * 1.05 or (b1.x - b0.x) > (a1.x - a0.x) * 1.05:
                 print("  WIDE", name, _, [round(v, 2) for v in (b1 - b0)])
 
@@ -237,7 +248,7 @@ def convert(name, path, length, body):
     if (y1 - y0) > (x1 - x0):
         tf(Matrix.Rotation(1.5707963, 4, "Z"))
         x0, x1, y0, y1, z0, z1 = ext()
-    if (z1 - z0) > (y1 - y0) * 1.4:     # still wrong way up: height should not exceed width much
+    if name not in UPRIGHT and (z1 - z0) > (y1 - y0) * 1.4:   # still wrong way up: a car is not much taller than wide
         tf(Matrix.Rotation(1.5707963, 4, "X"))
         x0, x1, y0, y1, z0, z1 = ext()
     length, height = length

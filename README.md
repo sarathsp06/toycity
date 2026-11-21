@@ -18,6 +18,8 @@ Wander the street you grew up on, send a friend a link, and meet them there. No 
 - 🚶 **Walk, run and jump** through real streets: every house, hedge, canal, tree and lamp post is where it really is
 - 🔎 **Find a place**: search an address, a shop or a street, or click anywhere to walk there
 - 🚗 **Drive any parked car** (or hop on a motorbike): walk up and press `E`. Look through your own eyes to sit behind the wheel
+- 🧭 **Autopilot**: in a car or on the bike, type where to go (or click the map) and watch the town go by on real streets
+- 🙋 **Ride along**: press `E` next to a friend who is driving and sit in their passenger seat
 - 💥 **Mind the paintwork**: crash and the car shows it; park on the pavement and you get a ticket
 - 👋 **Meet people**: everyone nearby walks around as themselves. Tap someone to call them, and hear them from where they stand
 - 📍 **Send a meeting link**: friends who open it arrive right next to you
@@ -29,7 +31,7 @@ Wander the street you grew up on, send a friend a link, and meet them there. No 
 | `W` `A` `S` `D` or arrows | walk / drive |
 | `Shift` | run / go faster |
 | `Space` | jump |
-| `E` | get in or out of a car |
+| `E` | get in or out of a car, or ride along with a friend |
 | `V` | look through your own eyes |
 | `F` | fly |
 | `M` | map |

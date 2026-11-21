@@ -45,7 +45,7 @@ export function setLook(p, look) {
       if (o.isMesh && o.material.name === 'toy_shirt') { o.material = o.material.clone(); o.material.color.copy(shirt); o.userData.own = true; }
     });
     if (p.model) { p.mixer.stopAllAction(); disposeOwn(p.model); p.group.remove(p.model); }
-    p.model = model; p.group.add(model); model.visible = !p.carMesh || p.riding; ride(p);
+    p.model = model; p.group.add(model); model.visible = !p.inside && (!p.carMesh || p.riding); ride(p);
     p.mixer = new THREE.AnimationMixer(model);
     p.act = {}; for (const n of ['idle', 'walk', 'run']) { p.act[n] = p.mixer.clipAction(t.clips[n]); p.act[n].play(); p.act[n].setEffectiveWeight(n === 'idle' ? 1 : 0); }
   });
@@ -92,6 +92,9 @@ export function animate(p, speed, dt) {
 export function setVehicle(p, car, make) {
   if (p.carMesh) { p.carMesh.removeFromParent(); p.carMesh.traverse(o => { if (o.isMesh && o.userData.own) o.material.dispose(); }); p.carMesh = null; }
   const [name, col] = (car || '').split(':');
+  p.inside = name === 'ride';   // a passenger: inside someone else's car, so not drawn at all
+  if (p.inside) { if (p.model) p.model.visible = false; p.ring.visible = false; p.tag.visible = false; p.riding = false; return; }
+  p.tag.visible = true;
   if (name && make) { p.carMesh = make(name, parseInt(col, 16)); if (p.carMesh) { p.carMesh.position.y = -0.15; p.group.add(p.carMesh); } }
   p.riding = name === 'bike';   // a motorbike shows its rider, sitting (see ride below)
   if (p.model) { p.model.visible = !p.carMesh || p.riding; ride(p); }
