@@ -1,8 +1,8 @@
 // Other players in the scene: their person and outfit, a name label
-// and a ring that lights up while they talk. Each one blends idle / walk / run by its speed.
+// and a ring that lights up while they talk. Each one blends idle / walk / run by its speed, with a
+// pose clip (riding, sitting, flying after a hit, lying, jumping, talking) layered over them.
 import * as THREE from 'three';
-import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
-import { loadAvatar, myLook } from '../avatar.js';
+import { loadAvatar, myLook, poseLayer } from '../avatar.js';
 import { FRONT } from '../vehicle.js';
 
 const SHIRTS = [0x2f6fde, 0x2a9d5c, 0xe0a020, 0x8e44ad, 0x16a3b8, 0xd35400, 0xc0392b, 0x34495e];
@@ -28,7 +28,7 @@ export function makePlayer(id, name, look) {
   const group = new THREE.Group();
   const ring = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.52, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x7CFC9A, transparent: true, opacity: 0, depthWrite: false }));
   ring.position.y = 0.05; group.add(ring);
-  const p = { id, group, model: null, mixer: null, act: null, ring, name: null, tag: null, speaking: 0, look: null };
+  const p = { id, group, model: null, mixer: null, act: null, pose: null, poseN: 0, up: 0, ring, name: null, tag: null, speaking: 0, look: null };
   setName(p, name);
   setLook(p, look);
   return p;
@@ -49,6 +49,7 @@ export function setLook(p, look) {
     p.model = model; p.group.add(model); model.visible = !p.inside && (!p.carMesh || p.riding); ride(p);
     p.mixer = new THREE.AnimationMixer(model);
     p.act = {}; for (const n of ['idle', 'walk', 'run']) { p.act[n] = p.mixer.clipAction(t.clips[n]); p.act[n].play(); p.act[n].setEffectiveWeight(n === 'idle' ? 1 : 0); }
+    p.pose = poseLayer(p.mixer, t.clips);
   });
 }
 const disposeOwn = m => m.traverse(o => { if (o.isMesh && o.userData.own) o.material.dispose(); });
@@ -60,21 +61,11 @@ export function setName(p, name) {
   p.tag = label(name || 'Visitor'); p.group.add(p.tag);
 }
 
-const RQ = new THREE.Quaternion(), RE = new THREE.Euler();
-const bendBone = (m, n, x, z = 0) => { const b = m.getObjectByName('mixamorig' + n); if (b) b.quaternion.multiply(RQ.setFromEuler(RE.set(x, 0, z))); };
-// the same seated pose the local player gets on a motorbike (city.js ridePose)
+// on the saddle of a motorbike, facing its front, the same as the local player (city.js ridePlace)
 function ride(p) {
   const m = p.model; if (!m) return;
   m.rotation.y = p.riding ? Math.PI / 2 : 0;
-  m.position.set(p.riding ? -0.12 : 0, p.riding ? -0.12 : 0, 0);
-}
-function ridePose(m) {
-  for (const s of ['Left', 'Right']) {
-    const k = s === 'Left' ? 1 : -1;
-    bendBone(m, s + 'UpLeg', -1.35, -k * 0.12); bendBone(m, s + 'Leg', 1.5);
-    bendBone(m, s + 'Arm', -0.9, k * 0.35); bendBone(m, s + 'ForeArm', 0, k * 0.25);
-  }
-  bendBone(m, 'Spine', 0.35);
+  m.position.set(p.riding ? -0.12 : 0, p.riding ? 0.31 : 0, 0);
 }
 
 // a passenger seen in the car they ride in (model: that car's model), or hidden when no car is near
@@ -84,14 +75,22 @@ export function seatIn(p, model) {
   p.model.visible = !!p.seat;
   const f = FRONT[p.seat] ?? 1;   // face the bonnet
   p.model.rotation.y = p.seat ? f * Math.PI / 2 : 0;
-  p.model.position.set(0, p.seat ? (p.seat === 'bike' ? -0.12 : -0.42) : 0, 0);   // sitting: the hips drop onto the seat
+  p.model.position.set(0, p.seat ? (p.seat === 'bike' ? 0.31 : 0) : 0, 0);   // the sitting clips put the hips 0.61 m up: on the seat
 }
-function sitPose(m) {   // knees up, hands in the lap
-  for (const s of ['Left', 'Right']) {
-    const k = s === 'Left' ? 1 : -1;
-    bendBone(m, s + 'UpLeg', -1.45, -k * 0.08); bendBone(m, s + 'Leg', 1.45);
-    bendBone(m, s + 'Arm', -0.5, k * 0.9); bendBone(m, s + 'ForeArm', 0, k * 0.6);
-  }
+// the pose clip for this moment: on a bike or in a car seat, flying after a hit (pose 1: the flinch,
+// held), lying (2, or 4 knocked out: the fall, from the moment it hits the ground, held flat), getting
+// up again after that, in the air (up, jumping), or standing still while talking
+function pickPose(p, speed) {
+  const P = p.pose; if (!P) return;
+  if (p.riding || p.seat === 'bike') return P.set('drive');
+  if (p.seat) return P.set('sit_idle');
+  if (p.carMesh || p.inside) return P.set(null);
+  if (p.poseN === 1) return P.set('hit', { once: true });
+  if (p.poseN === 2 || p.poseN === 4) { if (P.name !== 'fall') P.set('fall', { once: true, from: 0.93 }); return; }
+  if (P.name === 'fall') return P.set('sit_exit', { once: true, fade: 0.3 });
+  if (P.name === 'sit_exit' && !P.done && speed < 0.5) return;
+  if (p.up > 0 && p.poseN !== 5) return P.set('jump_loop');
+  P.set(p.speaking > 0.02 && speed < 0.3 ? 'talk' : null, { fade: P.name === 'sit_exit' ? 0.2 : 0.1 });
 }
 
 export function animate(p, speed, dt) {
@@ -99,11 +98,11 @@ export function animate(p, speed, dt) {
   if (p.riding) speed = 0;   // sitting still on the bike, whatever its speed
   const w = THREE.MathUtils.clamp(speed / 1.4, 0, 1), r = THREE.MathUtils.clamp((speed - 2.2) / 1.8, 0, 1);
   if (p.mixer) {
-  p.act.idle.setEffectiveWeight(1 - w); p.act.walk.setEffectiveWeight(w * (1 - r)); p.act.run.setEffectiveWeight(w * r);
-  p.act.walk.timeScale = THREE.MathUtils.clamp(speed / 1.4, 0.6, 1.6);
-  p.mixer.update(dt);
-  if (p.riding) ridePose(p.model);
-  else if (p.seat) p.seat === 'bike' ? ridePose(p.model) : sitPose(p.model);
+    pickPose(p, speed);
+    const k = p.pose.update(dt);   // what the pose clip leaves for walking
+    p.act.idle.setEffectiveWeight((1 - w) * k); p.act.walk.setEffectiveWeight(w * (1 - r) * k); p.act.run.setEffectiveWeight(w * r * k);
+    p.act.walk.timeScale = THREE.MathUtils.clamp(speed / 1.4, 0.6, 1.6);
+    p.mixer.update(dt);
   }
   p.ring.material.opacity += ((p.speaking > 0.02 ? 0.9 : 0) - p.ring.material.opacity) * Math.min(1, dt * 10);
 }
@@ -122,7 +121,8 @@ export function setVehicle(p, car, make) {
   p.ring.visible = !p.carMesh;
 }
 
-// a yellow (1) or red (2) card over someone who knocked a person over; and flying (1) or lying flat (2) after being hit
+// a yellow (1) or red (2) card over someone who knocked a person over; and their pose: flying (1) or
+// lying flat (2) after being hit, knocked out (4), going through a door (5); up: metres off the ground
 const CARDS = {};
 function cardMat(level) {
   if (CARDS[level]) return CARDS[level];
@@ -132,18 +132,14 @@ function cardMat(level) {
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
   return (CARDS[level] = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
 }
-export function setCard(p, level, pose) {
+export function setCard(p, level, pose, up = 0) {
   if (p.cardLevel !== level) {
     if (p.card) { p.group.remove(p.card); p.card = null; }
     if (level) { p.card = new THREE.Sprite(cardMat(level)); p.card.scale.set(0.42, 0.58, 1); p.card.renderOrder = 21; p.group.add(p.card); }
     p.cardLevel = level;
   }
   if (p.card) p.card.position.y = p.carMesh ? 2.3 : 2.6;
-  if (p.model && !p.riding && !p.carMesh) {
-    p.spin = pose === 1 ? (p.spin || 0) + 0.15 : 0;
-    p.model.rotation.x = pose === 1 ? -p.spin : pose === 2 || pose === 4 ? -Math.PI / 2 : 0;
-    p.model.position.y = pose === 2 || pose === 4 ? 0.12 : 0;
-  }
+  p.poseN = pose; p.up = up;
 }
 
 export function disposePlayer(p) {

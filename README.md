@@ -150,10 +150,11 @@ you play, except for the minimap tiles, and the place search and route planner t
 | [Honda VFR800](https://blendswap.com/blend/5449) | danielfc10 | CC BY |
 | Zuri (persona), from [BlenderKit](https://www.blenderkit.com) | Richie Kirui | CC0 |
 | Xbot (the classic figure and the shared walk, run and idle animations) | from the [three.js examples](https://github.com/mrdoob/three.js/tree/dev/examples/models/gltf) | as distributed with three.js |
+| [Universal Animation Library](https://quaternius.com/packs/universalanimationlibrary.html) (jumping, sitting, riding, falling, knocking, talking, crouching, dancing) | Quaternius | CC0 |
 
 Every parked car is that one SUV in its own paint (plus the odd motorbike), so the vehicles load in a
 few seconds and every car opens its door. The models are simplified by `tools/blendswap_cars.py`, and
-Zuri's Rigify skeleton was renamed to Mixamo bones by `tools/personas.py`, so every person shares the same animations. The
+Zuri's Rigify skeleton was renamed to Mixamo bones by `tools/personas.py`, so every person shares the same animations; `tools/retarget_anims.mjs` puts the Quaternius clips on that skeleton (`web/models/anims.glb`). The
 full list is in [CREDITS.txt](web/models/CREDITS.txt).
 
 ### Software and services

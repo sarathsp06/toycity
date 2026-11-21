@@ -9,7 +9,7 @@ import { Sky } from 'three/addons/objects/Sky.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import * as BU from 'three/addons/utils/BufferGeometryUtils.js';
 import * as TX from './textures.js';
-import { loadAvatar, myLook } from './avatar.js';
+import { loadAvatar, myLook, poseLayer } from './avatar.js';
 import { createSolids, footprintsOf, PERSON } from './solids.js';
 import { createDriving, makeCar, carKey, footprintOf, FRONT, PASSENGER, seatLocal } from './vehicle.js';
 import { createAutopilot } from './autopilot.js';
@@ -577,8 +577,9 @@ const player = new THREE.Group();
   for (const m of [bodyM, head, cap]) { m.castShadow = true; player.add(m); }
 }
 // rigged person (models/person.glb, dressed in Blender by tools/dress_person.py) with idle / walk / run
-// blended by actual speed; the capsule above stays until it has loaded
-const avatar = { mixer: null, actions: null, speed: 0 };
+// blended by actual speed, and one pose clip (models/anims.glb: jumping, riding, falling, knocking...)
+// layered over them (avatar.pose, see avatar.js poseLayer); the capsule above stays until it has loaded
+const avatar = { mixer: null, actions: null, pose: null, speed: 0 };
 // the player's own look: a random person and outfit given on the first visit, kept on this device
 async function useAvatar(look) {
   const { model, clips } = await loadAvatar(new URL('./', import.meta.url), { look });
@@ -591,11 +592,7 @@ async function useAvatar(look) {
   const actions = { idle: mixer.clipAction(clips.idle), walk: mixer.clipAction(clips.walk), run: mixer.clipAction(clips.run) };
   for (const a of Object.values(actions)) { a.play(); a.setEffectiveWeight(0); }
   actions.idle.setEffectiveWeight(1);
-  const bone = n => model.getObjectByName('mixamorig' + n);
-  const bones = {};
-  for (const n of ['Hips', 'Spine', 'Spine1', 'LeftUpLeg', 'RightUpLeg', 'LeftLeg', 'RightLeg', 'LeftFoot', 'RightFoot',
-    'LeftArm', 'RightArm', 'LeftForeArm', 'RightForeArm']) bones[n] = bone(n);
-  Object.assign(avatar, { mixer, actions, bones, model });
+  Object.assign(avatar, { mixer, actions, pose: poseLayer(mixer, clips), model });
 }
 useAvatar(myLook()).catch(e => console.warn('avatar', e));
 // natural speeds of the clips in m/s at this scale, used to keep the feet from sliding
@@ -606,58 +603,39 @@ function animateAvatar(dt, moved) {
   avatar.speed += (sp - avatar.speed) * Math.min(1, dt * 8);
   const s = avatar.speed, a = avatar.actions;
   const w = THREE.MathUtils.clamp(s / WALK_MS, 0, 1), r = THREE.MathUtils.clamp((s - 2.2) / 1.8, 0, 1);
-  a.idle.setEffectiveWeight(1 - w);
-  a.walk.setEffectiveWeight(w * (1 - r));
-  a.run.setEffectiveWeight(w * r);
+  pickPose();
+  const k = avatar.pose.update(dt);   // what the pose clip leaves for walking
+  a.idle.setEffectiveWeight((1 - w) * k);
+  a.walk.setEffectiveWeight(w * (1 - r) * k);
+  a.run.setEffectiveWeight(w * r * k);
   a.walk.timeScale = THREE.MathUtils.clamp(s / WALK_MS, 0.6, 1.6);
   a.run.timeScale = THREE.MathUtils.clamp(s / RUN_MS, 0.8, 2.2);
   avatar.mixer.update(dt);
-  jumpPose();
-  ridePose();
+  ridePlace();
 }
-// jump pose layered on top of the clips (the mannequin has no jump clip):
-//   crouch: knees bend and the body dips before take-off
-//   air:    knees tuck while rising, legs reach down again for the landing, arms swing up
-//   land:   a short knee bend that absorbs the impact
-const JQ = new THREE.Quaternion(), JE = new THREE.Euler();
-// on a motorbike: sit down, knees up, hands forward to the handlebars; the person turns to face the bike's front
-function ridePose() {
-  const B = avatar.bones, m = avatar.model; if (!B || !m) return;
-  const riding = driving?.rider;
-  m.rotation.y = riding ? (FRONT.bike ?? 1) * Math.PI / 2 : 0;
-  m.position.set(riding ? -0.12 * (FRONT.bike ?? 1) : 0, riding ? -0.12 : 0, 0);
-  if (!riding) return;
-  for (const s of ['Left', 'Right']) {
-    bend(B[s + 'UpLeg'], -1.35, 0, (s === 'Left' ? -1 : 1) * 0.12);
-    bend(B[s + 'Leg'], 1.5);
-    bend(B[s + 'Arm'], -0.9, 0, (s === 'Left' ? 1 : -1) * 0.35);
-    bend(B[s + 'ForeArm'], 0, 0, (s === 'Left' ? 1 : -1) * 0.25);
-  }
-  bend(B.Spine, 0.35);
+// the pose clip for this moment (motion capture, see avatar.js); being hit (knockDown, flingStep) and
+// knocking at a door (homes) start their own. Jumping: jump_start begins crouched and pushes off in
+// its first tenth of a second, then holds the legs up; jump_loop takes over if the air lasts longer
+// (stepping off a hedge); jump_land absorbs the landing and stands up again in 0.8 s.
+function pickPose() {
+  const P = avatar.pose;
+  if (driving.rider) return P.set('drive');
+  if (driving.driving || ride) return P.set(null);   // inside a car: not seen
+  if (fling.on || homes.busy) return;
+  if (jump.phase === 'crouch') return P.set('jump_start', { once: true });
+  if (jump.phase === 'air') { if (P.name !== 'jump_start' || P.done) P.set('jump_loop'); return; }
+  if (jump.phase === 'land') return P.set('jump_land', { once: true });
+  const landing = P.name === 'jump_land' && P.time < 0.8, knocking = P.name === 'knock' && !P.done;
+  if ((landing || knocking) && avatar.speed < 0.5) return;
+  P.set(social?.inCall && avatar.speed < 0.3 ? 'talk' : null);   // on a call, standing still: hands talk along
 }
-function bend(b, x, y = 0, z = 0) { if (b) b.quaternion.multiply(JQ.setFromEuler(JE.set(x, y, z))); }
-function jumpPose() {
-  const B = avatar.bones; if (!B) return;
-  let tuck = 0, crouch = 0, arms = 0;
-  if (jump.phase === 'crouch') crouch = Math.sin(Math.min(jump.t / CROUCH_T, 1) * Math.PI / 2);
-  else if (jump.phase === 'air') {
-    const rising = jump.v > 0, k = THREE.MathUtils.clamp(jump.v / JUMP_V, -1, 1);
-    tuck = rising ? 0.35 + 0.65 * (1 - k) : 1 + 0.6 * k;   // most tucked at the top of the arc
-    tuck = THREE.MathUtils.clamp(tuck, 0.2, 1);
-    arms = THREE.MathUtils.clamp(0.4 + 0.6 * k, 0, 1);
-  } else if (jump.phase === 'land') crouch = Math.sin((1 - Math.min(jump.t / LAND_T, 1)) * Math.PI / 2) * 0.8;
-  const knee = Math.max(tuck * 1.4, crouch * 1.1), hip = Math.max(tuck * 0.9, crouch * 0.75);
-  if (knee + arms < 1e-3) return;
-  for (const s of ['Left', 'Right']) {
-    bend(B[s + 'UpLeg'], -hip);
-    bend(B[s + 'Leg'], knee);
-    bend(B[s + 'Foot'], -0.35 * knee);
-    bend(B[s + 'Arm'], 0, 0, (s === 'Left' ? 1 : -1) * 0.7 * arms);
-    bend(B[s + 'ForeArm'], 0, 0, (s === 'Left' ? 1 : -1) * 0.4 * arms);
-  }
-  bend(B.Spine, 0.18 * Math.max(crouch, tuck));
-  // keep the feet on the ground when crouching: drop the whole body by the leg shortening
-  avatar.dip = 0.32 * crouch;
+// on a motorbike the person turns to face the bike's front and sits down on the saddle (the drive clip
+// has the hips 0.61 m over the feet; the saddle is 0.92 m over the ground)
+function ridePlace() {
+  const m = avatar.model; if (!m) return;
+  const riding = driving?.rider, f = FRONT.bike ?? 1;
+  m.rotation.y = riding ? f * Math.PI / 2 : 0;
+  m.position.set(riding ? -0.12 * f : 0, riding ? 0.31 : 0, 0);
 }
 player.position.set(info.start ? info.start.x - ORX : 0, 0.15, info.start ? -(info.start.y - ORY) : 0);
 scene.add(player);
@@ -718,7 +696,8 @@ function note(text) {
 }
 // ---------- front doors and homes (home.js) ----------
 const homes = createHomes({ scene, player, tiles, T, toRD, fromRD: (X, Y) => [X - ORX, ORY - Y], slug, note, loader: new GLTFLoader(),
-  look: y => { yaw = y; pitch = Math.min(pitch, 0.35); dist = Math.max(6, Math.min(dist, 12)); } });
+  look: y => { yaw = y; pitch = Math.min(pitch, 0.35); dist = Math.max(6, Math.min(dist, 12)); },
+  onKnock: () => avatar.pose?.set('knock', { once: true }) });
 driving = createDriving({ scene, player, models: CAR_MODELS, carTiles, solids, ground: (x, z) => blockedAt(x, z), note, onHitPerson: hitPerson });
 
 // ---------- knocking people over, and the card you get for it ----------
@@ -749,7 +728,7 @@ function hitPerson(id, vx, vz) {
   note(card.level > 1 ? `🟥 Red card! You hit ${p?.name || 'someone'} again. Everyone can see it.` : `🟨 Yellow card: you hit ${p?.name || 'someone'}. Drive carefully.`);
 }
 // someone drove into you: fly, land, lie there a moment, get up (only when on foot)
-const fling = { on: false, vx: 0, vz: 0, vy: 0, h: 0, down: 0, spin: 0 };
+const fling = { on: false, vx: 0, vz: 0, vy: 0, h: 0, down: 0 };
 // Health: 100, a hit takes 3 to 6 by its speed (so some twenty to thirty hits), and it comes back by
 // 1 every 4 s. At 0 you are knocked out: flat on the ground, screen grey, 30 s before you get up again.
 const HEALTH = 100, OUT_FOR = 30;
@@ -774,28 +753,34 @@ function knockDown({ vx, vz, by }) {
   }
   if (fling.on) return;
   const sp = Math.min(14, Math.hypot(vx, vz) || 3), k = sp / (Math.hypot(vx, vz) || 1);
-  Object.assign(fling, { on: true, vx: vx * k * 0.7, vz: vz * k * 0.7, vy: 3 + sp * 0.35, h: 0, down: 0, spin: 0 });
+  Object.assign(fling, { on: true, vx: vx * k * 0.7, vz: vz * k * 0.7, vy: 3 + sp * 0.35, h: 0, down: 0 });
   goal = null; marker.visible = false; jump.phase = null; jump.h = 0;
+  avatar.pose?.set('hit', { once: true });
   const f = document.getElementById('ouch'); if (f) { f.classList.remove('on'); void f.offsetWidth; f.classList.add('on'); }
   if (!health.out) note(`🤕 Ouch! ${who} ran you over. Health ${Math.round(health.hp)}/${HEALTH}.`);
 }
-// one frame of flying or lying down; returns true while it runs (no walking meanwhile)
+// one frame of flying or lying down; returns true while it runs (no walking meanwhile).
+// The clips: the hit's flinch, then the fall (its body collapses backwards over 0.93 s and lies flat
+// from 1.4 s; landing jumps to the moment it hits the ground), and sit_exit to get up again.
+const FALL_DOWN = 0.93;
 function flingStep(dt) {
   if (!fling.on) return false;
-  const m = avatar.model;
+  const P = avatar.pose;
   if (fling.down === 0) {
     const nx = player.position.x + fling.vx * dt, nz = player.position.z + fling.vz * dt;
     if (!blocked(nx, nz)) { player.position.x = nx; player.position.z = nz; } else { fling.vx *= -0.3; fling.vz *= -0.3; }
-    fling.vy -= 9.8 * dt; fling.h += fling.vy * dt; fling.spin += dt * 9;
-    if (m) m.rotation.x = -fling.spin;
-    if (fling.h <= 0) { fling.h = 0; fling.down = 0.001; }
+    fling.vy -= 9.8 * dt; fling.h += fling.vy * dt;
+    if (P && P.name === 'hit' && P.done) P.set('fall', { once: true });
+    if (fling.h <= 0) {
+      fling.h = 0; fling.down = 0.001;
+      if (P) { if (P.name !== 'fall') P.set('fall', { once: true, from: FALL_DOWN }); else if (P.time < FALL_DOWN) P.time = FALL_DOWN; }
+    }
   } else {
     fling.down += dt;
-    // flat on the back for 2.5 s, then up again over half a second
-    const up = THREE.MathUtils.smoothstep(fling.down, 2.5, 3.0);
-    if (m) m.rotation.x = -Math.PI / 2 * (1 - up);
-    if (health.out) { if (m) m.rotation.x = -Math.PI / 2; return true; }   // knocked out: stay down until the time is up
-    if (fling.down > 3.0) { fling.on = false; if (m) m.rotation.x = 0; needUnstick = true; }
+    if (health.out) return true;   // knocked out: stay down until the time is up
+    // flat on the back for 2.5 s, then up again
+    if (fling.down > 2.5 && P && P.name === 'fall') P.set('sit_exit', { once: true, fade: 0.3 });
+    if (fling.down > 3.4) { fling.on = false; P?.set(null, { fade: 0.2 }); needUnstick = true; }
   }
   return true;
 }
@@ -1382,7 +1367,6 @@ function frame(now) {
     const floor = overHedge() ? 1.0 : 0;   // a hedge is 1.1 m high; land on its top
     if (jump.v < 0 && jump.h <= floor) { jump.h = floor; jump.v = 0; jump.onHedge = floor > 0; jump.phase = 'land'; jump.t = 0; }
   }
-  avatar.dip = 0;
   animateAvatar(dt, jump.phase === 'air' ? 0 : movedThisFrame); movedThisFrame = 0;
   social?.update(dt, driving.driving ? Math.abs(driving.speed) : ride ? ride.speed || 0 : fling.on && !fling.down ? Math.hypot(fling.vx, fling.vz) : avatar.speed);
   if (health.out) {
@@ -1397,7 +1381,7 @@ function frame(now) {
   if (card.level && (card.t -= dt) <= 0) { card.level = 0; note('Card gone. Thanks for driving carefully.'); }
   showCard(player, card.level, driving.driving ? 2.3 : 2.25);
   driving.tick(dt, player.position);
-  player.position.y = 0.15 + jump.h - avatar.dip + (fling.on ? fling.h + (fling.down ? 0.12 : 0) : 0);
+  player.position.y = 0.15 + jump.h + (fling.on ? fling.h : 0);
   // sharp shadows that follow the player
   const R = 40 + Math.min(dist, 150) * 0.9;
   sun.target.position.copy(player.position); sun.position.copy(player.position).add(SUN_OFFSET);
@@ -1466,7 +1450,7 @@ if (params.get('mp') !== '0') import('./mp/index.js').then(m => m.start({
   // off with the 📞 Calls button; an agent (?agent=1) has a voice only if it joined with one (&voice=1)
   body: { get caps() { return voiceCap ? 'v' : ''; }, setVoice(on) { voiceCap = on; if (!AGENT) localStorage.setItem('toycity.calls', on ? 'on' : 'off'); },
     get autoAnswer() { return !!AGENT && voiceCap; },
-    get card() { return card.level; }, get pose() { return homes.inside ? 3 : homes.busy ? 5 : health.out ? 4 : fling.on ? (fling.down ? 2 : 1) : 0; }, get y() { return fling.on ? +fling.h.toFixed(2) : 0; } },
+    get card() { return card.level; }, get pose() { return homes.inside ? 3 : homes.busy ? 5 : health.out ? 4 : fling.on ? (fling.down ? 2 : 1) : 0; }, get y() { return +(fling.on ? fling.h : jump.h).toFixed(2); } },
 })).then(s => { social = s; window.__city.social = s; }).catch(e => { console.warn('multiplayer unavailable', e); document.getElementById('mp').textContent = 'Multiplayer unavailable right now'; });
 
 setFirstPerson(localStorage.getItem('toycity.view') === 'eyes');

@@ -1,6 +1,8 @@
 // People: realistic personas made by tools/personas.py, plus our dressed Xbot (models/person.glb, made
 // by tools/dress_person.py), whose clips everyone uses. Every persona has a Mixamo-named skeleton, so all of them share person.glb's idle /
-// walk / run clips. Bone orientations differ between rigs, so the clips are retargeted once per
+// walk / run clips and the pose clips in models/anims.glb (jumping, sitting, driving, falling...: motion
+// capture from the Quaternius Universal Animation Library, put on person.glb's skeleton by
+// tools/retarget_anims.mjs). Bone orientations differ between rigs, so the clips are retargeted once per
 // persona (world-space, by bone name), with the hip height scaled to the persona's proportions.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -74,12 +76,12 @@ function frameTurn(a, b, c, d) {
     return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x.clone().normalize(), y2.normalize(), z)); };
   return basis(c, d).multiply(basis(a, b).invert());
 }
-function retarget(src, target, clip, fps = 30) {
+export function retarget(src, target, clip, { fps = 30, fingers = false } = {}) {
   const S = SkeletonUtils.clone(src.scene); S.updateMatrixWorld(true);
   const tBones = {}; target.traverse(o => { if (o.isBone) tBones[o.name] = o; });
   const pairs = [], sBones = {};
   S.traverse(o => { if (o.isBone) sBones[o.name] = o; });
-  S.traverse(o => { if (o.isBone && tBones[o.name] && !/Hand(Thumb|Index|Middle|Ring|Pinky)/.test(o.name)) pairs.push({ s: o, t: tBones[o.name] }); });
+  S.traverse(o => { if (o.isBone && tBones[o.name] && (fingers || !/Hand(Thumb|Index|Middle|Ring|Pinky)/.test(o.name))) pairs.push({ s: o, t: tBones[o.name] }); });
   target.updateMatrixWorld(true);
   const pos = o => o.getWorldPosition(new THREE.Vector3());
   for (const pr of pairs) {
@@ -137,10 +139,42 @@ async function prepare(base, p) {
   const box = new THREE.Box3().setFromObject(model);
   model.scale.multiplyScalar((p.height || 1.78) / (box.max.y - box.min.y));
   model.traverse(o => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
-  const clips = {};
-  if (p.id === 'classic') for (const n of ['idle', 'walk', 'run']) clips[n] = own.animations.find(a => a.name === n);
-  else for (const n of ['idle', 'walk', 'run']) clips[n] = retarget(src, model, src.animations.find(a => a.name === n));
+  const clips = {}, all = [...src.animations.filter(a => ['idle', 'walk', 'run'].includes(a.name)), ...(await load(base, 'anims.glb')).animations];
+  for (const a of all) clips[a.name] = p.id === 'classic' ? a : retarget(src, model, a);
   return { model, clips };
+}
+// One pose clip (jumping, sitting, lying...) played over idle / walk / run, crossfaded in `fade`
+// seconds; update() returns the weight left for the walking clips. Used for the player and for the
+// other people in the scene.
+//   set(name, { once, from, fade }): play that clip (null: none); once: to its end, then hold the last frame; from: start there
+export function poseLayer(mixer, clips) {
+  let cur = null, prev = null, w = 0, pw = 0, rate = 10;
+  const L = {
+    set(name, { once = false, from = 0, fade = 0.1 } = {}) {
+      if ((cur?.name || null) === name) return;
+      if (prev) { prev.action.stop(); prev = null; }
+      prev = cur; pw = w; w = 0; rate = 1 / Math.max(fade, 1e-3);
+      cur = null;
+      if (!name) return;
+      if (!clips[name]) { console.warn('no pose clip', name); return; }
+      const action = mixer.clipAction(clips[name]);
+      action.reset(); action.setLoop(once ? THREE.LoopOnce : THREE.LoopRepeat, Infinity); action.clampWhenFinished = true;
+      action.time = from; action.setEffectiveWeight(0); action.play();
+      cur = { name, action };
+    },
+    get name() { return cur?.name || null; },
+    get time() { return cur ? cur.action.time : 0; },
+    set time(t) { if (cur) cur.action.time = t; },
+    get done() { return !!cur && cur.action.paused; },   // a `once` clip reached its end (held there)
+    update(dt) {
+      const k = dt * rate;
+      if (cur) { w = Math.min(1, w + k); cur.action.setEffectiveWeight(w); }
+      if (prev) { pw = Math.max(0, pw - k); prev.action.setEffectiveWeight(pw); if (!pw) { prev.action.stop(); prev = null; } }
+      return Math.max(0, 1 - w - pw);
+    },
+    stop() { cur?.action.stop(); prev?.action.stop(); cur = prev = null; w = pw = 0; },
+  };
+  return L;
 }
 export async function loadAvatar(base, { look = 'classic' } = {}) {
   const l = parseLook(look), p = PERSONAS.find(x => x.id === l?.persona) || PERSONAS[0];

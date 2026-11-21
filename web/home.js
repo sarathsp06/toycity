@@ -21,7 +21,7 @@ const POOL = 14;             // real doors around you
 const KEY = 'toycity.home';
 const OPEN = 1.35;           // radians the door swings in
 
-export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note, loader, look = () => {} }) {
+export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note, loader, look = () => {}, onKnock = () => {} }) {
   let model = null;
   loader.loadAsync(new URL('./models/door.glb', import.meta.url).href).then(g => {
     // each part is a mesh, or a group of meshes when it has several materials
@@ -118,7 +118,7 @@ export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note,
   const knocks = new Map();   // door id -> { ch, timer, answered }: a knock room stays open 30 s, knock again and it is reused
   async function knock(d) {
     if (!d || mine(d)) return;   // your own door: go in instead (L)
-    knockSound(); swing(keyOf(d), false);
+    knockSound(); swing(keyOf(d), false); onKnock();
     const label = addressOf(d);
     if (!presence) { note(`🚪 You knock at ${label}. Nobody answers.`); return; }
     note(`🚪 You knock at ${label}…`);

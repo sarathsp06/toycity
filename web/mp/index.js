@@ -212,6 +212,7 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
   let hudT = 0, last = 0;
   return {
     presence, voice, ambience,
+    get inCall() { return !!call?.members.size; },
     update(_, speed) {
       // networking runs on wall-clock time: the game clock is capped per frame and slows down
       // when the tab is in the background, which would stretch every timeout

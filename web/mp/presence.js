@@ -130,7 +130,7 @@ export async function createPresence({ scene, player, toRD, fromRD, slug, vehicl
       if (p.player) {
         p.player.group.visible = show && p.pose !== 3;   // 3: at home, inside the house
         const [x, z] = fromRD(s.x, s.y); p.player.group.position.set(x, 0.15 + (p.up || 0), z); p.player.group.rotation.y = s.h;
-        setCard(p.player, p.card || 0, p.pose || 0);
+        setCard(p.player, p.card || 0, p.pose || 0, p.up || 0);
         // a passenger ("ride"): sit them in the car they are in, beside its driver, so the driver sees them
         if (p.player.inside) {
           const host = carNear(x, z, p.id);
