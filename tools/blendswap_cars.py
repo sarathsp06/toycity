@@ -311,7 +311,7 @@ def convert(name, path, length, body):
         im, _, _ = build(interior_items, name + "_interiorsrc", paint_key)
         im.transform(M)
         io = bpy.data.objects.new(name + "_interiorsrc", im); scene.collection.objects.link(io)
-        extra.append(lod(io, 8000, "_interior")); bpy.data.objects.remove(io)
+        extra.append(lod(io, 24000, "_interior"))   # seen from 30 cm away: keep its detail; bpy.data.objects.remove(io)
         print(f"  INTERIOR {name}: {len(extra[-1].data.polygons)} tris from {len(interior_items)} parts")
     if name in DOORS:
         doors = DOORS[name]
@@ -319,7 +319,7 @@ def convert(name, path, length, body):
         body_mesh, _, _ = build([it for it in keep if it[1] not in in_door], name + "_body", paint_key)
         body_mesh.transform(M)
         bo = bpy.data.objects.new(name + "_bodysrc", body_mesh); scene.collection.objects.link(bo)
-        extra.append(lod(bo, 14000, "_body"))   # only the car you drive uses these: lighter; bpy.data.objects.remove(bo)
+        extra.append(lod(bo, 24000, "_body"))   # only the car you drive uses these: lighter; bpy.data.objects.remove(bo)
         for i, names in enumerate(doors):
             items = [it for it in keep if it[1] in names]
             if not items:

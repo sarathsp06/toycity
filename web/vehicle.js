@@ -29,22 +29,28 @@ export const REACH = 4;                        // how close you must be to get i
 const PARK_OK = 2.5;                           // within this of a parking spot counts as parked
 const TICKET_AFTER = 8, TOOT_EVERY = 14, TOOTS = 3, TOOT_NEAR = 45;
 
+const CABIN_TRIM = new THREE.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.75, metalness: 0 });
+const DRIVER_GLASS = new THREE.MeshStandardMaterial({ color: 0xdfe8ee, roughness: 0.05, metalness: 0.1, transparent: true, opacity: 0.08, depthWrite: false });
+
 // one car model as a group of meshes; the paint gets its own material (each car has its own colour).
 // driven: the car you are in, built with opening doors and its interior when the model has them
 export function makeCar(models, name, color, driven = false) {
   const model = models.find(m => m.name === name) || models[0]; if (!model) return null;
   const g = new THREE.Group(); g.userData.car = true;
-  const add = (parent, parts) => {
+  const add = (parent, parts, cabin = false) => {
     for (const [geo, mat, role] of parts) {
       const m = new THREE.Mesh(geo, role === 'paint' ? mat.clone() : mat);
       if (role === 'paint') { m.material.color.setHex(color); m.userData.own = true; }
+      // from the driver's seat the tinted glass reads as a grey film: nearly clear in the car you drive
+      if (driven && /^glass/.test(mat.name)) m.material = DRIVER_GLASS;
+      if (cabin && /^trim/.test(mat.name)) m.material = CABIN_TRIM;   // near-black plastic is a hole in the shade
       m.castShadow = true; parent.add(m);
     }
   };
   // a car with separate doors (see tools/blendswap_cars.py): the body plus one pivot per door, on its hinge
   if (model.open) {
     add(g, model.open.body);
-    if (driven && model.open.interior) add(g, model.open.interior);
+    if (driven && model.open.interior) add(g, model.open.interior, true);
     g.userData.doors = model.open.doors.map(d => {
       const pivot = new THREE.Group(); pivot.position.copy(d.hinge); add(pivot, d.parts); g.add(pivot);
       return { pivot, hinge: d.hinge };

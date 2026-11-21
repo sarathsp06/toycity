@@ -208,7 +208,7 @@ function openParts(root, name) {
   return { body: partsOf(body), doors, interior: inside ? partsOf(inside) : null };
 }
 progress(0.08, 'Parking the cars');
-const CAR_MODELS = await new GLTFLoader().loadAsync(new URL('./models/cars.glb?v=bike2', import.meta.url).href,
+const CAR_MODELS = await new GLTFLoader().loadAsync(new URL('./models/cars.glb?v=cab3', import.meta.url).href,
   e => e.total && progress(0.08 + 0.37 * e.loaded / e.total, 'Parking the cars')).then(g => {
   const list = [];
   for (const [name, w] of [...Object.entries(CAR_MIX), ...CAR_EXTRA.map(n => [n, 0])]) {
@@ -714,7 +714,7 @@ function toggleCar() {
   } else {
     const car = driving.nearest(player.position); if (!car) return;
     goal = null; marker.visible = false; jump.phase = null; jump.h = 0;
-    driving.enter(car); walkDist = dist; dist = Math.max(dist, 10); pitch = Math.min(pitch, 0.35);
+    driving.enter(car); walkDist = dist; dist = Math.max(dist, 10); pitch = firstPerson ? 0.5 : Math.min(pitch, 0.35);
   }
   for (const t of carTiles) updateCars(t);
   carBtn(); apBtn();
@@ -732,15 +732,28 @@ carButton?.addEventListener('click', e => { e.stopPropagation(); toggleCar(); })
 // ---------- autopilot: in a car or on the bike, name a place (or click the map) and lean back ----------
 // The route follows the region's OpenStreetMap streets (autopilot.js); W/A/S/D, the joystick or getting
 // out takes the wheel back.
-const autopilot = createAutopilot({ roadsUrl: new URL('roads.json', base).href, fromRD: (X, Y) => [X - ORX, ORY - Y] });
+const autopilot = createAutopilot({
+  // ?v: the segments carry direction, vehicle and speed flags now; a cached older file would not parse
+  roadsUrl: new URL('roads.json?v=2', base).href, fromRD: (X, Y) => [X - ORX, ORY - Y],
+  fromWGS: (la, lo) => { const [X, Y] = wgsToRd(la, lo); return [X - ORX, ORY - Y]; },
+  toWGS: (x, z) => rdToWgs(...toRD(x, z)),
+  inside: (x, z) => { const [X, Y] = toRD(x, z); return HAVE.has(Math.floor(X / T) + '_' + Math.floor(Y / T)); },
+});
 const apButton = document.getElementById('apbtn'), apForm = document.getElementById('apform'), apInput = document.getElementById('apq');
 async function autoTo(x, z, label) {
   note('🧭 Planning a route to ' + label + '…');
   const [fx, fz] = driving.forward;
-  const r = await autopilot.start({ x: player.position.x, z: player.position.z, fx, fz }, { x, z }, label).catch(() => null);
+  const vehicle = driving.model === 'bike' ? 'bike' : 'car';
+  const r = await autopilot.start({ x: player.position.x, z: player.position.z, fx, fz }, { x, z }, label, vehicle).catch(e => { console.warn('autopilot', e); return null; });
   if (!r) { note('🧭 No road there from here, sorry.'); return; }
-  note(`🧭 Autopilot to ${label}: ${(r.length / 1000).toFixed(1)} km. Steer to take over.`);
+  note(`🧭 Autopilot to ${label}: ${(r.length / 1000).toFixed(1)} km${r.source === 'local' ? ' (offline route)' : ''}. Steer to take over.`);
   apBtn();
+}
+// the status line while on autopilot: the next turn if it is close, else what is left of the trip
+function apLine() {
+  const n = autopilot.next, km = (autopilot.remaining / 1000).toFixed(1);
+  if (n && n.in < 250) return `${n.text} in ${Math.round(n.in / 10) * 10} m  ·  `;
+  return `🧭 ${km} km to ${autopilot.label}  ·  `;
 }
 function stopAuto(why) { if (!autopilot.active) return; autopilot.stop(); if (why) note(why); apBtn(); }
 function apBtn() {
@@ -1010,10 +1023,17 @@ let last = performance.now(), placeT = 0, wantT = 0, signT = 0, frames = 0, fpsT
 // dragging still turns and tilts the head, and your own body is hidden
 function setFirstPerson(on) {
   firstPerson = on; localStorage.setItem('toycity.view', on ? 'eyes' : 'chase');
+  if (on && (driving?.driving || ride)) pitch = 0.5;   // look at the road, a touch below the horizon
   const b = document.getElementById('eyesbtn'); if (b) b.setAttribute('aria-pressed', on);
   dispatchEvent(new Event('toycity:view'));
 }
+// in the driver's seat the dashboard is half a metre away: a closer near plane and a wider lens there
+function lens(seat) {
+  const near = seat ? 0.06 : 0.5, fov = seat ? 68 : 55;
+  if (camera.near !== near || camera.fov !== fov) { camera.near = near; camera.fov = fov; camera.updateProjectionMatrix(); }
+}
 function chaseCam() {
+  lens(firstPerson && (driving.driving || !!ride));
   if (firstPerson) {
     const look = 0.42 - pitch;                     // drag up and down to look up and down
     if (ride) {
@@ -1120,7 +1140,7 @@ function frame(now) {
     chaseCam();
   }
   if ((wantT += dt) > 0.3) { wantT = 0; updateWanted(); for (const t of carTiles) updateCars(t); }
-  if ((placeT += dt) > 0.5) { placeT = 0; place.textContent = (driving.driving ? Math.round(Math.abs(driving.speed) * 3.6) + ' km/h  ·  ' + (autopilot.active ? `🧭 ${(autopilot.remaining / 1000).toFixed(1)} km to ${autopilot.label}  ·  ` : '') : '') + nearestPlace(); carBtn(); }
+  if ((placeT += dt) > 0.5) { placeT = 0; place.textContent = (driving.driving ? Math.round(Math.abs(driving.speed) * 3.6) + ' km/h  ·  ' + (autopilot.active ? apLine() : '') : '') + nearestPlace(); carBtn(); }
 
   // only the 12 nearest signs, rescaled with distance
   if ((signT += dt) > 0.25) {

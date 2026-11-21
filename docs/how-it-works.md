@@ -228,15 +228,26 @@ than now, so a car parked bumper to bumper can always back out but never drive i
 players receive `model:colour` in the state message and draw the car instead of the person.
 A passenger sends `ride:0`: others hide them, and their own game seats them in the driver's car.
 
-The autopilot (`web/autopilot.js`) drives along the region's streets. `tools/roadgraph.mjs` turns
-every drivable OpenStreetMap way into a graph (`regions/<slug>/roads.json`: nodes in RD half-metres
-and their links, about 100,000 nodes for Rotterdam, loaded the first time you use it). A destination
-comes from the region's search index (every address, place and street), then OpenStreetMap's
-Nominatim search for anything else, or a click on the map. The route is an A* search over the graph;
-the car steers towards a point a few metres further along it (pure pursuit) and slows down where the
-route bends. On autopilot only buildings, water and hedges stop the car, not parked cars or people.
-When it is stuck it backs up with the wheel the other way, and after a few tries it hops to the next
-point of the route, so a trip always finishes. Any steering or throttle takes the wheel back.
+The autopilot (`web/autopilot.js`) plans with OpenStreetMap's Valhalla router (FOSSGIS's public
+server), asking for the vehicle you are in: `auto` for a car, `motorcycle` for the bike. That gives
+one-way streets, turn restrictions, access rules, turn-by-turn directions and the expected time per
+stretch, which sets the cruising speed. When the router can't be reached, or its route leaves the
+squares the region has, the game plans offline: `tools/roadgraph.mjs` turns every drivable
+OpenStreetMap way into `regions/<slug>/roads.json` (nodes in RD half-metres; each segment carries
+which directions are allowed, whether cars and motorbikes may use it, and the speed limit), and an
+A* search on travel time runs over it. A destination comes from the region's search index (every
+address, place and street; the nearest of a chain), then Nominatim, or a click on the map.
+
+The route is moved 1.5 m to the right of the road's centre line (the Netherlands drives on the
+right), less in corners and fading out at both ends. The car steers towards a point a few metres
+along it (pure pursuit) and slows down where it bends. On autopilot only buildings, water and hedges
+stop the car, not parked cars or people. When it is stuck it backs up with the wheel the other way,
+and after a few tries hops to the next point of the route, so a trip always finishes. Any steering
+or throttle takes the wheel back.
+
+From the driver's seat (`V` while driving) the camera's near plane drops from 0.5 m to 6 cm and
+the lens widens, so the dashboard and steering wheel aren't clipped away; the car you drive gets
+nearly clear glass and a lighter cabin trim, and its interior is exported at higher detail.
 
 ## 10. Phones
 

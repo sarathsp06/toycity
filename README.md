@@ -18,7 +18,7 @@ Wander the street you grew up on, send a friend a link, and meet them there. No 
 - 🚶 **Walk, run and jump** through real streets: every house, hedge, canal, tree and lamp post is where it really is
 - 🔎 **Find a place**: search an address, a shop or a street, or click anywhere to walk there
 - 🚗 **Drive any parked car** (or hop on a motorbike): walk up and press `E`. Look through your own eyes to sit behind the wheel
-- 🧭 **Autopilot**: in a car or on the bike, type where to go (or click the map) and watch the town go by on real streets
+- 🧭 **Autopilot**: in a car or on the bike, type where to go (or click the map) and watch the town go by. It plans the route for your vehicle on OpenStreetMap, keeps right and tells you the next turn
 - 🙋 **Ride along**: press `E` next to a friend who is driving and sit in their passenger seat
 - 💥 **Mind the paintwork**: crash and the car shows it; park on the pavement and you get a ticket
 - 👋 **Meet people**: everyone nearby walks around as themselves. Tap someone to call them, and hear them from where they stand
@@ -81,7 +81,7 @@ publishes it.
 
 Everything is fetched once by `tilebake.py`, clipped per 500 m square of the Dutch RD grid
 (EPSG:28992) and baked into the game's own files. The browser never calls these services while
-you play, except for the minimap tiles.
+you play, except for the minimap tiles, and the place search and route planner the autopilot asks.
 
 | Source | What it gives the game | Licence |
 |---|---|---|
@@ -91,7 +91,9 @@ you play, except for the minimap tiles.
 | PDOK [aerial photographs](https://www.pdok.nl/introductie/-/article/luchtfoto-pdok) (Beeldmateriaal Nederland) | 25 cm imagery draped over the ground and roofs near you, and lower resolution further out. | [CC BY 4.0](https://www.beeldmateriaal.nl) |
 | PDOK [administrative boundaries](https://www.pdok.nl/introductie/-/article/bestuurlijke-gebieden) | Municipality outlines, which decide which squares belong to a town. | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) / Kadaster |
 | PDOK [Locatieserver](https://www.pdok.nl/introductie/-/article/pdok-locatieserver) | Finding a town or address while baking. | Free public service |
-| [OpenStreetMap](https://www.openstreetmap.org/copyright), via the [Geofabrik](https://download.geofabrik.de) Zuid-Holland extract | Street names, shops and other named places, what kind of building each is (church, school…), street furniture, and bus stops (kept only when a bus route actually serves them). OSM tiles also draw the minimap. | © OpenStreetMap contributors, [ODbL](https://opendatacommons.org/licenses/odbl/) |
+| [OpenStreetMap](https://www.openstreetmap.org/copyright), via the [Geofabrik](https://download.geofabrik.de) Zuid-Holland extract | Street names, shops and other named places, what kind of building each is (church, school…), street furniture, and bus stops (kept only when a bus route actually serves them). OSM tiles also draw the minimap. The drivable streets, one-way streets and speed limits also make the autopilot's offline route network. | © OpenStreetMap contributors, [ODbL](https://opendatacommons.org/licenses/odbl/) |
+| [Valhalla](https://github.com/valhalla/valhalla) on OpenStreetMap, run by [FOSSGIS](https://www.fossgis.de) at valhalla1.openstreetmap.de | The autopilot's routes, for a car or a motorbike, with turn-by-turn directions. | Free public service; © OpenStreetMap contributors |
+| [Nominatim](https://nominatim.org) on openstreetmap.org | Autopilot destinations the game's own search index doesn't know. | Free public service; © OpenStreetMap contributors |
 
 ### 3D models
 
