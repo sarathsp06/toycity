@@ -289,7 +289,7 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
     let [px, pz, ph] = [x, z, h];
     if (!rolling) { const sp = emptySpotNear(x, z, SNAP); if (sp) { px = sp.x; pz = sp.z; ph = Math.abs(wrap(sp.yaw - h)) < Math.PI / 2 ? sp.yaw : sp.yaw + Math.PI; } }
     mesh.position.set(px, 0, pz); mesh.rotation.y = ph; scene.add(mesh);
-    if (st.model === 'bike') mesh.rotation.x = STAND_LEAN;   // on its side stand (the lean is about its length, as in the turns)
+    if (st.model === 'bike') { mesh.rotation.order = 'YXZ'; mesh.rotation.x = STAND_LEAN; }   // on its side stand: turned to its heading first, then leaned about its own length
     left = { mesh, x: px, z: pz, heading: ph, model: st.model, color: st.color, origin: st.origin, speed: rolling ? st.speed : 0, t: 0, toots: 0, ticket: null };
     swing(mesh); st.car = null; stopEngine();
     if (rolling) note('🏃 You jumped out. The handbrake was not on…');
