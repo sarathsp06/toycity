@@ -35,6 +35,7 @@ Wander the street you grew up on, send a friend a link, and meet them there. No 
 | `Space` | jump |
 | `E` | get in or out of a car, or ride along with a friend |
 | `K` | knock on the door in front of you |
+| `L` | make the house in front of you your home, or go inside it |
 | `V` | look through your own eyes |
 | `F` | fly |
 | `M` | map |

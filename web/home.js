@@ -195,12 +195,16 @@ export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note,
       return;
     }
     if (!near) return;
-    if (mine) bar.append(button('🏠 Go inside', goIn));
-    else bar.append(button('🚪 Knock (K)', () => knock(near)), button('🏠 Live here', () => liveHere(near)));
+    if (mine) bar.append(button('🏠 Go inside (L)', goIn));
+    else bar.append(button('🚪 Knock (K)', () => knock(near)), button('🏠 Live here (L)', () => liveHere(near)));
+    // the same in the hint line at the top, in case the buttons are covered
+    note(mine ? `🏠 Your home, ${home.label}: L or the button to go inside` : `🚪 ${addressOf(near)}: K to knock, L to live here`);
   }
   addEventListener('keydown', e => {
     if (e.target.tagName === 'INPUT' || e.repeat) return;
-    if (e.key.toLowerCase() === 'k' && near && !inside) knock(near);
+    const k = e.key.toLowerCase();
+    if (k === 'k' && near && !inside) knock(near);
+    if (k === 'l' && near && !inside) { if (home && idOf(near) === home.id) goIn(); else liveHere(near); }   // L: live here, or go in
   });
 
   // ---------- every frame ----------

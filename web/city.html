@@ -28,11 +28,11 @@
   #cracks { position: fixed; left: 0; top: 0; width: 100%; height: 60%; pointer-events: none; z-index: 2; }
   #cracks[hidden] { display: none; }
   /* at a front door: knock, live here, go inside; and the panel while you are home */
-  #doorbar { position: fixed; left: 50%; bottom: 112px; transform: translateX(-50%); z-index: 6; display: flex; gap: 8px; }
+  #doorbar { position: fixed; left: 50%; bottom: 168px; transform: translateX(-50%); z-index: 45; display: flex; gap: 8px; }
   #doorbar button, #homepanel button { font: 600 15px system-ui, sans-serif; padding: 9px 16px; border: 0; border-radius: 999px; background: #ffb547; color: #1b1206; box-shadow: 0 4px 16px rgba(0,0,0,.3); cursor: pointer; }
   #doorbar button + button { background: #fff; color: #1b2a36; }
   #doorbar[hidden], #homepanel[hidden] { display: none; }
-  #homepanel { position: fixed; left: 50%; bottom: 66px; transform: translateX(-50%); z-index: 6; background: rgba(255,250,240,.96); color: #2a1d10; border-radius: 18px; padding: 14px 18px; box-shadow: 0 6px 24px rgba(0,0,0,.3); display: flex; flex-direction: column; align-items: center; gap: 8px; font: 600 16px system-ui, sans-serif; text-align: center; }
+  #homepanel { position: fixed; left: 50%; bottom: 112px; transform: translateX(-50%); z-index: 45; background: rgba(255,250,240,.96); color: #2a1d10; border-radius: 18px; padding: 14px 18px; box-shadow: 0 6px 24px rgba(0,0,0,.3); display: flex; flex-direction: column; align-items: center; gap: 8px; font: 600 16px system-ui, sans-serif; text-align: center; }
   #homepanel small { font-weight: 400; color: #6b5a44; }
   body.touch #doorbar, body.touch #homepanel { bottom: 250px; }
   body.touch #carbtn { bottom: 204px; }
