@@ -19,8 +19,10 @@ Wander the street you grew up on, send a friend a link, and meet them there. No 
 - 🔎 **Find a place**: search an address, a shop or a street, or click anywhere to walk there
 - 🚗 **Drive any parked car** (or hop on a motorbike): walk up and press `E`. Look through your own eyes to sit behind the wheel
 - 🧭 **Autopilot**: in a car or on the bike, type where to go (or click the map) and watch the town go by. It plans the route for your vehicle on OpenStreetMap, keeps right and tells you the next turn
-- 🙋 **Ride along**: press `E` next to a friend who is driving and sit in their passenger seat
-- 💥 **Mind the paintwork**: crash and the car shows it; park on the pavement and you get a ticket
+- 🙋 **Ride along**: press `E` next to a friend who is driving and sit in their passenger seat; the driver sees you beside them
+- 🚪 **Knock on doors** (`K`) or **make a house your home**: go inside, hear it when someone knocks wherever you are, and step out to meet them
+- 💥 **Mind the paintwork**: crash and both cars show it; park on the pavement and you get a ticket
+- 🟨 **Drive carefully**: hit someone and they go flying, and you get a yellow card everyone can see (red if you do it again)
 - 👋 **Meet people**: everyone nearby walks around as themselves. Tap someone to call them, and hear them from where they stand
 - 📍 **Send a meeting link**: friends who open it arrive right next to you
 - 🛩️ **Fly** above the town, 🌅 change the time of day, and 🐦 listen to the neighbourhood
@@ -32,6 +34,7 @@ Wander the street you grew up on, send a friend a link, and meet them there. No 
 | `Shift` | run / go faster |
 | `Space` | jump |
 | `E` | get in or out of a car, or ride along with a friend |
+| `K` | knock on the door in front of you |
 | `V` | look through your own eyes |
 | `F` | fly |
 | `M` | map |

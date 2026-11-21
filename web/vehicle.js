@@ -19,12 +19,22 @@ const SIZES = { bike: { hl: 1.06, hw: 0.4, wb: 1.45 } };
 const sizeOf = m => SIZES[m] || { hl: 2.15, hw: 0.88, wb: 2.6 };
 export const footprintOf = (m, x, z, yaw) => { const s = sizeOf(m); return { x, z, hx: s.hl, hz: s.hw, yaw }; };
 // where the driver's eyes are, in the model's own frame (x along the car, +z = its left when FRONT is -1)
+// Right-hand drive (the player's choice): the driver sits on the car's right, the passenger on the left.
+// The SUV model is left-hand drive, so the car you drive gets its dashboard and steering wheel mirrored.
+// across: metres from the centre line to the right (+) or left (-), along the car's own z (see side()).
 const EYES = { suv: [0.2, 1.22, 0.38], suv_wreck: [0.2, 1.22, 0.38], bike: [-0.35, 1.55, 0] };
+// the passenger: along the car (towards the front, metres) and across (to the left), for each model
+export const PASSENGER = { suv: [0.2, 0.38], suv_wreck: [0.2, 0.38], bike: [-0.6, 0] };
+// local z of the car's right-hand side for a model whose bonnet points along FRONT * x
+const right = model => FRONT[model] ?? 1;
+// a seat as a local offset [x, z] in the car's own frame: along the length, then across (+ = right)
+export function seatLocal(model, along, across) { const f = FRONT[model] ?? 1; return [along * f, across * right(model)]; }
 const MAX_STEER = 0.55;
 const TOP = 14, BOOST = 28, REVERSE = 5;      // m/s: 50 km/h, 100 km/h with Shift, 18 km/h backwards
 const DAZED = 3, DAZED_TOP = 8;                // after a crash: 30 km/h at most for 3 s, then full speed again
 const ACCEL = 5, BRAKE = 10, ROLL = 0.9;      // m/s², and how quickly a car rolls to a stop
-const CRASH = 7;                               // m/s (25 km/h): a bump harder than this wrecks the car
+const CRASH = 4.5;                             // m/s (16 km/h): a bump harder than this dents the car (and what it hit)
+const KNOCK = 1.2;                             // m/s: faster than this, a person in the way is knocked over
 export const REACH = 4;                        // how close you must be to get in
 const PARK_OK = 2.5;                           // within this of a parking spot counts as parked
 const TICKET_AFTER = 8, TOOT_EVERY = 14, TOOTS = 3, TOOT_NEAR = 45;
@@ -50,7 +60,9 @@ export function makeCar(models, name, color, driven = false) {
   // a car with separate doors (see tools/blendswap_cars.py): the body plus one pivot per door, on its hinge
   if (model.open) {
     add(g, model.open.body);
-    if (driven && model.open.interior) add(g, model.open.interior, true);
+    if (driven && model.open.interior) {   // mirrored: the steering wheel goes to the right
+      const cab = new THREE.Group(); cab.scale.z = -1; add(cab, model.open.interior, true); g.add(cab);
+    }
     g.userData.doors = model.open.doors.map(d => {
       const pivot = new THREE.Group(); pivot.position.copy(d.hinge); add(pivot, d.parts); g.add(pivot);
       return { pivot, hinge: d.hinge };
@@ -79,10 +91,12 @@ function ticket() {
   return s;
 }
 
-export function createDriving({ scene, player, models, carTiles, solids, ground, note = () => {} }) {
+export function createDriving({ scene, player, models, carTiles, solids, ground, note = () => {}, onHitPerson = () => {} }) {
   const taken = new Set();
   const st = { car: null, origin: null, speed: 0, steer: 0, heading: 0, model: null, color: 0 };
-  let left = null;          // the car you got out of: { mesh, x, z, heading, model, color, origin, speed, ... }
+  let left = null;
+  const dented = new Map();  // parked cars someone crashed into: key -> their wrecked mesh, standing in for the instance
+  const knocked = new Map(); // person id -> seconds until they count as solid again          // the car you got out of: { mesh, x, z, heading, model, color, origin, speed, ... }
   let engine = null, ctx = null;
   let door = null;          // the driver's door swinging open and shut: { pivot, angle, t }
   let ignoreLeft = false;   // while the left car moves itself, it must not collide with its own footprint
@@ -97,6 +111,15 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
     o.connect(g).connect(a.destination); o.start(at); o.stop(at + dur + 0.05);
   }
   const toot = () => { beep(392, 0, 0.16, 0.035); beep(330, 0.22, 0.28, 0.035); };   // a polite double toot
+  const f0 = () => FRONT[st.model] ?? 1;
+  // a dull thump: someone bounced off the bonnet
+  function thud() {
+    const a = audio(); if (!a) return;
+    const o = a.createOscillator(), g = a.createGain(); o.type = 'sine';
+    o.frequency.setValueAtTime(140, a.currentTime); o.frequency.exponentialRampToValueAtTime(45, a.currentTime + 0.25);
+    g.gain.setValueAtTime(0.35, a.currentTime); g.gain.exponentialRampToValueAtTime(0.001, a.currentTime + 0.3);
+    o.connect(g).connect(a.destination); o.start(); o.stop(a.currentTime + 0.35);
+  }
   function crunch() {
     const a = audio(); if (!a) return;
     const n = a.createBufferSource(), buf = a.createBuffer(1, a.sampleRate * 0.5, a.sampleRate), d = buf.getChannelData(0);
@@ -110,7 +133,7 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
   function swing(car) {
     const doors = car?.userData.doors; if (!doors?.length) return;
     const f = FRONT[car.userData.model] ?? 1;
-    const d = doors.filter(d => d.hinge.z * -f > 0).sort((a, b) => b.hinge.x * f - a.hinge.x * f)[0];
+    const d = doors.filter(d => d.hinge.z * f > 0).sort((a, b) => b.hinge.x * f - a.hinge.x * f)[0];   // front right
     if (!d) return;
     if (door && door.pivot !== d.pivot) door.pivot.rotation.y = 0;
     door = { pivot: d.pivot, angle: Math.sign(d.hinge.z) * f * 1.15, t: 0 };
@@ -128,6 +151,7 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
         if (taken.has(carKey(tile, k))) continue;
         const d = Math.hypot(data[k] + ox - p.x, data[k + 2] + oz - p.z);
         if (d < bd) { bd = d; best = { tile, k, model, x: data[k] + ox, z: data[k + 2] + oz, yaw: data[k + 3], color: data[k + 5] }; }
+        if (best?.k === k && best.tile === tile && dented.has(carKey(tile, k))) best.wreck = true;
       }
     }
     return best;
@@ -166,6 +190,23 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
     st.car = makeCar(models, w, st.color, true); st.car.position.y = -0.15; player.add(st.car);
     st.model = w; st.dazed = DAZED; crunch(); note('💥 Crash! That will leave a mark.');
   }
+  // a parked car you drove into: hide its instance and put its wreck in its place (it stays solid)
+  function dentParked(tile, k) {
+    const key = carKey(tile, k); if (dented.has(key) || taken.has(key)) return;
+    const { data } = tile.cars, entry = tile.cars.all.find(c => c.k === k), w = entry && wreckOf(entry.model.name); if (!w) return;
+    const mesh = makeCar(models, w, data[k + 5]);
+    mesh.position.set(data[k] + tile.group.position.x, 0, data[k + 2] + tile.group.position.z); mesh.rotation.y = data[k + 3];
+    scene.add(mesh); dented.set(key, mesh);
+  }
+  // which parked cars a box at x, z (heading h) touches, as [tile, k]
+  function parkedAt(x, z, h, model) {
+    const out = [], me = footprintOf(model, x, z, h);
+    for (const t of carTiles) {
+      if (!t.carFps) continue;
+      t.carFps.forEach((f, n) => { if (!f.off && Math.hypot(f.x - x, f.z - z) < 7 && overlap(f, me)) out.push([t, n * 6]); });
+    }
+    return out;
+  }
   function wreckLeft() {
     const w = wreckOf(left.model); if (!w) return;
     disposeCar(left.mesh); left.model = w;
@@ -178,9 +219,14 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
     let x, z, heading, name, color, origin;
     if (target.left) { ({ x, z, heading, model: name, color, origin } = left); disposeCar(left.mesh); left = null; }
     else {
-      if (left) { setTaken(left.origin, false, carTiles); disposeCar(left.mesh); left = null; }   // that car goes home
+      if (left) {   // that car goes home, dents and all
+        const home = left.origin, w = left.model.endsWith('_wreck');
+        setTaken(home, false, carTiles); disposeCar(left.mesh); left = null;
+        if (w) for (const t of carTiles) if (home.startsWith(t.i + '_' + t.j + ':')) dentParked(t, +home.split(':')[1]);
+      }
       origin = carKey(target.tile, target.k); setTaken(origin, true, carTiles);
       x = target.x; z = target.z; heading = target.yaw; name = target.model.name; color = target.color;
+      if (dented.has(origin)) { dented.get(origin).removeFromParent(); disposeCar(dented.get(origin)); dented.delete(origin); name = wreckOf(name) || name; }
     }
     const car = makeCar(models, name, color, true); car.position.y = -0.15;
     swing(car);
@@ -203,7 +249,7 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
     swing(mesh); st.car = null; stopEngine();
     if (rolling) note('🏃 You jumped out. The handbrake was not on…');
     const out = sizeOf(left.model).hw + 1.3;
-    for (const [dx, dz] of [[fz, -fx], [-fz, fx], [-fx, -fz], [fx, fz]]) {
+    for (const [dx, dz] of [[-fz, fx], [fz, -fx], [-fx, -fz], [fx, fz]]) {   // the driver's (right) side first
       const ex = x + dx * out, ez = z + dz * out;
       if (!ground(ex, ez) && !solids.hit(ex, ez, 0.35)) return { x: ex, z: ez };
     }
@@ -213,6 +259,7 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
 
   // ---------- every frame ----------
   function tick(dt, me) {
+    for (const [id, t] of knocked) if (t - dt <= 0) { knocked.delete(id); solids.ignore.delete(id); } else knocked.set(id, t - dt);
     if (door) {
       const t = (door.t += dt);
       const k = t < OPEN_T ? ease(t / OPEN_T) : t < OPEN_T + HOLD_T ? 1 : 1 - ease(Math.min(1, (t - OPEN_T - HOLD_T) / OPEN_T));
@@ -283,12 +330,26 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
     const d = st.speed * dt, x = player.position.x + Math.cos(h) * f * d, z = player.position.z - Math.sin(h) * f * d;
     // A move is fine when it touches nothing, or touches less than now: a car parked tight against its
     // neighbour starts out touching it and may always back away. Otherwise bump: bounce back a little.
+    // a person in the way: faster than walking pace they are knocked flying, and the car carries on
+    if (!ghost && Math.abs(st.speed) > KNOCK) {
+      const me = footprintOf(st.model, x, z, h);
+      for (const f of solids.liveNear(x, z, 4)) {
+        if (!f.id || f.hx !== undefined || knocked.has(f.id) || !overlap({ ...f, hx: f.r, hz: f.r, yaw: 0 }, me)) continue;
+        const [fx, fz] = [Math.cos(h) * f0(), -Math.sin(h) * f0()];
+        knocked.set(f.id, 3); solids.ignore.add(f.id);
+        st.speed *= 0.8; thud();
+        onHitPerson(f.id, fx * st.speed, fz * st.speed);
+      }
+    }
     const now = hitsAt(player.position.x, player.position.z, st.heading, st.model), next = hitsAt(x, z, h, st.model);
     if (next === 0 || next < now) { player.position.x = x; player.position.z = z; st.heading = h; }
     else {
       const impact = Math.abs(st.speed);
       st.speed *= -0.25;
-      if (impact > CRASH && !wrecked && !ghost) wreckDriven();
+      if (impact > CRASH && !ghost) {
+        if (!wrecked) wreckDriven();
+        for (const [t, k] of parkedAt(x, z, h, st.model)) dentParked(t, k);   // the car you hit takes a dent too
+      }
       // arcade help for tight spots: blocked, you can still turn a little on the spot to wiggle out
       const turn = st.heading + steer * 0.6 * dt;
       if (steer && hitsAt(player.position.x, player.position.z, turn, st.model) <= now) st.heading = turn;
@@ -332,7 +393,7 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
   }
 
   return {
-    nearest, enter, exit, update, tick, taken, place,
+    nearest, enter, exit, update, tick, taken, place, dented,
     get driving() { return !!st.car; },
     get speed() { return st.speed; },
     get model() { return st.model; },
@@ -342,8 +403,8 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
     get forward() { const f = FRONT[st.model] ?? 1; return [Math.cos(st.heading) * f, -Math.sin(st.heading) * f]; },
     // the driver's eyes in world space, for the first-person view
     eyes(out) {
-      const [ex, ey, ez] = EYES[st.model] || [0, 1.3, 0.4], f = FRONT[st.model] ?? 1;
-      const lx = ex * f, lz = ez * -f, c = Math.cos(st.heading), s = Math.sin(st.heading);
+      const [ex, ey, ez] = EYES[st.model] || [0, 1.3, 0.4];
+      const [lx, lz] = seatLocal(st.model, ex, ez), c = Math.cos(st.heading), s = Math.sin(st.heading);
       return out.set(player.position.x + lx * c + lz * s, ey, player.position.z - lx * s + lz * c);
     },
     // what other players need to draw my car: "model:colour", empty when on foot

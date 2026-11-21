@@ -12,9 +12,9 @@ rm -rf "$OUT" dist/toycity-site.zip
 mkdir -p "$OUT/models" "$OUT/mp" "$OUT/media"
 cp web/index.html web/places.json "$OUT/"   # the front page: choose a place
 cp web/media/* "$OUT/media/"
-cp web/city.html web/city.js web/loader.worker.js web/textures.js web/avatar.js web/solids.js web/vehicle.js web/autopilot.js "$OUT/"
+cp web/city.html web/city.js web/loader.worker.js web/textures.js web/avatar.js web/solids.js web/vehicle.js web/autopilot.js web/home.js "$OUT/"
 cp web/mp/*.js "$OUT/mp/"
-cp web/models/cars.glb web/models/person.glb web/models/persona_*.glb web/models/CREDITS.txt "$OUT/models/"
+cp web/models/cars.glb web/models/door.glb web/models/person.glb web/models/persona_*.glb web/models/CREDITS.txt "$OUT/models/"
 for R in $RS; do
   mkdir -p "$OUT/regions/$R"
   cp -R web/regions/$R/tiles.json web/regions/$R/search.json web/regions/$R/roads.json \

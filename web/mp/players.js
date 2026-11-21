@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { loadAvatar, myLook } from '../avatar.js';
+import { FRONT } from '../vehicle.js';
 
 const SHIRTS = [0x2f6fde, 0x2a9d5c, 0xe0a020, 0x8e44ad, 0x16a3b8, 0xd35400, 0xc0392b, 0x34495e];
 const base = new URL('../', import.meta.url);
@@ -76,7 +77,25 @@ function ridePose(m) {
   bendBone(m, 'Spine', 0.35);
 }
 
+// a passenger seen in the car they ride in (model: that car's model), or hidden when no car is near
+export function seatIn(p, model) {
+  p.seat = model && model !== 'bike' ? model : model === 'bike' ? 'bike' : null;
+  if (!p.model) return;
+  p.model.visible = !!p.seat;
+  const f = FRONT[p.seat] ?? 1;   // face the bonnet
+  p.model.rotation.y = p.seat ? f * Math.PI / 2 : 0;
+  p.model.position.set(0, p.seat ? (p.seat === 'bike' ? -0.12 : -0.42) : 0, 0);   // sitting: the hips drop onto the seat
+}
+function sitPose(m) {   // knees up, hands in the lap
+  for (const s of ['Left', 'Right']) {
+    const k = s === 'Left' ? 1 : -1;
+    bendBone(m, s + 'UpLeg', -1.45, -k * 0.08); bendBone(m, s + 'Leg', 1.45);
+    bendBone(m, s + 'Arm', -0.5, k * 0.9); bendBone(m, s + 'ForeArm', 0, k * 0.6);
+  }
+}
+
 export function animate(p, speed, dt) {
+  if (p.seat) speed = 0;
   if (p.riding) speed = 0;   // sitting still on the bike, whatever its speed
   const w = THREE.MathUtils.clamp(speed / 1.4, 0, 1), r = THREE.MathUtils.clamp((speed - 2.2) / 1.8, 0, 1);
   if (p.mixer) {
@@ -84,6 +103,7 @@ export function animate(p, speed, dt) {
   p.act.walk.timeScale = THREE.MathUtils.clamp(speed / 1.4, 0.6, 1.6);
   p.mixer.update(dt);
   if (p.riding) ridePose(p.model);
+  else if (p.seat) p.seat === 'bike' ? ridePose(p.model) : sitPose(p.model);
   }
   p.ring.material.opacity += ((p.speaking > 0.02 ? 0.9 : 0) - p.ring.material.opacity) * Math.min(1, dt * 10);
 }
@@ -94,11 +114,36 @@ export function setVehicle(p, car, make) {
   const [name, col] = (car || '').split(':');
   p.inside = name === 'ride';   // a passenger: inside someone else's car, so not drawn at all
   if (p.inside) { if (p.model) p.model.visible = false; p.ring.visible = false; p.tag.visible = false; p.riding = false; return; }
+  p.seat = null;
   p.tag.visible = true;
   if (name && make) { p.carMesh = make(name, parseInt(col, 16)); if (p.carMesh) { p.carMesh.position.y = -0.15; p.group.add(p.carMesh); } }
   p.riding = name === 'bike';   // a motorbike shows its rider, sitting (see ride below)
   if (p.model) { p.model.visible = !p.carMesh || p.riding; ride(p); }
   p.ring.visible = !p.carMesh;
+}
+
+// a yellow (1) or red (2) card over someone who knocked a person over; and flying (1) or lying flat (2) after being hit
+const CARDS = {};
+function cardMat(level) {
+  if (CARDS[level]) return CARDS[level];
+  const c = document.createElement('canvas'); c.width = 64; c.height = 88;
+  const x = c.getContext('2d'); x.fillStyle = level > 1 ? '#e02424' : '#ffd21f';
+  x.beginPath(); x.roundRect(6, 4, 52, 80, 8); x.fill(); x.strokeStyle = 'rgba(0,0,0,.35)'; x.lineWidth = 3; x.stroke();
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  return (CARDS[level] = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
+}
+export function setCard(p, level, pose) {
+  if (p.cardLevel !== level) {
+    if (p.card) { p.group.remove(p.card); p.card = null; }
+    if (level) { p.card = new THREE.Sprite(cardMat(level)); p.card.scale.set(0.42, 0.58, 1); p.card.renderOrder = 21; p.group.add(p.card); }
+    p.cardLevel = level;
+  }
+  if (p.card) p.card.position.y = p.carMesh ? 2.3 : 2.6;
+  if (p.model && !p.riding && !p.carMesh) {
+    p.spin = pose === 1 ? (p.spin || 0) + 0.15 : 0;
+    p.model.rotation.x = pose === 1 ? -p.spin : pose === 2 ? -Math.PI / 2 : 0;
+    p.model.position.y = pose === 2 ? 0.12 : 0;
+  }
 }
 
 export function disposePlayer(p) {

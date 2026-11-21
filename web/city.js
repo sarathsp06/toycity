@@ -11,8 +11,9 @@ import * as BU from 'three/addons/utils/BufferGeometryUtils.js';
 import * as TX from './textures.js';
 import { loadAvatar, myLook } from './avatar.js';
 import { createSolids, footprintsOf, PERSON } from './solids.js';
-import { createDriving, makeCar, carKey, footprintOf, FRONT } from './vehicle.js';
+import { createDriving, makeCar, carKey, footprintOf, FRONT, PASSENGER, seatLocal } from './vehicle.js';
 import { createAutopilot } from './autopilot.js';
+import { createHomes } from './home.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 const params = new URLSearchParams(location.search);
@@ -208,7 +209,7 @@ function openParts(root, name) {
   return { body: partsOf(body), doors, interior: inside ? partsOf(inside) : null };
 }
 progress(0.08, 'Parking the cars');
-const CAR_MODELS = await new GLTFLoader().loadAsync(new URL('./models/cars.glb?v=cab3', import.meta.url).href,
+const CAR_MODELS = await new GLTFLoader().loadAsync(new URL('./models/cars.glb?v=view4', import.meta.url).href,
   e => e.total && progress(0.08 + 0.37 * e.loaded / e.total, 'Parking the cars')).then(g => {
   const list = [];
   for (const [name, w] of [...Object.entries(CAR_MIX), ...CAR_EXTRA.map(n => [n, 0])]) {
@@ -258,7 +259,7 @@ function updateCars(tile) {
   for (const g of groups) {
     let nh = 0, nl = 0;
     for (const { k } of g.list) {
-      if (driving?.taken.has(carKey(tile, k))) continue;   // someone is driving it
+      if (driving?.taken.has(carKey(tile, k)) || driving?.dented.has(carKey(tile, k))) continue;   // driven away, or a wreck stands there
       const d = Math.hypot(data[k] - px, data[k + 2] - pz);
       if (d < CAR_NEAR) fill(g.hi, nh++, data, k);
       else if (d < CAR_MID) fill(g.lo, nl++, data, k);
@@ -278,6 +279,7 @@ function instances(tile, name, data) {
     tile.carFps = fps; fps.forEach((f, n) => { if (driving?.taken.has(tile.i + '_' + tile.j + ':' + n * 6)) f.off = true; }); }
   solids.add(tile, fps);
   if (name === 'tree') tile.trees = data;   // kept for the background sounds (more trees, more birds)
+  const doorMeshes = name === 'door' ? [] : null;
   if (name === 'car' && CAR_MODELS.length) return carInstances(tile, data);
   const shape = SHAPES[name]; if (!shape) return;
   const n = data.length / 6;
@@ -293,8 +295,9 @@ function instances(tile, name, data) {
     m.computeBoundingSphere();
     m.castShadow = role !== 'pool'; m.receiveShadow = true;
     if (role === 'pool') { m.renderOrder = 2; m.visible = nightK > 0.02; pools.add(m); }
-    tile.group.add(m);
+    tile.group.add(m); doorMeshes?.push(m);
   }
+  if (doorMeshes) homes.adopt(tile, data, doorMeshes[0]);   // real doors replace the flat ones near you (home.js)
 }
 const pools = new Set();
 
@@ -351,7 +354,7 @@ function requestSquare(key, level) {
 
 function disposeTile(t) {
   if (!t) return;
-  carTiles.delete(t); solids.drop(t);
+  carTiles.delete(t); solids.drop(t); homes.release(t);
   t.group.traverse(o => { if (o.geometry && !o.isInstancedMesh) o.geometry.dispose(); if (o.isInstancedMesh) { o.dispose(); pools.delete(o); } });
   for (const tx of t.textures) tx.dispose();
   for (const m of t.materials) m.dispose();
@@ -668,7 +671,67 @@ function note(text) {
   const h = document.getElementById('hint'); if (!h) return;
   h.textContent = text; h.classList.remove('gone'); clearTimeout(note.t); note.t = setTimeout(() => h.classList.add('gone'), 4500);
 }
-driving = createDriving({ scene, player, models: CAR_MODELS, carTiles, solids, ground: (x, z) => blockedAt(x, z), note });
+// ---------- front doors and homes (home.js) ----------
+const homes = createHomes({ scene, player, tiles, T, toRD, fromRD: (X, Y) => [X - ORX, ORY - Y], slug, note, loader: new GLTFLoader(),
+  look: y => { yaw = y; pitch = Math.min(pitch, 0.35); dist = Math.max(6, Math.min(dist, 12)); } });
+driving = createDriving({ scene, player, models: CAR_MODELS, carTiles, solids, ground: (x, z) => blockedAt(x, z), note, onHitPerson: hitPerson });
+
+// ---------- knocking people over, and the card you get for it ----------
+// Drive into someone and they go flying (their own game plays it: see knockDown). The driver gets a card
+// over their car or head that everyone sees: yellow the first time, red if it happens again while the
+// yellow is still showing. It wears off after a few minutes of driving nicely.
+const CARD_FOR = 180;                    // seconds a card stays up after the last offence
+const card = { level: 0, t: 0, sprite: null };
+function cardSprite(level) {
+  const c = document.createElement('canvas'); c.width = 64; c.height = 88;
+  const x = c.getContext('2d'); x.fillStyle = level > 1 ? '#e02424' : '#ffd21f';
+  x.beginPath(); x.roundRect(6, 4, 52, 80, 8); x.fill(); x.strokeStyle = 'rgba(0,0,0,.35)'; x.lineWidth = 3; x.stroke();
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
+  sp.scale.set(0.42, 0.58, 1); sp.renderOrder = 21; sp.userData.card = level;
+  return sp;
+}
+function showCard(group, level, y) {
+  const old = group.children.find(o => o.userData.card !== undefined);
+  if (old && old.userData.card === level) { old.position.y = y; return; }
+  if (old) { group.remove(old); old.material.map.dispose(); old.material.dispose(); }
+  if (level) { const sp = cardSprite(level); sp.position.y = y; group.add(sp); }
+}
+function hitPerson(id, vx, vz) {
+  const p = window.__city.social?.presence.peers.get(id);
+  social?.presence.sendTo(id, { t: 'hit', vx, vz, by: social.presence.name });
+  card.level = Math.min(2, card.level + 1); card.t = CARD_FOR;
+  note(card.level > 1 ? `🟥 Red card! You hit ${p?.name || 'someone'} again. Everyone can see it.` : `🟨 Yellow card: you hit ${p?.name || 'someone'}. Drive carefully.`);
+}
+// someone drove into you: fly, land, lie there a moment, get up (only when on foot)
+const fling = { on: false, vx: 0, vz: 0, vy: 0, h: 0, down: 0, spin: 0 };
+function knockDown({ vx, vz, by }) {
+  if (driving.driving || ride || fly || fling.on) return;
+  const sp = Math.min(14, Math.hypot(vx, vz) || 3), k = sp / (Math.hypot(vx, vz) || 1);
+  Object.assign(fling, { on: true, vx: vx * k * 0.7, vz: vz * k * 0.7, vy: 3 + sp * 0.35, h: 0, down: 0, spin: 0 });
+  goal = null; marker.visible = false; jump.phase = null; jump.h = 0;
+  const f = document.getElementById('ouch'); if (f) { f.classList.remove('on'); void f.offsetWidth; f.classList.add('on'); }
+  note(`🤕 Ouch! ${typeof by === 'string' && by ? by.slice(0, 40) : 'Someone'} ran you over.`);
+}
+// one frame of flying or lying down; returns true while it runs (no walking meanwhile)
+function flingStep(dt) {
+  if (!fling.on) return false;
+  const m = avatar.model;
+  if (fling.down === 0) {
+    const nx = player.position.x + fling.vx * dt, nz = player.position.z + fling.vz * dt;
+    if (!blocked(nx, nz)) { player.position.x = nx; player.position.z = nz; } else { fling.vx *= -0.3; fling.vz *= -0.3; }
+    fling.vy -= 9.8 * dt; fling.h += fling.vy * dt; fling.spin += dt * 9;
+    if (m) m.rotation.x = -fling.spin;
+    if (fling.h <= 0) { fling.h = 0; fling.down = 0.001; }
+  } else {
+    fling.down += dt;
+    // flat on the back for 2.5 s, then up again over half a second
+    const up = THREE.MathUtils.smoothstep(fling.down, 2.5, 3.0);
+    if (m) m.rotation.x = -Math.PI / 2 * (1 - up);
+    if (fling.down > 3.0) { fling.on = false; if (m) m.rotation.x = 0; needUnstick = true; }
+  }
+  return true;
+}
 let walkDist = dist;
 // ---------- riding along: get into a friend's car as a passenger ----------
 // E next to someone who is driving puts you in their passenger seat; you move with their car until E again.
@@ -686,8 +749,8 @@ function driverNear() {
 }
 // the passenger seat: beside the driver (front right), or behind the rider on a motorbike
 function seat(p, out) {
-  const [name] = p.car.split(':'), f = FRONT[name] ?? 1, g = p.player.group, h = g.rotation.y;
-  const [lx, lz] = name === 'bike' ? [-0.6 * f, 0] : [0.2 * f, -0.38 * -f];
+  const [name] = p.car.split(':'), g = p.player.group, h = g.rotation.y;
+  const [along, across] = PASSENGER[name] || PASSENGER.suv, [lx, lz] = seatLocal(name, along, -across);   // left of the driver
   return out.set(g.position.x + lx * Math.cos(h) + lz * Math.sin(h), 0.15, g.position.z - lx * Math.sin(h) + lz * Math.cos(h));
 }
 function toggleCar() {
@@ -779,7 +842,7 @@ const keys = {};
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
   keys[e.key.toLowerCase()] = true;
-  if (e.key.toLowerCase() === 'e' && !e.repeat) toggleCar();
+  if (e.key.toLowerCase() === 'e' && !e.repeat && !homes.inside && !homes.busy) toggleCar();
   if (e.key.toLowerCase() === 'f') { if (driving.driving) toggleCar(); toggleFly(); }
   if (e.key.toLowerCase() === 'v') setFirstPerson(!firstPerson);
   if (e.key.toLowerCase() === 'm') toggleMap();
@@ -1032,25 +1095,32 @@ function lens(seat) {
   const near = seat ? 0.06 : 0.5, fov = seat ? 68 : 55;
   if (camera.near !== near || camera.fov !== fov) { camera.near = near; camera.fov = fov; camera.updateProjectionMatrix(); }
 }
+// the cracked windscreen over the driver's-seat view of a wrecked car
+const crackEl = document.getElementById('cracks');
+function cracks(on) { if (crackEl && crackEl.hidden === !!on) crackEl.hidden = !on; }
 function chaseCam() {
   lens(firstPerson && (driving.driving || !!ride));
   if (firstPerson) {
     const look = 0.42 - pitch;                     // drag up and down to look up and down
     if (ride) {
+      cracks(false);
       camera.position.set(player.position.x, 1.22, player.position.z);
       for (const c of player.children) c.visible = false;
     } else if (driving.driving) {
       // from the driver's seat: you see the dashboard, the steering wheel and the bonnet (or the handlebars)
       driving.eyes(camera.position);
       for (const c of player.children) c.visible = !!c.userData.car;
+      cracks(driving.model?.endsWith('_wreck'));   // a wreck's windscreen is cracked
     } else {
+      cracks(false);
       camera.position.set(player.position.x - Math.sin(yaw) * 0.12, player.position.y + 1.62, player.position.z - Math.cos(yaw) * 0.12);
       for (const c of player.children) c.visible = false;
     }
     camera.lookAt(camera.position.x - Math.sin(yaw) * Math.cos(look), camera.position.y + Math.sin(look), camera.position.z - Math.cos(yaw) * Math.cos(look));
     return;
   }
-  for (const c of player.children) c.visible = ride ? false : !driving.driving || !!c.userData.car || driving.rider;   // in a car you see the car, not the person
+  for (const c of player.children) c.visible = c.userData.card !== undefined ? !ride && !homes.inside : ride || homes.inside ? false : !driving.driving || !!c.userData.car || driving.rider;   // in a car you see the car, not the person (and your card, if you have one)
+  cracks(false);
   const pe = pitch + Math.max(0, 1.2 - pitch) * THREE.MathUtils.smoothstep(dist, 30, 300);
   const off = new THREE.Vector3(Math.sin(yaw) * Math.cos(pe), Math.sin(pe), Math.cos(yaw) * Math.cos(pe)).multiplyScalar(dist);
   camera.position.lerp(player.position.clone().add(off), 0.18);
@@ -1107,6 +1177,8 @@ function frame(now) {
     if ((Math.abs(driving.speed) > 0.5 || firstPerson) && !dragging) { let d = behind - yaw; d = Math.atan2(Math.sin(d), Math.cos(d)); yaw += d * Math.min(1, dt * (firstPerson ? 10 : 2.5)); }
     chaseCam();
   }
+  else if (flingStep(dt)) chaseCam();
+  else if (homes.busy || homes.inside) { homes.update(dt, false); chaseCam(); }
   else {
     const fwd = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)), right = new THREE.Vector3(-fwd.z, 0, fwd.x), v = new THREE.Vector3();
     if (keys['w'] || keys['arrowup']) v.add(fwd); if (keys['s'] || keys['arrowdown']) v.sub(fwd);
@@ -1139,6 +1211,7 @@ function frame(now) {
     }
     chaseCam();
   }
+  if (!homes.busy && !homes.inside) homes.update(dt, !driving.driving && !ride && !fly && !fling.on);
   if ((wantT += dt) > 0.3) { wantT = 0; updateWanted(); for (const t of carTiles) updateCars(t); }
   if ((placeT += dt) > 0.5) { placeT = 0; place.textContent = (driving.driving ? Math.round(Math.abs(driving.speed) * 3.6) + ' km/h  ·  ' + (autopilot.active ? apLine() : '') : '') + nearestPlace(); carBtn(); }
 
@@ -1161,9 +1234,11 @@ function frame(now) {
   }
   avatar.dip = 0;
   animateAvatar(dt, jump.phase === 'air' ? 0 : movedThisFrame); movedThisFrame = 0;
-  social?.update(dt, driving.driving ? Math.abs(driving.speed) : ride ? ride.speed || 0 : avatar.speed);
+  social?.update(dt, driving.driving ? Math.abs(driving.speed) : ride ? ride.speed || 0 : fling.on && !fling.down ? Math.hypot(fling.vx, fling.vz) : avatar.speed);
+  if (card.level && (card.t -= dt) <= 0) { card.level = 0; note('Card gone. Thanks for driving carefully.'); }
+  showCard(player, card.level, driving.driving ? 2.3 : 2.25);
   driving.tick(dt, player.position);
-  player.position.y = 0.15 + jump.h - avatar.dip;
+  player.position.y = 0.15 + jump.h - avatar.dip + (fling.on ? fling.h + (fling.down ? 0.12 : 0) : 0);
   // sharp shadows that follow the player
   const R = 40 + Math.min(dist, 150) * 0.9;
   sun.target.position.copy(player.position); sun.position.copy(player.position).add(SUN_OFFSET);
@@ -1187,7 +1262,7 @@ function bench(n = 30) {
   for (let k = 0; k < n; k++) { renderer.render(scene, camera); gl.finish(); }
   return +((performance.now() - t0) / n).toFixed(2);
 }
-window.__city = { ovTiles, solids, driving, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, bench, blocked, jump, toRD, ORX, ORY, get stats() { return window.__stats; } };
+window.__city = { ovTiles, solids, driving, knockDown, card, fling, homes, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, bench, blocked, jump, toRD, ORX, ORY, get stats() { return window.__stats; } };
 // ---------- social layer: other people, voice and background sounds (web/mp/, ?mp=0 turns it off) ----------
 // It only reads the player's position and the trees and parked cars around it; nothing here depends on it.
 let social = null;
@@ -1203,8 +1278,11 @@ function surroundings() {
 }
 if (params.get('mp') !== '0') import('./mp/index.js').then(m => m.start({
   scene, camera, player, toRD, fromRD: (X, Y) => [X - ORX, ORY - Y], slug, params, surroundings, useAvatar, solids, goToRD: arriveNear,
-  vehicle: { get shared() { return ride ? 'ride:0' : driving.shared; }, make: (name, color) => makeCar(CAR_MODELS, name, color) }, view: { get eyes() { return firstPerson; }, set eyes(v) { setFirstPerson(v); } },
-  hud: document.getElementById('mp'),
+  vehicle: { get shared() { return ride ? 'ride:0' : driving.shared; }, make: (name, color) => makeCar(CAR_MODELS, name, color),
+    get mine() { return driving.driving ? { model: driving.model, x: player.position.x, z: player.position.z, h: player.rotation.y } : null; } }, view: { get eyes() { return firstPerson; }, set eyes(v) { setFirstPerson(v); } },
+  hud: document.getElementById('mp'), knockDown, homes,
+  // what others see of you besides where you are: your card, lying flat or flying, and how high you are
+  body: { get card() { return card.level; }, get pose() { return homes.inside ? 3 : fling.on ? (fling.down ? 2 : 1) : 0; }, get y() { return fling.on ? +fling.h.toFixed(2) : 0; } },
 })).then(s => { social = s; window.__city.social = s; }).catch(e => { console.warn('multiplayer unavailable', e); document.getElementById('mp').textContent = 'Multiplayer unavailable right now'; });
 
 setFirstPerson(localStorage.getItem('toycity.view') === 'eyes');

@@ -64,14 +64,18 @@ export function createSolids() {
   }
   function hit(x, z, r) {
     for (const f of grid.get(cellOf(x, z)) || []) if (hits(f, x, z, r)) return true;
-    for (const fn of live) for (const f of fn()) if (hits(f, x, z, r)) return true;
+    for (const fn of live) for (const f of fn()) if (!(f.id && ignore.has(f.id)) && hits(f, x, z, r)) return true;
     return false;
   }
+  // the static footprints touching a circle, e.g. the parked car you just drove into
+  function at(x, z, r) { return (grid.get(cellOf(x, z)) || []).filter(f => hits(f, x, z, r)); }
+  // people (live footprints with an id) that are not solid for now: someone knocked over a moment ago
+  const ignore = new Set();
   // moving things (other players, their cars) within r of a point, for checks beyond 'is it solid'
   function liveNear(x, z, r) {
     const out = [];
     for (const fn of live) for (const f of fn()) if (Math.hypot(f.x - x, f.z - z) < r) out.push(f);
     return out;
   }
-  return { add, drop, hit, liveNear, live: fn => live.push(fn) };
+  return { add, drop, hit, at, liveNear, ignore, live: fn => live.push(fn) };
 }

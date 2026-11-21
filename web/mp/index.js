@@ -11,7 +11,7 @@ import { PERSON } from '../solids.js';
 import { footprintOf } from '../vehicle.js';
 import * as THREE from 'three';
 
-export async function start({ scene, camera, player, toRD, fromRD, slug, params, hud, surroundings, useAvatar, view, goToRD, solids, vehicle }) {
+export async function start({ scene, camera, player, toRD, fromRD, slug, params, hud, surroundings, useAvatar, view, goToRD, solids, vehicle, body, knockDown, homes }) {
   hud.innerHTML = `<button id="mpname" title="Change your name"></button>
     <button id="mpview" title="Switch between seeing through your eyes and from behind (V)"></button>
     <button id="mpsound" title="Birds, wind and traffic"></button>
@@ -21,14 +21,17 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
   const callBox = document.createElement('div'); callBox.id = 'mpcall'; callBox.hidden = true; document.body.append(callBox);
   const toasts = document.createElement('div'); toasts.id = 'mptoasts'; document.body.append(toasts);
   const $ = s => hud.querySelector(s);
-  const presence = await createPresence({ scene, player, toRD, fromRD, slug, vehicle });
+  const presence = await createPresence({ scene, player, toRD, fromRD, slug, vehicle, body });
+  // a driver ran into you: their game sends where the car was going; yours plays the fall
+  homes?.connect(presence);   // houses: knocks and residents (home.js)
+  presence.onCall((m, id) => { if (m.t === 'hit' && Number.isFinite(m.vx) && Number.isFinite(m.vz) && presence.peers.get(id)?.car) knockDown?.(m); });
   // other people are solid: you walk around them, not through them
   solids?.live(() => [...presence.peers.values()].filter(p => p.player?.group.visible && p.dist < 20)
     .map(p => {
       const g = p.player.group.position;
       // someone driving is as big as their car, and carries its speed (a fast one wrecks a car it hits)
       if (p.car?.startsWith('ride')) return { x: 1e9, z: 1e9, r: 0 };   // a passenger is inside a car, not in the way
-      return p.car ? { ...footprintOf(p.car.split(':')[0], g.x, g.z, p.player.group.rotation.y), v: p.speed || 0 } : { x: g.x, z: g.z, r: PERSON.r };
+      return p.car ? { ...footprintOf(p.car.split(':')[0], g.x, g.z, p.player.group.rotation.y), v: p.speed || 0 } : { x: g.x, z: g.z, r: PERSON.r, id: p.id };
     }));
   // Calls. The people near you are listed as "📞 Talk to …" buttons at the bottom of the screen; tapping
   // one (or the person themselves, or Talk in the people list) rings them. Only people in the same call

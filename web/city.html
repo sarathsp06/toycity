@@ -21,6 +21,20 @@
   #hint.gone { opacity: 0; }
   #carbtn { position: fixed; left: 50%; bottom: 66px; transform: translateX(-50%); z-index: 6; font: 600 15px system-ui, sans-serif; padding: 9px 18px; border: 0; border-radius: 999px; background: #ffb547; color: #1b1206; box-shadow: 0 4px 16px rgba(0,0,0,.3); cursor: pointer; }
   #carbtn[hidden] { display: none; }
+  /* hit by a car: the screen flashes red for a moment */
+  #ouch { position: fixed; inset: 0; pointer-events: none; z-index: 4; background: radial-gradient(transparent 30%, rgba(220,30,30,.65)); opacity: 0; }
+  #ouch.on { animation: ouch 1.6s ease-out; }
+  @keyframes ouch { 0% { opacity: 1; } 100% { opacity: 0; } }
+  #cracks { position: fixed; left: 0; top: 0; width: 100%; height: 60%; pointer-events: none; z-index: 2; }
+  #cracks[hidden] { display: none; }
+  /* at a front door: knock, live here, go inside; and the panel while you are home */
+  #doorbar { position: fixed; left: 50%; bottom: 112px; transform: translateX(-50%); z-index: 6; display: flex; gap: 8px; }
+  #doorbar button, #homepanel button { font: 600 15px system-ui, sans-serif; padding: 9px 16px; border: 0; border-radius: 999px; background: #ffb547; color: #1b1206; box-shadow: 0 4px 16px rgba(0,0,0,.3); cursor: pointer; }
+  #doorbar button + button { background: #fff; color: #1b2a36; }
+  #doorbar[hidden], #homepanel[hidden] { display: none; }
+  #homepanel { position: fixed; left: 50%; bottom: 66px; transform: translateX(-50%); z-index: 6; background: rgba(255,250,240,.96); color: #2a1d10; border-radius: 18px; padding: 14px 18px; box-shadow: 0 6px 24px rgba(0,0,0,.3); display: flex; flex-direction: column; align-items: center; gap: 8px; font: 600 16px system-ui, sans-serif; text-align: center; }
+  #homepanel small { font-weight: 400; color: #6b5a44; }
+  body.touch #doorbar, body.touch #homepanel { bottom: 250px; }
   body.touch #carbtn { bottom: 204px; }
   /* autopilot: a button beside "Get out" while you drive, and a box to type where to go */
   #apbtn { position: fixed; left: calc(50% + 100px); bottom: 66px; z-index: 6; font: 600 15px system-ui, sans-serif; padding: 9px 16px; border: 0; border-radius: 999px; background: #fff; color: #1b2a36; box-shadow: 0 4px 16px rgba(0,0,0,.3); cursor: pointer; }
@@ -133,6 +147,11 @@
 </div>
 <div id="hint">WASD to walk · drag to look · ☰ for more</div>
 <button id="carbtn" hidden>🚗 Get in (E)</button>
+<div id="ouch"></div>
+<svg id="cracks" hidden viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true"><g fill="none" stroke="rgba(255,255,255,.75)" stroke-width="1.6" stroke-linecap="round">
+  <path d="M640 140 L560 60 L520 0 M640 140 L760 90 L860 30 M640 140 L700 230 L690 330 M640 140 L540 190 L430 210 M640 140 L620 40 M640 140 L740 170 L900 160"/>
+  <path stroke-width="1" d="M600 100 L585 120 L610 130 M690 110 L705 135 L680 150 M670 200 L650 215 M585 165 L560 150 M760 165 L770 140"/>
+  <circle cx="640" cy="140" r="9" stroke-width="2"/></g></svg>
 <button id="apbtn" hidden>🧭 Autopilot</button>
 <form id="apform" hidden><input id="apq" placeholder="Where to? An address or a place" aria-label="Where to drive" autocomplete="off"/><button>Go</button></form>
 <div id="place">loading…</div>

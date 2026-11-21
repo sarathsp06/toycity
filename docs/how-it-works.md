@@ -245,6 +245,26 @@ stop the car, not parked cars or people. When it is stuck it backs up with the w
 and after a few tries hops to the next point of the route, so a trip always finishes. Any steering
 or throttle takes the wheel back.
 
+Cars are right-hand drive: the SUV model is left-hand drive, so the car you drive gets its dashboard
+mirrored, and the eyes, the driver's door and the getting-out side are on the right. A passenger sits
+on the left; other players' games seat them in the car nearest to where they are (`presence.js`).
+
+A bump faster than 16 km/h turns the car into its wreck, and the parked car it hit too (a wreck mesh
+stands in for that instance, and stays when the car you dropped goes back to its spot). Driving into
+a person faster than walking pace sends them a `hit` message: their own game flings them along the
+car's direction, lays them flat for a few seconds and stands them up, and everyone sees it through
+the state message (pose and height). The driver gets a card shown over their car or head, yellow
+then red, for three minutes.
+
+### Doors and homes
+
+Front doors near you are a real model (`tools/door_model.py` builds `models/door.glb` in Blender:
+frame, step, panelled leaf with window, handle and letterbox, hinged so it swings in). At a door you
+can knock (`K`) or make it your home (saved in this browser). Each home is a small multiplayer room
+named after the door's RD position, so a knock reaches its residents wherever they are, with a system
+notification when the tab is in the background. At your own door you can go inside: the door opens,
+you step through and others stop seeing you; "Step outside", or answering a knock, walks you out.
+
 From the driver's seat (`V` while driving) the camera's near plane drops from 0.5 m to 6 cm and
 the lens widens, so the dashboard and steering wheel aren't clipped away; the car you drive gets
 nearly clear glass and a lighter cabin trim, and its interior is exported at higher detail.

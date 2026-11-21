@@ -63,6 +63,10 @@ FRONT_END = {"suv": -1, "van": 1}
 # interior parts (seats, dashboard, steering wheel) exported as <name>_interior, only for the car you drive
 INTERIOR = {"suv": ["UCR_GENSUV_ZYX0_006", "UCR_GENSUV_ZYX0_INT_ARCH_A", "UCR_GENSUV_ZYX0_INT_SEAT_B",
                     "UCR_GENSUV_ZYX0_INT_WALL", "UCR_GENSUV_ZYX0_1SBD"]}
+# where the driver's (and the front passenger's) eyes are in the finished car, metres (x length, y width, z up,
+# wheels on z = 0; the game sinks the car 15 cm). Dark trim panels between those eyes and the windscreen are
+# cut from <name>_body, the version only the car you drive uses (see clear_view).
+EYES = {"suv": [(-0.2, -0.38, 1.37), (-0.2, 0.38, 1.37)]}
 MAT_PIN = {"suv": {"x_ucr_light": "headlight", "x_ucr_leather": "trim", "x_ucr_grey": "trim", "x_ucr_plastic_grey": "trim"}}
 MAT_PIN["suv_wreck"] = MAT_PIN["suv"]
 CREDITS = {
@@ -128,6 +132,34 @@ def materials():
             m.blend_method = "BLEND" if hasattr(m, "blend_method") else None
         out[k] = m
     return out
+
+
+def clear_view(mesh, eyes):
+    """Delete the non-paint, non-glass faces you see through the windscreen from the driver's seat.
+    Rays fan out over the front view (80 degrees wide, from below the dashboard line to well above);
+    the first face each ray hits within 1.8 m goes if it is trim, then the rays go again until none hit."""
+    from mathutils.bvhtree import BVHTree
+    import math
+    names = [m.name for m in mesh.materials]
+    gone = 0
+    for _ in range(40):
+        bm = bmesh.new(); bm.from_mesh(mesh); bm.faces.ensure_lookup_table()
+        solid = [f for f in bm.faces if not names[f.material_index].startswith("glass")]
+        bvh = BVHTree.FromPolygons([v.co.copy() for v in bm.verts], [[v.index for v in f.verts] for f in solid])
+        hit = set()
+        for ex, ey, ez in eyes:
+            for a in range(-40, 41, 2):
+                for e in range(-20, 31):
+                    ra, re = math.radians(a), math.radians(e)
+                    d = Vector((-math.cos(re) * math.cos(ra), math.sin(ra), math.sin(re)))
+                    _, _, i, dist = bvh.ray_cast(Vector((ex, ey, ez)), d, 1.8)
+                    if i is not None and not names[solid[i].material_index].startswith("paint"):
+                        hit.add(solid[i])
+        if not hit:
+            bm.free(); break
+        bmesh.ops.delete(bm, geom=list(hit), context="FACES")
+        bm.to_mesh(mesh); bm.free(); gone += len(hit)
+    return gone
 
 
 def convert(name, path, length, body):
@@ -318,6 +350,8 @@ def convert(name, path, length, body):
         in_door = {n for d in doors for n in d}
         body_mesh, _, _ = build([it for it in keep if it[1] not in in_door], name + "_body", paint_key)
         body_mesh.transform(M)
+        if name in EYES:
+            print(f"  VIEW {name}: {clear_view(body_mesh, EYES[name])} trim faces cleared from the windscreen")
         bo = bpy.data.objects.new(name + "_bodysrc", body_mesh); scene.collection.objects.link(bo)
         extra.append(lod(bo, 24000, "_body"))   # only the car you drive uses these: lighter; bpy.data.objects.remove(bo)
         for i, names in enumerate(doors):
