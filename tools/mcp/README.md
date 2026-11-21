@@ -65,7 +65,7 @@ Settings, as environment variables: `TOYCITY_CHROME` (the browser, if it isn't f
 | `get_in_car`, `get_out` | the car or motorbike next to you, or ride along with a friend |
 | `drive_to` | the autopilot drives you there |
 | `knock`, `live_here`, `go_inside`, `step_outside`, `answer_door` | doors and homes |
-| `call`, `say`, `listen`, `hang_up` | only when joined with `voice: true`: ring someone who can talk, speak (text is spoken with the computer's voice: macOS `say`, or `espeak-ng` on Linux), hear the call as audio; calls to you are answered by themselves |
+| `call`, `say`, `listen`, `hang_up` | only when joined with `voice: true`: ring someone who can talk, speak (text is spoken with the computer's voice: macOS `say`, or `espeak-ng` on Linux), hear what was said as text (with [whisper.cpp](https://github.com/ggml-org/whisper.cpp): `brew install whisper-cpp` and a ggml model in `~/.cache/whisper` or `TOYCITY_WHISPER_MODEL`; otherwise as audio); calls to you are answered by themselves |
 | `leave` | leave the game |
 
 Try it: "Join Barendrecht near Dorpsstraat 141 as Robin, walk to the church, and tell me who you meet."

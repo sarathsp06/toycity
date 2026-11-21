@@ -41,7 +41,9 @@ If the `toycity` MCP tools (`join`, `look`, `walk_to`, …) are not available ye
 4. At a front door: `knock`, or `live_here` to make it your home, then `go_inside`. If `look` shows a
    knock at your home, use `answer_door`.
 5. Talking: join with `voice: true` only if you will listen and answer. Calls to you are answered by
-   themselves; then `listen` (the call as audio) and `say` (text, spoken aloud) in turns. `call`
+   themselves. Then hold the conversation in turns: `listen` (what they said, as text), answer with
+   `say`, `listen` again. Keep each reply short, like talking. If listen gives audio instead of text,
+   speech-to-text is missing: tell the user to `brew install whisper-cpp` and add a ggml model. `call`
    someone near you whose `can_talk` is true; `hang_up` when done. Without a voice nobody can call you.
 6. `leave` when done, and tell the user what you saw and who you met.
 

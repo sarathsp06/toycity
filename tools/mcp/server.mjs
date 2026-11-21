@@ -247,9 +247,36 @@ server.tool('answer_door', 'Someone is knocking at your home (look lists knocks)
 // ---------- voice: only for an agent that joined with voice: true ----------
 function speak(text) {   // text to a WAV file with the computer's own speech: macOS say, or espeak-ng / espeak
   const f = path.join(os.tmpdir(), `toycity-say-${process.pid}.wav`);
-  if (process.platform === 'darwin') execFileSync('say', ['-o', f, '--data-format=LEI16@22050', text]);
+  if (process.platform === 'darwin') {
+    // the system voice first; some voices (Siri ones) write an empty file, so then a classic voice
+    for (const v of [[], ['-v', 'Samantha'], ['-v', 'Daniel']]) {
+      try { execFileSync('say', [...v, '-o', f, '--data-format=LEI16@22050', text]); } catch { continue; }
+      if (fs.existsSync(f) && fs.statSync(f).size > 2000) break;
+    }
+  }
   else { let ok = false; for (const c of ['espeak-ng', 'espeak']) { try { execFileSync(c, ['-w', f, text]); ok = true; break; } catch { /* next */ } } if (!ok) throw new Error('no text-to-speech here: install espeak-ng, or pass your own audio'); }
+  if (!fs.existsSync(f) || fs.statSync(f).size <= 2000) throw new Error('Text-to-speech produced no sound on this computer.');
   const b = fs.readFileSync(f).toString('base64'); fs.rmSync(f, { force: true }); return b;
+}
+
+// speech to text, so the agent knows what was said: whisper.cpp (whisper-cli) with a ggml model,
+// from TOYCITY_WHISPER_MODEL or a usual place. Without it, listen gives the audio itself.
+function whisperModel() {
+  const home = os.homedir(), cands = [process.env.TOYCITY_WHISPER_MODEL, ...['.cache/whisper', '.cache/hyperframes/whisper/models', '.whisper', 'Library/Application Support/whisper']
+    .flatMap(d => { try { return fs.readdirSync(path.join(home, d)).filter(f => /^ggml-.*\.bin$/.test(f)).map(f => path.join(home, d, f)); } catch { return []; } }),
+    '/opt/homebrew/share/whisper-cpp/ggml-base.en.bin', '/usr/local/share/whisper-cpp/ggml-base.en.bin'].filter(Boolean);
+  return cands.find(f => fs.existsSync(f));
+}
+function transcribe(wavB64) {
+  const model = whisperModel(); if (!model) return null;
+  const bin = ['whisper-cli', 'whisper-cpp', 'main'].find(b => { try { execFileSync('which', [b], { stdio: 'ignore' }); return true; } catch { return false; } });
+  if (!bin) return null;
+  const f = path.join(os.tmpdir(), `toycity-heard-${process.pid}.wav`);
+  fs.writeFileSync(f, Buffer.from(wavB64, 'base64'));
+  try {
+    const out = execFileSync(bin, ['-m', model, '-f', f, '-nt', '-np', '-l', 'en'], { encoding: 'utf8', timeout: 90000, stdio: ['ignore', 'pipe', 'ignore'] });
+    return out.replace(/\[(BLANK_AUDIO|MUSIC|NOISE)[^\]]*\]/gi, '').replace(/\s+/g, ' ').trim();
+  } catch { return null; } finally { fs.rmSync(f, { force: true }); }
 }
 const needVoice = () => { need(); if (!hasVoice) throw new Error('You joined without a voice: leave and join again with voice: true.'); };
 
@@ -265,18 +292,21 @@ server.tool('say', 'Speak in your call (calls to you are answered by themselves 
     const inCall = await inPage(() => window.__agentCall?.members.length || 0);
     if (!inCall) return text('You are not in a call: nobody would hear you. Use call, or wait for someone to call you.');
     const secs = await inPage(b => window.__agentVoice.say(b), wav_base64 || speak(t));
+    if (!(secs > 0.1)) return text('The sound could not be played (it was empty). Try again with different words.');
     await page.waitForTimeout(Math.min(30, secs) * 1000);
     return text(`Said it (${secs.toFixed(1)} s).`);
   });
 
-server.tool('listen', 'What you heard in your call since you last listened (up to two minutes), as audio. Wait a little first if you just spoke.',
+server.tool('listen', 'What was said in your call since you last listened (up to two minutes), as text (or audio if this computer has no speech-to-text). Wait a little first if you just spoke. To hold a conversation: listen, then say, then listen again.',
   { seconds: z.number().min(0).max(30).default(0).describe('listen this much longer first') },
   async ({ seconds }) => {
     needVoice(); if (seconds) await page.waitForTimeout(seconds * 1000);
     const r = await inPage(() => window.__agentVoice?.take?.() || null);
     if (!r || r.seconds < 0.2) return text('Nothing heard yet.');
     if (r.silent) return text(`${r.seconds.toFixed(0)} s of silence.`);
-    return { content: [{ type: 'text', text: `${r.seconds.toFixed(1)} s of call audio:` }, { type: 'audio', data: r.wav, mimeType: 'audio/wav' }] };
+    const said = transcribe(r.wav);
+    if (said !== null) return text(said ? `Heard (${r.seconds.toFixed(0)} s): "${said}"` : `${r.seconds.toFixed(0)} s, no words heard.`);
+    return { content: [{ type: 'text', text: `${r.seconds.toFixed(1)} s of call audio (no speech-to-text here: install whisper.cpp for words):` }, { type: 'audio', data: r.wav, mimeType: 'audio/wav' }] };
   });
 
 server.tool('hang_up', 'Leave your call.', {},
