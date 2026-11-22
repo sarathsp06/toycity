@@ -68,6 +68,24 @@
   .feature h3 { margin: 10px 0 6px; font-size: 18px; }
   .feature p { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.55; }
 
+  /* first time: three steps */
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; counter-reset: step; }
+  .step { background: var(--card); border: 1px solid rgba(255,255,255,.07); border-radius: 18px; padding: 22px 22px 20px 64px; position: relative; }
+  .step::before { counter-increment: step; content: counter(step); position: absolute; left: 20px; top: 20px; width: 30px; height: 30px; border-radius: 50%; background: var(--accent); color: #1b1206; font-weight: 800; display: grid; place-items: center; }
+  .step h3 { margin: 0 0 6px; font-size: 18px; } .step p { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.55; }
+  kbd { background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.2); border-radius: 5px; padding: 0 6px; font-family: inherit; font-size: .9em; color: var(--ink); }
+
+  /* where the data comes from */
+  .sources { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+  .source { background: var(--card); border: 1px solid rgba(255,255,255,.07); border-radius: 16px; padding: 18px 20px; }
+  .source h3 { margin: 0 0 4px; font-size: 17px; } .source .who { font-size: 13px; color: var(--accent); margin-bottom: 8px; }
+  .source p { margin: 0; color: var(--muted); font-size: 14.5px; line-height: 1.55; }
+  .source a { color: var(--ink); }
+  .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+  .fact { border-left: 3px solid var(--accent); padding: 4px 0 4px 16px; }
+  .fact b { display: block; font-size: 24px; letter-spacing: -.01em; } .fact span { color: var(--muted); font-size: 14.5px; line-height: 1.5; }
+  .more { display: inline-block; margin-top: 20px; font-weight: 700; color: var(--accent); text-decoration: none; }
+
   .quote { margin: 64px 0 0; padding: 36px 28px; border-radius: 22px; text-align: center; font-size: clamp(20px, 3vw, 28px); line-height: 1.4; letter-spacing: -.01em;
            background: radial-gradient(120% 140% at 50% 0%, rgba(255,181,71,.18), transparent 60%), var(--card); border: 1px solid rgba(255,181,71,.2); }
   .quote small { display: block; margin-top: 12px; font-size: 15px; color: var(--muted); }
@@ -97,7 +115,7 @@
       Wander the street you grew up on, send a friend a link, and meet them there. Tap them to talk.</p>
     <div class="cta">
       <a class="btn primary" href="#places">Choose a place →</a>
-      <a class="btn ghost" href="https://github.com/sarathsp06/toycity" target="_blank" rel="noopener">See how it's built</a>
+      <a class="btn ghost" href="#data">Where the data comes from</a>
     </div>
   </div>
 </header>
@@ -127,6 +145,40 @@
     </div>
   </section>
 
+  <section id="start">
+    <h2>First time? It's easy.</h2>
+    <p class="sub">There's nothing to learn before you start walking.</p>
+    <div class="steps">
+      <div class="step"><h3>Pick a place</h3><p>You start on a real street. Type any address in the ☰ menu to jump there.</p></div>
+      <div class="step"><h3>Walk around</h3><p>Use <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or just click where you want to go. Drag to look. On a phone, use the stick.</p></div>
+      <div class="step"><h3>Look for others</h3><p>Real people have a name over their head. Tap one to talk. Everyone else on the pavement is a passer-by.</p></div>
+    </div>
+  </section>
+
+  <section id="data">
+    <h2>Where it all comes from</h2>
+    <p class="sub">No artist drew these streets. Every piece comes from open data that anyone can download.</p>
+    <div class="sources">
+      <div class="source"><h3>Buildings</h3><div class="who">3D BAG · TU Delft</div><p>Every building in the Netherlands as a 3D model with its real height and roof shape, made from the national building register and laser height scans. <a href="https://3dbag.nl" target="_blank" rel="noopener">3dbag.nl</a></p></div>
+      <div class="source"><h3>Pavements, gardens, water</h3><div class="who">BGT · Kadaster, via PDOK</div><p>The government's large-scale map: every road, pavement, hedge, lawn and canal is drawn to within tens of centimetres. <a href="https://www.pdok.nl" target="_blank" rel="noopener">pdok.nl</a></p></div>
+      <div class="source"><h3>Addresses and aerial photos</h3><div class="who">BAG and Luchtfoto · PDOK</div><p>Every front door has its real house number. The ground and roofs are coloured by aerial photos at 25 cm per pixel.</p></div>
+      <div class="source"><h3>Shops, street names, roads</h3><div class="who">OpenStreetMap contributors</div><p>The names of shops, bus stops and streets, and the road network that cars and the route line follow. <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">openstreetmap.org</a></p></div>
+      <div class="source"><h3>Birds on the water</h3><div class="who">Sovon Vogelonderzoek Nederland</div><p>Which swans, geese and ducks you meet on a pond follows the national bird survey. <a href="facts.html">See the numbers →</a></p></div>
+    </div>
+  </section>
+
+  <section id="didyouknow">
+    <h2>Did you know?</h2>
+    <p class="sub">A few numbers from the towns as they are built here.</p>
+    <div class="facts">
+      <div class="fact"><b>4,100 km</b><span>of streets and roads you can drive, with their real speed limits and one-way rules.</span></div>
+      <div class="fact"><b>27,700</b><span>named places: shops, cafés, schools, churches and bus stops.</span></div>
+      <div class="fact"><b>97%</b><span>of the Netherlands' 5 × 5 km survey squares have breeding mallards. Mute swans breed in 72%.</span></div>
+      <div class="fact"><b>Same for everyone</b><span>The town's cars, passers-by and birds follow the clock, so you and your friends see them in the same places.</span></div>
+    </div>
+    <a class="more" href="facts.html">More facts behind the town →</a>
+  </section>
+
   <div class="quote">Find the bus stop where you waited every morning.<small>Then send someone the link.</small></div>
 </main>
 
@@ -136,7 +188,7 @@
     © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors.<br/>
     Car models from BlendSwap (CC BY / CC0), people from BlenderKit (CC0). Rendered with three.js.
   </div>
-  <div><a href="https://github.com/sarathsp06/toycity" target="_blank" rel="noopener">Source on GitHub</a></div>
+  <div><a href="facts.html">Facts behind the town</a> · <a href="https://github.com/sarathsp06/toycity" target="_blank" rel="noopener">Source on GitHub</a></div>
 </footer>
 
 <script>

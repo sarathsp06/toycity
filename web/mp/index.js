@@ -11,7 +11,7 @@ import { PERSON } from '../solids.js';
 import { footprintOf } from '../vehicle.js';
 import * as THREE from 'three';
 
-export async function start({ scene, camera, player, toRD, fromRD, slug, params, hud, surroundings, view, goToRD, solids, vehicle, body, knockDown, homes }) {
+export async function start({ scene, camera, player, toRD, fromRD, slug, params, hud, surroundings, view, goToRD, find, solids, vehicle, body, knockDown, homes }) {
   hud.innerHTML = `<button id="mpname" title="Change your name"></button>
     <button id="mpview" title="Switch between seeing through your eyes and from behind (V)"></button>
     <button id="mpsound" title="Birds, wind and traffic"></button>
@@ -185,7 +185,13 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
     $('#mplist').replaceChildren(...(ps.length ? ps.map(p => {
       const row = document.createElement('div'), go = document.createElement('button');
       row.textContent = `${p.name || 'Visitor'}${p.mic ? '' : ' 🔇'} · ${p.dist < 1000 ? Math.round(p.dist) + ' m' : (p.dist / 1000).toFixed(1) + ' km'} `;
-      go.textContent = 'Go'; go.onclick = () => { const s = p.track.sample(performance.now() / 1000); if (s && goToRD) goToRD(s.x, s.y); };
+      go.textContent = 'Go'; go.title = 'Jump to them'; go.onclick = () => { const s = p.track.sample(performance.now() / 1000); if (s && goToRD) goToRD(s.x, s.y); };
+      // 🧭 Find: a route line to them, by footpath or by road, that follows them as they move
+      if (find) {
+        const nav = document.createElement('button'); nav.textContent = '🧭 Find'; nav.title = 'Show the way to them';
+        nav.onclick = () => find({ id: p.id, name: p.name || 'Visitor', pos: () => { const q = presence.peers.get(p.id), s = q?.track.sample(performance.now() / 1000); return s ? fromRD(s.x, s.y) : null; } });
+        row.append(nav);
+      }
       row.append(go);
       if (canTalk(p) && myCaps().includes('v')) { const talk = document.createElement('button'); talk.textContent = call?.members.has(p.id) ? 'In call' : '📞 Talk'; talk.disabled = !!call?.members.has(p.id); talk.onclick = () => ring(p.id); row.append(talk); }
       return row;

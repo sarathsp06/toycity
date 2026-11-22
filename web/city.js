@@ -17,7 +17,8 @@ import { createTraffic, COUNT as TRAFFIC_N } from './traffic.js';
 import { createPeds, COUNT as PEDS_N } from './peds.js';
 import { createHomes } from './home.js';
 import { createRadio, mountRadio } from './radio.js';
-import { createMissions, mountMissions } from './missions.js';
+import { createNav, mountNav } from './nav.js';
+import { createBirds } from './birds.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 const params = new URLSearchParams(location.search);
@@ -121,7 +122,29 @@ function worldUV(m) {
 }
 const M = {};
 for (const k of Object.keys(TX.SURFACES)) M['surf:' + k] = worldUV(std({ map: perMetre(TX.SURFACES[k](renderer)), roughness: k === 'road' ? 0.8 : 0.95 }));
-M.water = std({ color: 0x3d6f8f, roughness: 0.12, metalness: 0.15 });
+// Water: a dark canal green-blue that mirrors the sky (scene.environment), with small ripples made in
+// the shader from world position and time, so there is no texture to load and no uv needed
+const waterTime = { value: 0 };
+M.water = std({ color: 0x24434d, roughness: 0.04, metalness: 0, envMapIntensity: 1.6 });
+M.water.onBeforeCompile = s => {
+  s.uniforms.uTime = waterTime;
+  s.vertexShader = s.vertexShader.replace('#include <common>', '#include <common>\nvarying vec2 vWater;')
+    .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWater = (modelMatrix * vec4(transformed, 1.0)).xz;');
+  s.fragmentShader = s.fragmentShader.replace('#include <common>', `#include <common>
+    varying vec2 vWater; uniform float uTime;
+    // the slope of a few crossing wave trains: d/dx and d/dz of sum(a sin(k.p - w t))
+    vec2 waves(vec2 p) {
+      vec2 g = vec2(0.0);
+      g += 0.050 * vec2(0.8, 0.6) * cos(dot(p, vec2(0.8, 0.6)) * 1.3 - uTime * 1.1);
+      g += 0.040 * vec2(-0.5, 0.9) * cos(dot(p, vec2(-0.5, 0.9)) * 2.1 - uTime * 1.6);
+      g += 0.025 * vec2(0.95, -0.3) * cos(dot(p, vec2(0.95, -0.3)) * 4.3 - uTime * 2.3);
+      g += 0.015 * vec2(-0.2, -1.0) * cos(dot(p, vec2(-0.2, -1.0)) * 7.9 - uTime * 3.1);
+      return g;
+    }`).replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+    { vec2 g = waves(vWater) * smoothstep(250.0, 30.0, length(vViewPosition));
+      normal = normalize(normal + (viewMatrix * vec4(-g.x, 0.0, -g.y, 0.0)).xyz); }`);
+};
+M.water.customProgramCacheKey = () => 'water';
 M.hedge = std({ map: perMetre(TX.SURFACES.plants(renderer)), color: 0xb8d0a8 });
 M.fhedge = std({ map: perMetre(TX.SURFACES.plants(renderer)), color: 0xc0d8b0 });
 M.gwall = std({ map: perMetre(TX.wallTexture(renderer, ...TX.WALLS[0])) });
@@ -407,7 +430,7 @@ function requestSquare(key, level) {
 
 function disposeTile(t) {
   if (!t) return;
-  carTiles.delete(t); solids.drop(t); homes.release(t); driving?.release?.(t);
+  carTiles.delete(t); solids.drop(t); birds.drop(t); homes.release(t); driving?.release?.(t);
   // the ground plane and the sprites' geometry are shared by every square: those stay
   t.group.traverse(o => { if (o.isMesh && !o.isInstancedMesh && !o.userData.ground) o.geometry.dispose(); if (o.isInstancedMesh) { o.dispose(); pools.delete(o); } });
   for (const tx of t.textures) tx.dispose();
@@ -439,6 +462,7 @@ function applySquare({ key, level, r, req }) {
     const mesh = new THREE.Mesh(qGeo(file, g), mat);
     mesh.castShadow = shadow && !NO_SHADOW_CAST.has(name); mesh.receiveShadow = shadow;
     if (name.startsWith('wall') || name === 'roof') mesh.userData.solid = true;
+    if (name === 'water') tile.water = mesh.geometry;
     q.add(mesh);
   };
   if (near) {
@@ -449,6 +473,12 @@ function applySquare({ key, level, r, req }) {
     tile.coll = new Uint8Array(d.buf, d.base + d.header.coll[0], d.header.coll[1]);
     tile.low = d.header.low ? new Uint8Array(d.buf, d.base + d.header.low[0], d.header.low[1]) : null;
     tile.meta = d.header.meta;
+    if (tile.water) {   // the ponds in world metres (x, z) for the birds; the geometry is quantised
+      const P = tile.water.attributes.position.array, n = P.length / 3, xz = new Float32Array(n * 2); let ys = 0;
+      const gx = tile.group.position.x, gz = tile.group.position.z;
+      for (let k = 0; k < n; k++) { xz[2 * k] = P[3 * k] * QQ.q - QQ.ox + gx; xz[2 * k + 1] = P[3 * k + 2] * QQ.q - QQ.oz + gz; ys += P[3 * k + 1] * QQ.q - QQ.oy; }
+      birdsLater.push(() => tiles.get(key) === tile && birds.add(tile, xz, tile.water.index.array, ys / n + 0.03, key));
+    }
     for (const [n, k, x, y] of d.header.meta.pois.slice(0, 80)) {
       const sp = label(n, /church|place_of_worship|townhall|school/.test(k) ? '#e6ecff' : '#fff8e6');
       sp.position.set(x, 9.5, -y); tile.group.add(sp); tile.sprites.push(sp); signs.add(sp);
@@ -712,7 +742,7 @@ function note(text) {
 const homes = createHomes({ scene, player, tiles, T, toRD, fromRD: (X, Y) => [X - ORX, ORY - Y], slug, note, loader: new GLTFLoader(),
   look: y => { yaw = y; pitch = Math.min(pitch, 0.35); dist = Math.max(6, Math.min(dist, 12)); },
   onKnock: () => avatar.pose?.set('knock', { once: true }) });
-driving = createDriving({ scene, player, models: CAR_MODELS, carTiles, solids, ground: (x, z) => blockedAt(x, z), note, onHitPerson: hitPerson, onBumpCar: (x, z) => { traffic?.bumped(x, z); missions?.oops(); } });
+driving = createDriving({ scene, player, models: CAR_MODELS, carTiles, solids, ground: (x, z) => blockedAt(x, z), note, onHitPerson: hitPerson, onBumpCar: (x, z) => traffic?.bumped(x, z) });
 
 // ---------- knocking people over, and the card you get for it ----------
 // Drive into someone and they go flying (their own game plays it: see knockDown). The driver gets a card
@@ -738,7 +768,7 @@ function showCard(group, level, y) {
 function hitPerson(id, vx, vz) {
   const p = window.__city.social?.presence.peers.get(id);
   if (!peds?.hit(id, vx, vz)) social?.presence.sendTo(id, { t: 'hit', vx, vz, by: social.presence.name });   // one of the town's people, or a player
-  card.level = Math.min(2, card.level + 1); card.t = CARD_FOR; missions?.oops();
+  card.level = Math.min(2, card.level + 1); card.t = CARD_FOR;
   note(card.level > 1 ? `🟥 Red card! You hit ${p?.name || 'someone'} again. Everyone can see it.` : `🟨 Yellow card: you hit ${p?.name || 'someone'}. Drive carefully.`);
 }
 // someone drove into you: fly, land, lie there a moment, get up (only when on foot)
@@ -892,6 +922,9 @@ function others() {
   }
   return othersList;
 }
+// ---------- birds on the water (birds.js): which ones come from Sovon's survey numbers, see facts.html ----------
+const birds = createBirds({ scene, THREE });
+const birdsLater = [];   // finding the ponds takes a moment: one square's worth per frame, after it is drawn
 const ambientOpts = { scene, autopilot, solids, slug, T, toRD, others };
 const traffic = createTraffic({ ...ambientOpts, models: CAR_MODELS, sounds: () => social?.ambience?.on ?? true, count: trafficOn ? TRAFFIC_N[qName] || TRAFFIC_N.mid : 0 });
 const peds = createPeds({ ...ambientOpts, count: trafficOn ? PEDS_N[qName] || PEDS_N.mid : 0 });
@@ -904,19 +937,12 @@ function setTraffic(on) {
 }
 trafficBtn?.addEventListener('click', () => setTraffic(!trafficOn));
 setTraffic(trafficOn);
-// ---------- car radio (radio.js) and klusjes, small street errands (missions.js) ----------
+// ---------- car radio (radio.js) ----------
 const radio = createRadio();
 mountRadio(document.body, radio);
-const missions = createMissions({ player, driving, scene, note, toRD, fromRD: (X, Y) => [X - ORX, ORY - Y],
-  index: async () => searchIndex ||= await (await fetch(new URL('search.json', base))).json(),
-  inside: (X, Y) => HAVE.has(Math.floor(X / T) + '_' + Math.floor(Y / T)),
-  heading: () => yaw,
-  // the GPS line: a walking route on foot, the road route by car or bike; null falls back to the arrow
-  route: async (from, to, mode) => {
-    const v = mode === 'foot' ? 'foot' : driving.model === 'bike' ? 'bike' : 'car';
-    return (await autopilot.plan(from, to, v).catch(() => null)) || (v === 'foot' ? await autopilot.plan(from, to, 'bike').catch(() => null) : null);
-  } });
-mountMissions(document.getElementById('mission'), missions);
+// ---------- finding someone: a route line to another player (nav.js) ----------
+const nav = createNav({ scene, player, driving, autopilot, walksUrl: new URL('walks.json', base), fromRD: (X, Y) => [X - ORX, ORY - Y], heading: () => yaw, note });
+mountNav(document.getElementById('nav'), nav);
 const apButton = document.getElementById('apbtn'), apForm = document.getElementById('apform'), apInput = document.getElementById('apq');
 async function autoTo(x, z, label) {
   note('🧭 Planning a route to ' + label + '…');
@@ -1438,8 +1464,11 @@ function frame(now) {
   if (card.level && (card.t -= dt) <= 0) { card.level = 0; note('Card gone. Thanks for driving carefully.'); }
   showCard(player, card.level, driving.driving ? 2.3 : 2.25);
   driving.tick(dt, player.position);
+  waterTime.value = (now / 1000) % 1e4;   // the ripples
+  if (birdsLater.length) birdsLater.shift()();
+  birds.update(dt, player.position.x, player.position.z);
   radio.update(driving.driving && !driving.rider);   // a bike has no radio
-  missions.update(dt);
+  nav.update(dt);
   // the town's own cars and people: where I am and whether I am on foot, in a car, or flying
   me.x = player.position.x; me.z = player.position.z; me.inCar = driving.driving || !!ride; me.onFoot = !me.inCar && !fly; me.fly = fly;
   traffic.update(dt, me); peds.update(dt, me);
@@ -1488,7 +1517,7 @@ if (AGENT) window.__agent = {
   draw(n = 3) { AGENT.draw = n; },   // render the next few frames (for a screenshot)
   get drawing() { return AGENT.draw > 0; },
 };
-window.__city = { ovTiles, solids, driving, radio, missions, knockDown, card, fling, homes, health, traffic, peds, setTraffic, nearestPlace, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, jump, toRD, rdToWgs, ORX, ORY, info, stats: null };
+window.__city = { ovTiles, solids, driving, radio, nav, knockDown, card, fling, homes, health, traffic, peds, birds, setTraffic, nearestPlace, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, jump, toRD, rdToWgs, ORX, ORY, info, stats: null };
 // ---------- social layer: other people, voice and background sounds (web/mp/, ?mp=0 turns it off) ----------
 // It only reads the player's position and the trees and parked cars around it; nothing here depends on it.
 let social = null;
@@ -1503,7 +1532,7 @@ function surroundings() {
   return { green: Math.min(1, trees / 25), street: Math.min(1, (cars + 4 * traffic.near(60)) / 30), traffic: traffic.near(60), inCar: (driving.driving && !driving.rider) || (!!ride && !ride.car?.startsWith('bike')) };
 }
 if (params.get('mp') !== '0') import('./mp/index.js').then(m => m.start({
-  scene, camera, player, toRD, fromRD: (X, Y) => [X - ORX, ORY - Y], slug, params, surroundings, useAvatar, solids, goToRD: arriveNear,
+  scene, camera, player, toRD, fromRD: (X, Y) => [X - ORX, ORY - Y], slug, params, surroundings, useAvatar, solids, goToRD: arriveNear, find: who => nav.find(who),
   vehicle: { get shared() { return ride ? 'ride:0' : driving.shared; }, make: (name, color) => makeCar(CAR_MODELS, name, color),
     get mine() { return driving.driving ? { model: driving.model, x: player.position.x, z: player.position.z, h: player.rotation.y } : null; } }, view: { get eyes() { return firstPerson; }, set eyes(v) { setFirstPerson(v); } },
   hud: document.getElementById('mp'), knockDown, homes,

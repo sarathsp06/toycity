@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Toy City · Facts behind the town</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="description" content="The real numbers Toy City uses, and where they come from: which birds you meet on a Dutch pond, and how likely each one is." />
+<style>
+  :root { --ink: #f3f6f8; --muted: #a9b8c4; --accent: #ffb547; --bg: #0d141b; --card: #16212b; --line: rgba(255,255,255,.1); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; line-height: 1.55; }
+  a { color: var(--accent); }
+  main { max-width: 980px; margin: 0 auto; padding: 28px 22px 60px; }
+  header a.back { color: var(--muted); text-decoration: none; font-size: 14px; }
+  .kicker { font-size: 13px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); font-weight: 700; margin-top: 26px; }
+  h1 { font-size: clamp(34px, 6vw, 56px); line-height: 1; letter-spacing: -.03em; margin: 8px 0 14px; }
+  h2 { margin: 42px 0 10px; font-size: 26px; letter-spacing: -.01em; }
+  p.lead { color: #dbe4ea; font-size: 18px; max-width: 700px; }
+  .note { color: var(--muted); font-size: 14px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin: 18px 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; }
+  .card .big { font-size: 34px; font-weight: 800; letter-spacing: -.02em; }
+  .card .who { font-weight: 700; }
+  .card .nl { color: var(--muted); font-size: 13px; }
+  .bar { height: 8px; border-radius: 4px; background: rgba(255,255,255,.08); margin: 8px 0 4px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), #ff7a59); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 12px 0; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+  td.n { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .calc { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px; margin: 16px 0; }
+  .calc label { display: block; font-weight: 600; margin-bottom: 6px; }
+  .calc input { width: 100%; }
+  .calc .size { font-size: 22px; font-weight: 800; }
+  code { background: rgba(255,255,255,.08); padding: 1px 6px; border-radius: 6px; }
+  footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); margin-top: 50px; padding-top: 18px; }
+</style>
+</head>
+<body>
+<main>
+  <header><a class="back" href="./">← Toy City</a></header>
+  <div class="kicker">Facts behind the town</div>
+  <h1>Who's on the pond?</h1>
+  <p class="lead">The swans, geese, ducks and coots on Toy City's water aren't placed at random. Which birds a pond gets comes from the Dutch national bird survey. Here are the numbers, where they come from, and the one step we had to estimate ourselves.</p>
+
+  <h2>How common each bird is</h2>
+  <p>Sovon, the Dutch bird-monitoring organisation, divides the country into <span id="squares"></span> squares of <span id="size"></span>. In the <span id="years"></span> survey, volunteers checked every square for breeding birds. This is the share of squares where each species breeds.</p>
+  <div class="cards" id="cards"></div>
+
+  <h2>Your pond, your chances</h2>
+  <p>A bird breeding somewhere in a 5 × 5 km square doesn't mean it's on every pond in it. Bigger water holds more birds, and a narrow ditch fewer. Slide to see the chance of meeting each bird on a pond of that size, as the game calculates it.</p>
+  <div class="calc">
+    <label for="area">Pond size: <span class="size" id="areaOut"></span></label>
+    <input id="area" type="range" min="2.4" max="5" step="0.01" value="3.48" aria-label="Pond size in square metres (logarithmic)" />
+    <p class="note" id="sizeHint"></p>
+    <table><thead><tr><th>Bird</th><th>Chance on this pond</th><th></th></tr></thead><tbody id="pondRows"></tbody></table>
+    <p class="note">Chance of at least one kind of water bird on this pond: <b id="any"></b></p>
+  </div>
+
+  <h2>The numbers, with sources</h2>
+  <table>
+    <thead><tr><th>Bird</th><th>Breeds in (% of squares, 2013–15)</th><th>Seen in winter (% of squares)</th><th>Breeding pairs in NL</th><th>Group size in the game</th><th>Source</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <h2>What's measured and what's ours</h2>
+  <p><b>Measured (Sovon):</b> the percentages of atlas squares, from each species' page in the <a id="atlasLink">Sovon Vogelatlas</a>, and the national breeding-pair estimates from the <a href="https://stats.sovon.nl/">Sovon species statistics</a>.</p>
+  <p><b>Our estimate:</b> how a square's chance carries over to one pond. In the game, chance on a pond = <i>share of squares where it breeds</i> × <i>area ÷ (area + <span id="half"></span> m²)</i>. So a pond of <span id="half2"></span> m² (about 55 × 55 m) gets half its square's chance, and a big lake nearly all of it. Water smaller than <span id="min"></span> m² gets no birds. The survey doesn't measure single ponds, so this step is a reasonable guess, not survey data.</p>
+  <p><b>Our choice:</b> how many birds come together (a swan pair, sometimes with cygnets; geese in groups), how they look (toy models, not field-guide drawings), and that the game uses the breeding-season numbers all year round.</p>
+  <p class="note">Everyone in a town sees the same birds: which birds a pond has, and where they swim, follow from the pond and the clock, the same way the town's traffic does.</p>
+
+  <footer>Bird data: Sovon Vogelonderzoek Nederland, <i>Vogelatlas van Nederland</i> (2018), fieldwork 2013–2015, and Sovon species statistics (breeding-pair estimates 2015–2020). Read on <span id="checked">22 November 2026</span>.</footer>
+</main>
+
+<script type="module">
+  import { SPECIES, ATLAS, SIZE_HALF, MIN_AREA, chance } from './birds.js';
+  const $ = id => document.getElementById(id);
+  $('squares').textContent = ATLAS.squares.toLocaleString('en'); $('size').textContent = ATLAS.size; $('years').textContent = ATLAS.fieldwork;
+  $('half').textContent = $('half2').textContent = SIZE_HALF.toLocaleString('en'); $('min').textContent = MIN_AREA;
+  $('atlasLink').href = ATLAS.url;
+  const pct = x => Math.round(x) + '%';
+  const sorted = [...SPECIES].sort((a, b) => b.breed - a.breed);
+  $('cards').innerHTML = sorted.map(s => `<div class="card"><div class="who">${s.en}</div><div class="nl">${s.nl}</div>
+    <div class="big">${pct(s.breed)}</div><div class="bar"><i style="width:${s.breed}%"></i></div><div class="note">of the country's squares</div></div>`).join('');
+  $('rows').innerHTML = sorted.map(s => `<tr><td><b>${s.en}</b><br><span class="note">${s.nl}</span></td>
+    <td class="n">${pct(s.breed)}</td><td class="n">${pct(s.winter)}</td><td class="n">${s.pairs || '<span class="note">—</span>'}</td>
+    <td class="n">${s.flock[0] === s.flock[1] ? s.flock[0] : s.flock[0] + '–' + s.flock[1]}${s.young ? ` + ${s.young[0]}–${s.young[1]} young` : ''}</td>
+    <td><a href="${s.atlas}" target="_blank" rel="noopener">atlas</a>${s.pairs ? ` · <a href="${s.stats}" target="_blank" rel="noopener">stats</a>` : ''}</td></tr>`).join('');
+  function pond() {
+    const area = Math.round(10 ** +$('area').value);
+    $('areaOut').textContent = area.toLocaleString('en') + ' m²';
+    $('sizeHint').textContent = area < 600 ? 'a ditch or a small garden pond' : area < 3000 ? 'a park pond' : area < 20000 ? 'a big pond or a stretch of canal' : 'a lake';
+    let none = 1;
+    $('pondRows').innerHTML = sorted.map(s => { const c = chance(s, area); none *= 1 - c; return `<tr><td>${s.en}</td><td class="n">${pct(c * 100)}</td><td style="width:45%"><div class="bar"><i style="width:${c * 100}%"></i></div></td></tr>`; }).join('');
+    $('any').textContent = pct((1 - none) * 100);
+  }
+  $('area').addEventListener('input', pond); pond();
+</script>
+</body>
+</html>

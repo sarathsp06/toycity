@@ -10,14 +10,14 @@ OUT=dist/site
 RS=${REGIONS:-$(python3 -c "import json; print(' '.join(dict.fromkeys(p['region'] for p in json.load(open('web/places.json')))))")}
 rm -rf "$OUT" dist/toycity-site.zip
 mkdir -p "$OUT/models" "$OUT/mp" "$OUT/media"
-cp web/index.html web/places.json "$OUT/"   # the front page: choose a place
+cp web/index.html web/facts.html web/places.json "$OUT/"   # the front page: choose a place
 cp web/media/* "$OUT/media/"
-cp web/city.html web/city.js web/loader.worker.js web/textures.js web/avatar.js web/solids.js web/vehicle.js web/autopilot.js web/home.js web/radio.js web/missions.js web/traffic.js web/peds.js web/ambient.js "$OUT/"
+cp web/city.html web/city.js web/loader.worker.js web/textures.js web/avatar.js web/solids.js web/vehicle.js web/autopilot.js web/home.js web/radio.js web/nav.js web/traffic.js web/peds.js web/ambient.js web/birds.js "$OUT/"
 cp web/mp/*.js "$OUT/mp/"
 cp web/models/cars.glb web/models/door.glb web/models/anims.glb web/models/person.glb web/models/persona_*.glb web/models/CREDITS.txt "$OUT/models/"
 for R in $RS; do
   mkdir -p "$OUT/regions/$R"
-  cp -R web/regions/$R/tiles.json web/regions/$R/search.json web/regions/$R/roads.json \
+  cp -R web/regions/$R/tiles.json web/regions/$R/search.json web/regions/$R/roads.json web/regions/$R/walks.json \
         web/regions/$R/t web/regions/$R/a web/regions/$R/o "$OUT/regions/$R/"
 done
 echo "regions: $RS"

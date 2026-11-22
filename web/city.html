@@ -49,14 +49,6 @@
   #radiobtn { position: fixed; right: calc(50% + 100px); bottom: 66px; z-index: 6; font: 600 15px system-ui, sans-serif; padding: 9px 16px; border: 0; border-radius: 999px; background: #fff; color: #1b2a36; box-shadow: 0 4px 16px rgba(0,0,0,.3); cursor: pointer; white-space: nowrap; }
   #radiobtn[hidden] { display: none; }
   body.touch #radiobtn { bottom: 204px; }
-  #mission { position: fixed; left: 50%; top: 78px; transform: translateX(-50%); z-index: 5; display: flex; gap: 6px; align-items: center; max-width: min(92vw, 520px); font: 600 14px system-ui, sans-serif; color: #1b2a36; background: rgba(255,255,255,.92); padding: 6px 10px; border-radius: 20px; box-shadow: 0 2px 10px rgba(0,0,0,.15); }
-  #mission.empty { display: none; }
-  #mission .offer, #mission .run { display: flex; gap: 6px; align-items: center; }
-  #mission .text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #mission button { font: 600 14px system-ui, sans-serif; border: 0; border-radius: 999px; padding: 6px 12px; background: #ffb547; color: #1b1206; cursor: pointer; }
-  #mission .no, #mission .stop { background: #eef2f5; color: #1b2a36; }
-  #mission [hidden] { display: none !important; }   /* after .offer/.run, which set display: flex */
-  #mission .offer .text { white-space: normal; line-height: 1.25; }
   #apform { position: fixed; left: 50%; bottom: 116px; transform: translateX(-50%); z-index: 6; display: flex; gap: 6px; background: #fff; padding: 6px; border-radius: 999px; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
   #apform input { font: 15px system-ui, sans-serif; border: 0; outline: 0; padding: 6px 10px; width: min(62vw, 280px); }
   #apform button { font: 600 15px system-ui, sans-serif; border: 0; border-radius: 999px; padding: 6px 14px; background: #ffb547; color: #1b1206; cursor: pointer; }
@@ -75,6 +67,10 @@
   #minibtn { position: fixed; right: 24px; top: 24px; z-index: 6; border: 0; border-radius: 6px; background: rgba(255,255,255,.9); cursor: pointer; font-size: 12px; padding: 3px 7px; }
   .me-arrow { width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-bottom: 18px solid #e24a3b; filter: drop-shadow(0 0 2px #fff); }
   canvas { touch-action: none; }
+  #nav { position: fixed; left: 50%; top: 78px; transform: translateX(-50%); z-index: 5; display: flex; gap: 8px; align-items: center; max-width: min(92vw, 480px); font: 600 14px system-ui, sans-serif; color: #1b2a36; background: rgba(255,255,255,.94); padding: 6px 8px 6px 14px; border-radius: 999px; box-shadow: 0 2px 10px rgba(0,0,0,.15); }
+  #nav[hidden] { display: none; }
+  #nav .text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #nav button { font: inherit; border: 0; border-radius: 999px; padding: 4px 10px; background: #eef2f5; color: #1b2a36; cursor: pointer; }
   #mp { margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 12px; color: #4a5a66; }
   #mpcall { position: fixed; left: 50%; bottom: 74px; transform: translateX(-50%); z-index: 30; background: rgba(20,30,40,.88); color: #fff; border-radius: 22px; padding: 8px 10px 8px 14px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; max-width: 92vw; font: 14px system-ui, sans-serif; }
   #mpcall[hidden] { display: none; }
@@ -105,6 +101,11 @@
   body.touch #top { top: 8px; left: 8px; }
   body.touch #hud { top: 52px; left: 8px; right: 8px; max-width: none; padding: 7px 9px; font-size: 13px; }
   body.touch #mini { width: 160px; height: 130px; top: 8px; right: 8px; }
+  /* fewer buttons to figure out: the mouse wheel zooms and V (or the menu) looks through your eyes,
+     so on a computer only the map button stays on screen */
+  body:not(.touch) #zin, body:not(.touch) #zout, #eyesbtn { display: none; }
+  #hud .keys { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; }
+  #hud h4 { margin: 8px 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: #5b6b78; }
   body.touch #zoom { bottom: auto; top: 50%; transform: translateY(-50%); right: 12px; }
   body.touch #place { bottom: 160px; font-size: 13px; }
   #loading { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: #9ccbe8; color: #1b2a33; z-index: 10; transition: opacity .4s; }
@@ -154,17 +155,29 @@
 </script>
 <div id="top"><a id="back" href="./" title="Choose another place" aria-label="Choose another place">←</a><span id="title">Toy City</span><button id="menubtn" aria-label="Menu" aria-expanded="false" aria-controls="hud" title="Menu">☰</button></div>
 <div id="hud" hidden>
-  <span class="keys"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> walk · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · drag to look · click to go there · scroll or <kbd>+</kbd><kbd>−</kbd> zoom · <kbd>V</kbd> your eyes · <kbd>E</kbd> drive a parked car · <kbd>F</kbd> fly · <kbd>M</kbd> map</span>
-  <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
+  <h4 style="margin-top:0">Getting around</h4>
+  <div class="keys">
+    <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>walk (<kbd>Shift</kbd> to run)</span>
+    <span>click</span><span>walk to that spot</span>
+    <span>drag · scroll</span><span>look around · zoom</span>
+    <span><kbd>E</kbd></span><span>get into a parked car or bike</span>
+    <span><kbd>M</kbd></span><span>map</span>
+    <span><kbd>V</kbd> · <kbd>F</kbd> · <kbd>Space</kbd></span><span>your own eyes · fly · jump</span>
+  </div>
+  <h4>Go somewhere</h4>
+  <form id="goto" style="display:flex;gap:4px"><input id="q" placeholder="Address or place" aria-label="Address or place" style="flex:1"/><button>Go</button></form>
+  <h4>Settings</h4>
+  <div style="display:flex;gap:6px;flex-wrap:wrap">
     <select id="tod" aria-label="Time of day"><option value="morning">Morning</option><option value="noon" selected>Midday</option><option value="golden">Golden hour</option><option value="dusk">Dusk</option><option value="night">Night</option></select>
     <select id="quality" aria-label="Quality"><option value="low">Fast</option><option value="mid" selected>Balanced</option><option value="high">Sharp</option></select>
     <button id="trafficbtn" aria-pressed="true" title="Cars on the streets and people on the pavements">🚗 Traffic</button>
+    <button type="button" onclick="document.getElementById('eyesbtn').click()" title="Through your own eyes (V)">👁️ Your eyes</button>
   </div>
-  <form id="goto" style="margin-top:6px;display:flex;gap:4px"><input id="q" placeholder="Address or place" aria-label="Address or place" style="flex:1"/><button>Go</button></form>
+  <p style="margin:8px 0 0"><a href="facts.html" target="_blank" rel="noopener" style="color:inherit">🦢 Facts behind the town</a></p>
   <div id="mp"></div>
   <div id="perf"></div>
 </div>
-<div id="hint">WASD to walk · drag to look · ☰ for more</div>
+<div id="hint">Walk with WASD or click anywhere · drag to look around · ☰ for help</div>
 <button id="carbtn" hidden>🚗 Get in (E)</button>
 <div id="ouch"></div>
 <div id="hp" hidden><div></div><span></span></div>
@@ -173,7 +186,7 @@
   <path stroke-width="1" d="M600 100 L585 120 L610 130 M690 110 L705 135 L680 150 M670 200 L650 215 M585 165 L560 150 M760 165 L770 140"/>
   <circle cx="640" cy="140" r="9" stroke-width="2"/></g></svg>
 <button id="apbtn" hidden>🧭 Autopilot</button>
-<div id="mission" class="empty"></div>
+<div id="nav" hidden></div>
 <form id="apform" hidden><input id="apq" placeholder="Where to? An address or a place" aria-label="Where to drive" autocomplete="off"/><button>Go</button></form>
 <div id="place">loading…</div>
 <div id="mini" hidden></div><button id="minibtn" title="Bigger or smaller map" hidden>⤢</button>
