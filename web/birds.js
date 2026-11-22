@@ -125,52 +125,107 @@ export function swimSpots(pos, w, seed, n = 16) {
 }
 
 // ---------- the live part ----------
+// Drawing: every species is one InstancedMesh (one draw call however many birds there are), filled each
+// frame with only the birds within SEEN metres. The Canada goose and the mallard are low-poly models by
+// Poly by Google (CC-BY 3.0, see models/CREDITS.txt), loaded the first time birds appear; until then, and
+// for the other species, the birds are built here from a few shapes merged into one coloured mesh.
+// Model space: x is forward, y up, metres, the waterline at y = 0.
 const LEG = 14;          // seconds per swim (out to a spot, or back home), half of it resting
-const SEEN = 180;        // birds farther than this are not moved
-export function createBirds({ scene, THREE }) {
-  const live = new Map();   // tile -> { group, flocks }
-  const mats = {}, geos = {};
-  const mat = c => mats[c] ||= new THREE.MeshLambertMaterial({ color: c });
-  const geo = (k, f) => geos[k] ||= f();
-  // toy birds from a few shapes: body, neck, head, beak (and a tail), sized and coloured per species
+const SEEN = 180;        // birds farther than this are not drawn
+const CAP = 96;          // birds of one kind drawn at once
+export const MODELS = { canada: { url: 'models/goose.glb', len: 0.85, water: 0.36 }, mallard: { url: 'models/mallard.glb', len: 0.55, water: 0.3 } };
+export function createBirds({ scene, THREE, loadModel }) {
+  const live = new Map();   // tile -> flocks
+  const kinds = new Map();  // kind -> InstancedMesh
+  const flat = new THREE.MeshLambertMaterial({ vertexColors: true });
+
+  // ---- shapes merged into one geometry with a colour per vertex ----
+  function merge(parts) {
+    const P = [], N = [], C = [], col = new THREE.Color();
+    for (const [g0, hex, m] of parts) {
+      const g = g0.index ? g0.toNonIndexed() : g0; if (m) g.applyMatrix4(m);
+      const p = g.attributes.position.array, n = g.attributes.normal.array; col.set(hex);
+      for (let k = 0; k < p.length; k++) { P.push(p[k]); N.push(n[k]); }
+      for (let k = 0; k < p.length / 3; k++) C.push(col.r, col.g, col.b);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
+    g.computeBoundingSphere(); return g;
+  }
+  const M = (x, y, z, rz = 0, ry = 0) => new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, ry, rz)), new THREE.Vector3(1, 1, 1));
+  const sphere = (r, sx, sy, sz, w = 12, h = 9) => new THREE.SphereGeometry(r, w, h).scale(sx, sy, sz);
+  // a mute swan: long low body with the tail swept up, wings held a little raised, an S-shaped neck,
+  // the orange bill with its black knob. Cygnets are the same shape, small and grey.
+  function swan(body, bill, knob, k = 1) {
+    const b = sphere(0.5, 1.15, 0.48, 0.62, 18, 12), p = b.attributes.position;
+    for (let v = 0; v < p.count; v++) { const x = p.getX(v); if (x < -0.25) p.setY(v, p.getY(v) + (-x - 0.25) * 0.45); }
+    b.computeVertexNormals();
+    const neck = new THREE.TubeGeometry(new THREE.CatmullRomCurve3([[0.4, 0.1], [0.5, 0.32], [0.44, 0.56], [0.47, 0.76], [0.56, 0.83]].map(([x, y]) => new THREE.Vector3(x, y, 0))), 18, 0.05, 8);
+    const g = merge([
+      [b, body, M(0, 0.06, 0)],
+      [sphere(0.5, 0.78, 0.26, 0.3), body, M(-0.14, 0.2, 0.16, 0.18)], [sphere(0.5, 0.78, 0.26, 0.3), body, M(-0.14, 0.2, -0.16, 0.18)],
+      [neck, body], [sphere(0.075, 1.35, 0.95, 0.85), body, M(0.6, 0.835, 0)],
+      [new THREE.ConeGeometry(0.034, 0.15, 8), bill, M(0.72, 0.8, 0, -Math.PI / 2 - 0.35)],
+      [sphere(0.028, 1, 1, 0.8, 8, 6), knob, M(0.665, 0.845, 0)],
+      [sphere(0.012, 1, 1, 1, 6, 4), 0x111111, M(0.63, 0.855, 0.05)], [sphere(0.012, 1, 1, 1, 6, 4), 0x111111, M(0.63, 0.855, -0.05)],
+    ]);
+    return k === 1 ? g : g.scale(k, k, k);
+  }
+  // the others: body, tail, neck, head and bill, sized and coloured per species
   const LOOK = {
-    swan: { body: 0xf5f5f2, neck: 0xf5f5f2, head: 0xf5f5f2, beak: 0xe8762a, len: 1.1, neck_h: 0.75, curve: true },
-    blackswan: { body: 0x1c1c22, neck: 0x1c1c22, head: 0x1c1c22, beak: 0xc9302c, len: 1.0, neck_h: 0.7, curve: true },
     greylag: { body: 0x8d8579, neck: 0x9a9184, head: 0x9a9184, beak: 0xf08a3c, len: 0.75, neck_h: 0.38 },
     canada: { body: 0x7a6650, neck: 0x141414, head: 0x141414, beak: 0x141414, len: 0.8, neck_h: 0.45, chin: 0xffffff },
-    egyptian: { body: 0xb69a78, neck: 0xd6c5a8, head: 0xd6c5a8, beak: 0xe9a3a3, len: 0.6, neck_h: 0.32, eye: 0x6b3b22 },
-    mallard: { body: 0x9c8f80, neck: 0x1d5a33, head: 0x1d5a33, beak: 0xe5c22a, len: 0.48, neck_h: 0.16, female: 0x8c6a45 },
+    egyptian: { body: 0xb69a78, neck: 0xd6c5a8, head: 0xd6c5a8, beak: 0xe9a3a3, len: 0.6, neck_h: 0.32 },
+    mallard: { body: 0x9c8f80, neck: 0x1d5a33, head: 0x1d5a33, beak: 0xe5c22a, len: 0.48, neck_h: 0.16 },
     tufted: { body: 0x232326, neck: 0x232326, head: 0x232326, beak: 0x8a96a8, len: 0.4, neck_h: 0.12, side: 0xf2f2f2 },
     coot: { body: 0x202024, neck: 0x202024, head: 0x202024, beak: 0xf4f1ea, len: 0.34, neck_h: 0.12 },
     moorhen: { body: 0x2c2a33, neck: 0x2c2a33, head: 0x2c2a33, beak: 0xd8312a, len: 0.3, neck_h: 0.12 },
     grebe: { body: 0x8b7867, neck: 0xf2ece4, head: 0x5a3c28, beak: 0xd9a0a0, len: 0.45, neck_h: 0.3 },
   };
-  function makeBird(id, small, k) {
-    const L = LOOK[id], s = L.len * (small ? 0.45 : 1), g = new THREE.Group();
-    const bodyC = small && id === 'swan' ? 0x9a948a : id === 'mallard' && k % 2 ? L.female : L.body;
-    const body = new THREE.Mesh(geo('body', () => new THREE.SphereGeometry(0.5, 10, 7).scale(1, 0.55, 0.62)), mat(bodyC));
-    body.scale.setScalar(s); body.position.y = 0.12 * s; g.add(body);
-    if (L.side) { const sd = new THREE.Mesh(geo('side', () => new THREE.SphereGeometry(0.5, 8, 6).scale(0.7, 0.35, 0.64)), mat(L.side)); sd.scale.setScalar(s); sd.position.set(-0.05 * s, 0.1 * s, 0); g.add(sd); }
-    const tail = new THREE.Mesh(geo('tail', () => new THREE.ConeGeometry(0.18, 0.4, 6).rotateZ(Math.PI / 2 + 0.5)), mat(bodyC));
-    tail.scale.setScalar(s * 0.55); tail.position.set(-0.45 * s, 0.16 * s, 0); g.add(tail);
-    const nh = L.neck_h * (small ? 0.6 : 1) / s;   // neck height in body units
-    const neck = new THREE.Mesh(geo('neck', () => new THREE.CylinderGeometry(0.07, 0.1, 1, 7).translate(0, 0.5, 0)), mat(small && id === 'swan' ? 0x9a948a : id === 'mallard' && k % 2 ? L.female : L.neck));
-    neck.scale.set(s, nh * s, s); neck.position.set(0.32 * s, 0.18 * s, 0); if (L.curve) neck.rotation.z = -0.12; g.add(neck);
-    const head = new THREE.Group(); head.position.set(0.32 * s + (L.curve ? 0.1 * s : 0), 0.18 * s + nh * s, 0); g.add(head);
-    const hm = new THREE.Mesh(geo('head', () => new THREE.SphereGeometry(0.13, 8, 6).scale(1.25, 1, 0.9)), mat(small && id === 'swan' ? 0x9a948a : id === 'mallard' && k % 2 ? L.female : L.head));
-    hm.scale.setScalar(s); head.add(hm);
-    const beak = new THREE.Mesh(geo('beak', () => new THREE.ConeGeometry(0.05, 0.2, 6).rotateZ(-Math.PI / 2).translate(0.2, -0.02, 0)), mat(small && id === 'swan' ? 0x333333 : L.beak));
-    beak.scale.setScalar(s); head.add(beak);
-    if (L.chin) { const ch = new THREE.Mesh(geo('chin', () => new THREE.SphereGeometry(0.06, 6, 4).scale(1.4, 0.6, 1.3)), mat(L.chin)); ch.scale.setScalar(s); ch.position.set(0.02 * s, -0.06 * s, 0); head.add(ch); }
-    g.userData.head = head; g.userData.bob = 0.3 + (k % 5) * 0.13;
-    g.traverse(o => { o.castShadow = false; o.receiveShadow = false; });
-    return g;
+  function simple(L) {
+    const s = L.len, nh = L.neck_h, hy = 0.18 * s + nh;
+    const parts = [
+      [sphere(0.5, 1, 0.55, 0.62, 12, 8), L.body, M(0, 0.05 * s, 0).scale(new THREE.Vector3(s, s, s))],
+      [new THREE.ConeGeometry(0.1, 0.22, 6).scale(s, s, s), L.body, M(-0.45 * s, 0.12 * s, 0, Math.PI / 2 + 0.5)],
+      [new THREE.CylinderGeometry(0.07 * s, 0.1 * s, nh, 7).translate(0, nh / 2, 0), L.neck, M(0.32 * s, 0.12 * s, 0)],
+      [sphere(0.13 * s, 1.25, 1, 0.9, 9, 7), L.head, M(0.32 * s, hy, 0)],
+      [new THREE.ConeGeometry(0.05 * s, 0.2 * s, 6), L.beak, M(0.32 * s + 0.2 * s, hy - 0.02 * s, 0, -Math.PI / 2)],
+    ];
+    if (L.side) parts.push([sphere(0.5, 0.7, 0.33, 0.645, 10, 6), L.side, M(-0.05 * s, 0.05 * s, 0).scale(new THREE.Vector3(s, s, s))]);
+    if (L.chin) parts.push([sphere(0.06 * s, 1.4, 0.6, 1.3, 6, 4), L.chin, M(0.34 * s, hy - 0.06 * s, 0)]);
+    return merge(parts);
+  }
+  const BUILD = {
+    swan: () => swan(0xf6f6f2, 0xe8702a, 0x161616), cygnet: () => swan(0x9c968c, 0x3a3a3a, 0x3a3a3a, 0.48),
+    blackswan: () => swan(0x1d1d24, 0xc9302c, 0xeeeeee, 0.95),
+  };
+  function kind(id) {
+    let m = kinds.get(id); if (m) return m;
+    m = new THREE.InstancedMesh((BUILD[id] || (() => simple(LOOK[id])))(), flat, CAP);
+    m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.count = 0; m.frustumCulled = false; m.castShadow = m.receiveShadow = false;
+    kinds.set(id, m); scene.add(m);
+    if (MODELS[id] && loadModel) swapModel(id, m);
+    return m;
+  }
+  // a real model for this species: one mesh, turned to face +x, scaled to the bird's length, set at the waterline
+  function swapModel(id, m) {
+    const d = MODELS[id];
+    loadModel(d.url).then(gltf => {
+      let src = null; gltf.scene.updateMatrixWorld(true); gltf.scene.traverse(o => { if (o.isMesh && !src) src = o; });
+      if (!src) return;
+      const g = src.geometry.clone().applyMatrix4(src.matrixWorld); g.rotateY(Math.PI / 2);   // the models face +z
+      g.computeBoundingBox(); const b = g.boundingBox.clone(), k = d.len / (b.max.x - b.min.x);   // a copy: translate() recomputes the box
+      g.translate(-(b.max.x + b.min.x) / 2, -b.min.y, -(b.max.z + b.min.z) / 2).scale(k, k, k);
+      g.translate(0, -(b.max.y - b.min.y) * k * d.water, 0); g.computeBoundingSphere();
+      const map = src.material.map; if (map) map.colorSpace = THREE.SRGBColorSpace;
+      const old = m.geometry; m.geometry = g; m.material = new THREE.MeshLambertMaterial({ map }); old.dispose();
+    }).catch(e => console.warn('birds: model', d.url, e));
   }
 
   // a tile's water came in: find its ponds and put birds on them
   function add(tile, pos, idx, y, key) {
     drop(tile);
-    const bodies = waterBodies(pos, idx), group = new THREE.Group(), flocks = [];
+    const bodies = waterBodies(pos, idx), flocks = [];
     bodies.slice(0, 40).forEach((w, bi) => {
       if (w.area < MIN_AREA) return;
       const seed = hash(key + ':' + bi + ':' + Math.round(w.area)), picked = pickBirds(w.area, seed);
@@ -181,18 +236,16 @@ export function createBirds({ scene, THREE }) {
         const r = rng(seed + fi * 7919), home = Math.floor(r() * spots.pts.length), birds = [];
         for (let k = 0; k < n; k++) {
           const small = !!s.young && k >= s.flock[1];
-          const b = makeBird(s.id, small, k); group.add(b);
-          // swans: the cygnets follow in a line; the others loosely around the first
-          const off = s.young ? [-(k * 0.9 + 0.4) * (small ? 1 : 0.5), (k % 2 ? 1 : -1) * 0.25 * (small ? 0 : 1)] : [(r() - 0.5) * 2.6, (r() - 0.5) * 2.6];
-          birds.push({ mesh: b, off, phase: r() * 10 });
+          // swans: the cygnets follow in a line behind the pair; the others loosely around the first
+          const off = s.young ? [-(k * 0.9 + 0.4) * (small ? 1 : 0.5), (k % 2 ? 1 : -1) * 0.35 * (small ? 0 : 1)] : [(r() - 0.5) * 2.6, (r() - 0.5) * 2.6];
+          birds.push({ kind: small ? 'cygnet' : s.id, off, phase: r() * 10, size: 0.92 + r() * 0.16 });
         }
         flocks.push({ s, birds, spots, home, phase: r() * LEG * 2, seed: seed + fi, y, x: spots.pts[home][0], z: spots.pts[home][1], h: r() * 6.28 });
       });
     });
-    if (!flocks.length) return;
-    scene.add(group); live.set(tile, { group, flocks });
+    if (flocks.length) live.set(tile, flocks);
   }
-  function drop(tile) { const l = live.get(tile); if (!l) return; scene.remove(l.group); live.delete(tile); }
+  function drop(tile) { live.delete(tile); }
 
   // where a flock is at time t: leg 2k swims home -> spot k, leg 2k+1 back; half of each leg resting
   function at(f, t) {
@@ -204,28 +257,32 @@ export function createBirds({ scene, THREE }) {
     const m = Math.min(1, frac * 2), e = m * m * (3 - 2 * m);   // swim the first half, rest the second
     return [a[0] + (b[0] - a[0]) * e, a[1] + (b[1] - a[1]) * e, frac < 0.5 ? 1 : 0, Math.atan2(-(b[1] - a[1]), b[0] - a[0])];
   }
+  const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(0, 0, 0, 'YXZ'), _p = new THREE.Vector3(), _s = new THREE.Vector3();
   return {
     add, drop,
     update(dt, px, pz) {
       const t = (Date.now() / 1000) % 1e6;   // the wall clock: everyone sees the same swim
-      for (const { flocks } of live.values()) for (const f of flocks) {
-        if (Math.hypot(f.x - px, f.z - pz) > SEEN) continue;
+      for (const m of kinds.values()) m.count = 0;
+      for (const flocks of live.values()) for (const f of flocks) {
+        if (Math.abs(f.x - px) > SEEN || Math.abs(f.z - pz) > SEEN) continue;
         const [x, z, swimming, dir] = at(f, t);
         f.x = x; f.z = z;
         if (swimming && dir !== undefined) { let d = dir - f.h; d = Math.atan2(Math.sin(d), Math.cos(d)); f.h += d * Math.min(1, dt * 2.5); }
-        const c = Math.cos(f.h), s = Math.sin(f.h);
+        const c = Math.cos(f.h), s = Math.sin(f.h), nod = f.s.id === 'coot' || f.s.id === 'moorhen';
         for (const b of f.birds) {
-          const bx = x + b.off[0] * c + b.off[1] * s, bz = z - b.off[0] * s + b.off[1] * c;   // offsets turn with the flock
-          const w = t * 1.6 + b.phase;
-          b.mesh.position.set(bx, f.y + 0.02 * Math.sin(w), bz);
-          b.mesh.rotation.y = f.h + 0.15 * Math.sin(w * 0.3);
-          const hd = b.mesh.userData.head;   // coots and moorhens nod as they swim; the others look around
-          if (hd) hd.rotation.y = swimming && (f.s.id === 'coot' || f.s.id === 'moorhen') ? 0 : 0.5 * Math.sin(w * 0.4);
-          if (hd && swimming && (f.s.id === 'coot' || f.s.id === 'moorhen')) hd.position.x += (0.04 * Math.sin(w * 6) - (hd.userData.nod || 0)), hd.userData.nod = 0.04 * Math.sin(w * 6);
+          const m = kind(b.kind); if (m.count >= CAP) continue;
+          const w = t * 1.6 + b.phase;   // offsets turn with the flock; a gentle bob; coots nod as they swim
+          _p.set(x + b.off[0] * c + b.off[1] * s, f.y + 0.015 * Math.sin(w), z - b.off[0] * s + b.off[1] * c);
+          _e.set(0, f.h + 0.15 * Math.sin(w * 0.3), (swimming && nod ? 0.12 * Math.sin(w * 6) : 0.03 * Math.sin(w * 0.9)));
+          m.setMatrixAt(m.count++, _m.compose(_p, _q.setFromEuler(_e), _s.setScalar(b.size)));
         }
       }
+      for (const m of kinds.values()) if (m.count) m.instanceMatrix.needsUpdate = true;
     },
-    get count() { let n = 0; for (const { flocks } of live.values()) for (const f of flocks) n += f.birds.length; return n; },
-    get flocks() { const out = []; for (const { flocks } of live.values()) for (const f of flocks) out.push({ species: f.s.en, n: f.birds.length, x: f.x, z: f.z }); return out; },
+    kind,   // the InstancedMesh of one kind (made on first use): for previews
+    get count() { let n = 0; for (const flocks of live.values()) for (const f of flocks) n += f.birds.length; return n; },
+    get drawCalls() { let n = 0; for (const m of kinds.values()) if (m.count) n++; return n; },
+    // where every flock is right now (also the ones too far away to be drawn)
+    get flocks() { const t = (Date.now() / 1000) % 1e6, out = []; for (const flocks of live.values()) for (const f of flocks) { const [x, z] = at(f, t); out.push({ species: f.s.en, n: f.birds.length, x, z }); } return out; },
   };
 }

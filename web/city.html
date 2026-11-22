@@ -21,6 +21,8 @@
   #hint.gone { opacity: 0; }
   #carbtn { position: fixed; left: 50%; bottom: 66px; transform: translateX(-50%); z-index: 6; font: 600 15px system-ui, sans-serif; padding: 9px 18px; border: 0; border-radius: 999px; background: #ffb547; color: #1b1206; box-shadow: 0 4px 16px rgba(0,0,0,.3); cursor: pointer; }
   #carbtn[hidden] { display: none; }
+  #swimbtn { position: fixed; left: 50%; bottom: 112px; transform: translateX(-50%); z-index: 6; font: 600 15px system-ui, sans-serif; padding: 9px 18px; border: 0; border-radius: 999px; background: #6cc6ff; color: #06202e; box-shadow: 0 4px 16px rgba(0,0,0,.3); cursor: pointer; }
+  #swimbtn[hidden] { display: none; }
   /* hit by a car: the screen flashes red for a moment */
   #ouch { position: fixed; inset: 0; pointer-events: none; z-index: 4; background: radial-gradient(transparent 30%, rgba(220,30,30,.65)); opacity: 0; }
   #ouch.on { animation: ouch 1.6s ease-out; }
@@ -43,6 +45,7 @@
   #homepanel small { font-weight: 400; color: #6b5a44; }
   body.touch #doorbar, body.touch #homepanel { bottom: 250px; }
   body.touch #carbtn { bottom: 204px; }
+  body.touch #swimbtn { bottom: 250px; }
   /* autopilot: a button beside "Get out" while you drive, and a box to type where to go */
   #apbtn { position: fixed; left: calc(50% + 100px); bottom: 66px; z-index: 6; font: 600 15px system-ui, sans-serif; padding: 9px 16px; border: 0; border-radius: 999px; background: #fff; color: #1b2a36; box-shadow: 0 4px 16px rgba(0,0,0,.3); cursor: pointer; }
   #apbtn[hidden], #apform[hidden] { display: none; }
@@ -161,6 +164,7 @@
     <span>click</span><span>walk to that spot</span>
     <span>drag · scroll</span><span>look around · zoom</span>
     <span><kbd>E</kbd></span><span>get into a parked car or bike</span>
+    <span><kbd>G</kbd></span><span>swim, next to water</span>
     <span><kbd>M</kbd></span><span>map</span>
     <span><kbd>V</kbd> · <kbd>F</kbd> · <kbd>Space</kbd></span><span>your own eyes · fly · jump</span>
   </div>
@@ -179,6 +183,7 @@
 </div>
 <div id="hint">Walk with WASD or click anywhere · drag to look around · ☰ for help</div>
 <button id="carbtn" hidden>🚗 Get in (E)</button>
+<button id="swimbtn" hidden>🏊 Swim (G)</button>
 <div id="ouch"></div>
 <div id="hp" hidden><div></div><span></span></div>
 <svg id="cracks" hidden viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true"><g fill="none" stroke="rgba(255,255,255,.75)" stroke-width="1.6" stroke-linecap="round">

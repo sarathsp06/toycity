@@ -85,6 +85,7 @@ function pickPose(p, speed) {
   if (p.riding || p.seat === 'bike') return P.set('drive');
   if (p.seat) return P.set('sit_idle');
   if (p.carMesh || p.inside) return P.set(null);
+  if (p.poseN === 6) return P.set(speed > 0.25 ? 'swim' : 'swim_idle', { fade: 0.3 });
   if (p.poseN === 1) return P.set('hit', { once: true });
   if (p.poseN === 2 || p.poseN === 4) { if (P.name !== 'fall') P.set('fall', { once: true, from: 0.93 }); return; }
   if (P.name === 'fall') return P.set('sit_exit', { once: true, fade: 0.3 });

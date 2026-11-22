@@ -166,7 +166,11 @@ export function createFleet({ slug, T, toRD, nodesOf, plan, per = 1, show, radiu
   const agents = new Map();   // id -> { id, key, k, loop, dead, lag, slot, d, pos: {x,z,dx,dz,v,s}, t }
   const cache = new Map();    // id -> loop, kept for a while after its square went out of reach
   const active = [];          // agents with a slot, in slot order (holes are null)
-  let want = Math.max(1, Math.ceil(show * per)), slots = show, tick = 0, keys = [], px = 0, pz = 0;
+  // ids per square: enough for `show` shown at once across the squares in reach, with room to spare
+  // (a loop is often partly out of reach), not `show` in every square: each one costs a route to plan
+  const spread = Math.max(1, (2 * radius / T + 1) ** 2 / 4);
+  const wantFor = n => Math.max(1, Math.ceil(n * per / spread));
+  let want = wantFor(show), slots = show, tick = 0, keys = [], px = 0, pz = 0, idle = false;
   const cells = () => Math.ceil(radius / T);
   // the squares within reach of the player, nearest first
   function reach(x, z) {
@@ -218,12 +222,14 @@ export function createFleet({ slug, T, toRD, nodesOf, plan, per = 1, show, radiu
     update(dt, x, z) {
       px = x; pz = z;
       if ((tick -= dt) <= 0) { tick = 0.5; roster(); }
-      planOne();
+      // routes are planned in the browser's spare time after a frame (a few ms each), one per frame otherwise
+      if (typeof requestIdleCallback !== 'function') planOne();
+      else if (!idle) { idle = true; requestIdleCallback(d => { idle = false; while (d.timeRemaining() > 3 && planOne()); }, { timeout: 500 }); }
       const t = now();
       for (const a of active) if (a) place(a, t);
       return active;
     },
-    setCount(n) { slots = n; want = Math.max(1, Math.ceil(n * per)); tick = 0; },
+    setCount(n) { slots = n; want = wantFor(n); tick = 0; },
     get count() { let n = 0; for (const a of active) if (a) n++; return n; },
     // how many active ones are within r of the player
     near(r) { let n = 0; for (const a of active) if (a && a.d < r) n++; return n; },

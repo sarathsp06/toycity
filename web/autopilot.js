@@ -19,6 +19,9 @@
 //   ap.next            -> the next turn: { text, in } (metres), or null
 
 const TOP = 22, BEND = 3.5, ARRIVE = 8;     // m/s: never above 80 km/h, 13 km/h in sharp bends; metres
+// the town's own cars and people plan short loops (ambient.js): a search that needs more nodes than this
+// gives up the same way in every browser, so the traffic stays the same for everyone
+const LOOP_CAP = 20000;
 const LANE = { car: 1.5, bike: 1.1, foot: 0 };       // metres right of the road's centre line
 const VALHALLA = 'https://valhalla1.openstreetmap.de/route';
 const COSTING = { car: 'auto', bike: 'motorcycle', foot: 'pedestrian' };
@@ -113,14 +116,17 @@ export function createAutopilot({ roadsUrl, fromRD, fromWGS, toWGS, inside }) {
       }
       return -1;
     };
-    // the search's working arrays, kept with the graph and wiped per search (see astar)
-    const cost = new Float64Array(N), from = new Int32Array(N), done = new Uint8Array(N);
-    return (graph = { xs, zs, out, nearest, cost, from, done, hk: new Float64Array(4096), hi: new Int32Array(4096) });
+    // the search's working arrays, kept with the graph. Nothing is wiped between searches: an entry
+    // counts only when its stamp is this search's number (seen: cost and from are set, shut: done)
+    const cost = new Float64Array(N), from = new Int32Array(N), seen = new Uint32Array(N), shut = new Uint32Array(N);
+    return (graph = { xs, zs, out, nearest, cost, from, seen, shut, gen: 0, hk: new Float64Array(4096), hi: new Int32Array(4096) });
   }
   // A* on travel time: length / speed limit, only along segments open to this vehicle and in the
   // allowed direction. A flat binary heap (keys and node ids side by side) keeps it quick on 100,000 nodes.
-  function astar(g, a, b, bit) {
-    const { xs, zs, cost, from, done } = g; cost.fill(Infinity); from.fill(-1); done.fill(0);
+  // cap: give up after that many nodes (a place that cannot be reached would otherwise search everything)
+  function astar(g, a, b, bit, cap = Infinity) {
+    const { xs, zs, cost, from, seen, shut } = g, gen = ++g.gen;
+    const costOf = v => (seen[v] === gen ? cost[v] : Infinity);
     const h = n => Math.hypot(xs[n] - xs[b], zs[n] - zs[b]) / 36;   // 130 km/h: never more than the truth
     let hk = g.hk, hi = g.hi, n = 0;   // the heap holds n entries; it grows when a search needs more
     const push = (key, id) => {
@@ -134,18 +140,19 @@ export function createAutopilot({ roadsUrl, fromRD, fromWGS, toWGS, inside }) {
       hk[i] = key; hi[i] = id;
       return top;
     };
-    cost[a] = 0; push(h(a), a);
-    while (n) {
-      const u = pop(); if (done[u]) continue; done[u] = 1;
-      if (u === b) break;
+    seen[a] = gen; cost[a] = 0; from[a] = -1; push(h(a), a);
+    let found = a === b;
+    for (let left = cap; n && left > 0; left--) {
+      const u = pop(); if (shut[u] === gen) continue; shut[u] = gen;
+      if (u === b) { found = true; break; }
       const o = g.out[u];
       for (let k = 0; k < o.length; k += 2) {
         const m = o[k], f = o[k + 1]; if (!(f & bit)) continue;
         const c = cost[u] + Math.hypot(xs[m] - xs[u], zs[m] - zs[u]) / ((f >> 4) / 3.6);
-        if (c < cost[m]) { cost[m] = c; from[m] = u; push(c + h(m), m); }
+        if (c < costOf(m)) { seen[m] = gen; cost[m] = c; from[m] = u; push(c + h(m), m); }
       }
     }
-    if (from[b] < 0 && a !== b) return null;
+    if (!found) return null;
     const out = []; for (let v = b; v >= 0; v = from[v]) out.push(v);   // node ids, destination first
     return out.reverse();
   }
@@ -257,7 +264,7 @@ export function createAutopilot({ roadsUrl, fromRD, fromWGS, toWGS, inside }) {
     start, stop, drive, plan,
     // the region's own road graph and A* over it, for the ambient traffic and people (ambient.js):
     // graph() loads it once; route(a, b, bit) is the node list a..b for that vehicle bit (sync, once loaded)
-    local: { graph: load, route: (a, b, bit) => (graph ? astar(graph, a, b, bit) : null) },
+    local: { graph: load, route: (a, b, bit) => (graph ? astar(graph, a, b, bit, LOOP_CAP) : null) },
     get active() { return !!route; },
     get label() { return route?.label; },
     // what is left of the trip, in metres

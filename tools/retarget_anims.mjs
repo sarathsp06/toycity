@@ -32,7 +32,7 @@ for (const [s, S] of [['l', 'Left'], ['r', 'Right']]) {
 // our clip name -> the library's
 const CLIPS = { jump_start: 'Jump_Start', jump_loop: 'Jump_Loop', jump_land: 'Jump_Land', hit: 'Hit_Chest', fall: 'Death01', roll: 'Roll',
   sit_enter: 'Sitting_Enter', sit_idle: 'Sitting_Idle_Loop', sit_exit: 'Sitting_Exit', sit_talk: 'Sitting_Talking_Loop', drive: 'Driving_Loop',
-  talk: 'Idle_Talking_Loop', knock: 'Interact', crouch: 'Crouch_Idle_Loop', dance: 'Dance_Loop' };
+  talk: 'Idle_Talking_Loop', knock: 'Interact', crouch: 'Crouch_Idle_Loop', dance: 'Dance_Loop', swim: 'Swim_Fwd_Loop', swim_idle: 'Swim_Idle_Loop' };
 
 async function playwright() {
   for (const p of [path.join(os.homedir(), 'node_modules/playwright-core/index.mjs'), path.join(ROOT, 'tools/node_modules/playwright-core/index.mjs')])

@@ -2,6 +2,9 @@ Car models from BlendSwap (licence as declared by the uploader):
 - Generic SUV ZYX0 by 1DInc, CC0, https://blendswap.com/blend/29795
 - Honda VFR800 by danielfc10, CC-BY, https://blendswap.com/blend/5449
 Person: Xbot from the three.js examples, dressed with tools/dress_person.py.
-Pose animations (anims.glb: jumping, sitting, driving, falling, knocking, talking, crouching, dancing, rolling):
+Pose animations (anims.glb: jumping, sitting, driving, falling, knocking, talking, crouching, dancing, rolling, swimming):
   Universal Animation Library by Quaternius, CC0, https://quaternius.com/packs/universalanimationlibrary.html
   retargeted onto the person's skeleton by tools/retarget_anims.mjs.
+Birds on the water (goose.glb, mallard.glb): low-poly models by Poly by Google, CC-BY 3.0,
+  'Goose' https://poly.pizza/m/9wn3If7Qgb4 and 'Mallard duck' https://poly.pizza/m/frSLi6b6Vid.
+  The swans, coots and the other water birds are built in web/birds.js.

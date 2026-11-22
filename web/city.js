@@ -477,7 +477,11 @@ function applySquare({ key, level, r, req }) {
       const P = tile.water.attributes.position.array, n = P.length / 3, xz = new Float32Array(n * 2); let ys = 0;
       const gx = tile.group.position.x, gz = tile.group.position.z;
       for (let k = 0; k < n; k++) { xz[2 * k] = P[3 * k] * QQ.q - QQ.ox + gx; xz[2 * k + 1] = P[3 * k + 2] * QQ.q - QQ.oz + gz; ys += P[3 * k + 1] * QQ.q - QQ.oy; }
-      birdsLater.push(() => tiles.get(key) === tile && birds.add(tile, xz, tile.water.index.array, ys / n + 0.03, key));
+      birdsLater.push(() => {
+        if (tiles.get(key) !== tile) return;
+        tile.waterY = ys / n; tile.wet = wetMask(tile, xz, tile.water.index.array);
+        birds.add(tile, xz, tile.water.index.array, ys / n + 0.03, key);
+      });
     }
     for (const [n, k, x, y] of d.header.meta.pois.slice(0, 80)) {
       const sp = label(n, /church|place_of_worship|townhall|school/.test(k) ? '#e6ecff' : '#fff8e6');
@@ -666,6 +670,7 @@ function pickPose() {
   if (driving.rider) return P.set('drive');
   if (driving.driving || ride) return P.set(null);   // inside a car: not seen
   if (fling.on || homes.busy) return;
+  if (swim.on) return P.set(avatar.speed > 0.25 ? 'swim' : 'swim_idle', { fade: 0.3 });
   if (jump.phase === 'crouch') return P.set('jump_start', { once: true });
   if (jump.phase === 'air') { if (P.name !== 'jump_start' || P.done) P.set('jump_loop'); return; }
   if (jump.phase === 'land') return P.set('jump_land', { once: true });
@@ -722,7 +727,7 @@ if (matchMedia('(pointer: coarse)').matches || params.get('touch')) {
   pad.addEventListener('pointerdown', e => { e.preventDefault(); joy.id = e.pointerId; try { pad.setPointerCapture(e.pointerId); } catch { /* synthetic or already released */ } move(e); });
   pad.addEventListener('pointermove', e => { if (e.pointerId === joy.id) move(e); });
   pad.addEventListener('pointerup', end); pad.addEventListener('pointercancel', end);
-  document.getElementById('jumpbtn').addEventListener('pointerdown', e => { e.preventDefault(); if (!jump.phase && !fly && !driving.driving) { jump.phase = 'crouch'; jump.t = 0; } });
+  document.getElementById('jumpbtn').addEventListener('pointerdown', e => { e.preventDefault(); if (!jump.phase && !fly && !driving.driving && !swim.on) { jump.phase = 'crouch'; jump.t = 0; } });
 }
 function zoomBy(f) {
   if (fly) { const off = camera.position.clone().sub(orbit.target).multiplyScalar(f); if (off.length() > 8 && off.length() < 2500) camera.position.copy(orbit.target).add(off); }
@@ -923,7 +928,7 @@ function others() {
   return othersList;
 }
 // ---------- birds on the water (birds.js): which ones come from Sovon's survey numbers, see facts.html ----------
-const birds = createBirds({ scene, THREE });
+const birds = createBirds({ scene, THREE, loadModel: u => new GLTFLoader().loadAsync(u) });
 const birdsLater = [];   // finding the ponds takes a moment: one square's worth per frame, after it is drawn
 const ambientOpts = { scene, autopilot, solids, slug, T, toRD, others };
 const traffic = createTraffic({ ...ambientOpts, models: CAR_MODELS, sounds: () => social?.ambience?.on ?? true, count: trafficOn ? TRAFFIC_N[qName] || TRAFFIC_N.mid : 0 });
@@ -983,13 +988,14 @@ const keys = {};
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
   keys[e.key.toLowerCase()] = true;
-  if (e.key.toLowerCase() === 'e' && !e.repeat && !homes.inside && !homes.busy) toggleCar();
+  if (e.key.toLowerCase() === 'e' && !e.repeat && !homes.inside && !homes.busy && !swim.on) toggleCar();
+  if (e.key.toLowerCase() === 'g' && !e.repeat && !swim.on) startSwim();
   if (e.key.toLowerCase() === 'f') { if (driving.driving) toggleCar(); toggleFly(); }
   if (e.key.toLowerCase() === 'v') setFirstPerson(!firstPerson);
   if (e.key.toLowerCase() === 'm') toggleMap();
   if (e.key === '-' || e.key === '_') zoomBy(1.6); if (e.key === '=' || e.key === '+') zoomBy(1 / 1.6);
   if (e.key.startsWith('Arrow')) e.preventDefault();
-  if (e.key === ' ') { e.preventDefault(); if (!jump.phase && !fly && !driving.driving) { jump.phase = 'crouch'; jump.t = 0; } }
+  if (e.key === ' ') { e.preventDefault(); if (!jump.phase && !fly && !driving.driving && !swim.on) { jump.phase = 'crouch'; jump.t = 0; } }
 });
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 function toggleFly() { fly = !fly; orbit.enabled = fly; if (fly) orbit.target.copy(player.position); }
@@ -1034,12 +1040,68 @@ function blockedAt(x, z) {
   if ((t.coll[bit >> 3] >> (bit & 7)) & 1) return true;
   return jump.h < 0.5 && t.low && ((t.low[bit >> 3] >> (bit & 7)) & 1);
 }
+// ---------- water you can swim in: a 0.5 m bitmap per near square, like coll, from its water triangles ----------
+function wetMask(tile, xz, idx) {
+  const bits = new Uint8Array(125000), ox = tile.i * T, oy = tile.j * T;
+  for (let t = 0; t < idx.length; t += 3) {
+    // the triangle in the square's own RD metres (X east, Y north from its corner)
+    const P = [0, 1, 2].map(k => [xz[2 * idx[t + k]] + ORX - ox, ORY - xz[2 * idx[t + k] + 1] - oy]);
+    const c0 = Math.max(0, Math.floor(Math.min(P[0][0], P[1][0], P[2][0]) / 0.5)), c1 = Math.min(999, Math.floor(Math.max(P[0][0], P[1][0], P[2][0]) / 0.5));
+    const r0 = Math.max(0, Math.floor(Math.min(P[0][1], P[1][1], P[2][1]) / 0.5)), r1 = Math.min(999, Math.floor(Math.max(P[0][1], P[1][1], P[2][1]) / 0.5));
+    const [[ax, ay], [bx, by], [cx, cy]] = P, d = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy); if (!d) continue;
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+      const x = c * 0.5 + 0.25, y = r * 0.5 + 0.25;
+      const u = ((by - cy) * (x - cx) + (cx - bx) * (y - cy)) / d, v = ((cy - ay) * (x - cx) + (ax - cx) * (y - cy)) / d;
+      if (u >= -1e-6 && v >= -1e-6 && u + v <= 1 + 1e-6) { const bit = r * 1000 + c; bits[bit >> 3] |= 1 << (bit & 7); }
+    }
+  }
+  return bits;
+}
+function wetAt(x, z) {   // the water level there, or null on dry land
+  const X = x + ORX, Y = ORY - z, i = Math.floor(X / T), j = Math.floor(Y / T), t = tiles.get(i + '_' + j);
+  if (!t || !t.wet) return null;
+  const bit = Math.floor((Y - j * T) / 0.5) * 1000 + Math.floor((X - i * T) / 0.5);
+  return (t.wet[bit >> 3] >> (bit & 7)) & 1 ? t.waterY : null;
+}
+// Swimming: near the water a Swim button (or G) takes you in; you swim (W/A/S/D, click, Shift faster)
+// anywhere the water goes, and climb out by swimming onto the bank. Others see it too (pose 6).
+const swim = { on: false, y: 0 };
+const SWIM_MS = 1.1, SWIM_FAST = 2;
+function waterNear(r = 2.5) {   // the nearest swimmable spot within r metres, 0.6 m in from the edge
+  const p = player.position;
+  for (let d = 0.5; d <= r; d += 0.5) for (let a = 0; a < 16; a++) {
+    const cx = Math.cos(a * Math.PI / 8), cz = Math.sin(a * Math.PI / 8), x = p.x + cx * d, z = p.z + cz * d;
+    if (wetAt(x, z) !== null && wetAt(x + cx * 0.6, z + cz * 0.6) !== null) return [x + cx * 0.6, z + cz * 0.6];
+  }
+  return null;
+}
+function startSwim() {
+  if (swim.on || driving.driving || ride || fly || homes.busy || homes.inside || fling.on) return;
+  const w = waterNear(); if (!w) return;
+  player.position.x = w[0]; player.position.z = w[1]; goal = detour = null; marker.visible = false; jump.phase = null; jump.h = 0;
+  swim.on = true; swim.y = wetAt(w[0], w[1]) ?? 0;
+  note('🏊 Swimming. Swim onto the bank to climb out.'); swimBtn(true);
+}
+function stopSwim(say = true) { if (!swim.on) return; swim.on = false; if (say) note('💧 Out of the water.'); swimBtn(true); }
+// while swimming: water is open, dry land you may step onto ends the swim, walls stay walls
+const swimBlocked = (x, z) => [[0, 0], [R0, 0], [-R0, 0], [0, R0], [0, -R0]].some(([a, b]) => wetAt(x + a, z + b) === null && blockedAt(x + a, z + b));
+const swimButton = document.getElementById('swimbtn');
+const swimAt = { x: NaN, z: NaN, on: null };
+function swimBtn(force) {
+  if (!swimButton) return;
+  const p = player.position;
+  if (!force && swimAt.on === swim.on && Math.hypot(p.x - swimAt.x, p.z - swimAt.z) < 0.5) return;
+  swimAt.x = p.x; swimAt.z = p.z; swimAt.on = swim.on;
+  const hidden = swim.on || driving.driving || !!ride || fly || homes.inside || !waterNear();
+  if (swimButton.hidden !== hidden) swimButton.hidden = hidden;
+}
+swimButton?.addEventListener('click', e => { e.stopPropagation(); startSwim(); });
 // jumping (Space): enough to clear a 1.1 m hedge; up to 1.3 m at the top of the arc
 const jump = { h: 0, v: 0, phase: null, t: 0 };   // phase: crouch -> air -> land -> null
 const GRAVITY = 14, JUMP_V = 6, CROUCH_T = 0.12, LAND_T = 0.16;
 const R0 = 0.3;
 let movedThisFrame = 0;
-const blocked = (x, z) => blockedAt(x, z) || blockedAt(x + R0, z) || blockedAt(x - R0, z) || blockedAt(x, z + R0) || blockedAt(x, z - R0)
+const blocked = (x, z) => swim.on ? swimBlocked(x, z) : blockedAt(x, z) || blockedAt(x + R0, z) || blockedAt(x - R0, z) || blockedAt(x, z + R0) || blockedAt(x, z - R0)
   || (!fly && solids.hit(x, z, PERSON.r));
 let stuck = 0, needUnstick = true;
 // An agent walks round what is in its way, as a person does: when the straight line to its goal is
@@ -1398,11 +1460,11 @@ function frame(now) {
     if (jm > 0.15) v.addScaledVector(fwd, -joy.y).addScaledVector(right, joy.x);
     if (v.lengthSq() > 0) { goal = null; marker.visible = false; }
     // walk, or run with Shift or the joystick pushed to its edge; click-to-go speeds up for long trips
-    let speed = keys['shift'] || jm > 0.9 ? 6 : jm > 0.15 ? 1.2 + 0.8 * jm : 1.8;
+    let speed = swim.on ? (keys['shift'] || jm > 0.9 ? SWIM_FAST : SWIM_MS) : keys['shift'] || jm > 0.9 ? 6 : jm > 0.15 ? 1.2 + 0.8 * jm : 1.8;
     if (goal) {
       const to = (detour || goal).clone().sub(player.position); to.y = 0; const d = to.length();
       // a person's click-to-go speeds up on long trips; an agent walks (1.8 m/s) or runs (6 m/s) like anyone on foot
-      const boost = AGENT ? (AGENT.run ? 6 : 1.8) : Math.max(speed, d / 2.5);
+      const boost = swim.on ? speed : AGENT ? (AGENT.run ? 6 : 1.8) : Math.max(speed, d / 2.5);
       if (d < 0.4) { if (detour) { const q = detourQ.shift(); detour = q ? new THREE.Vector3(q[0], 0.15, q[1]) : null; } else { goal = null; marker.visible = false; } } else { v.copy(to); speed = Math.min(boost * dt, d) / dt; }
       marker.material.opacity = 0.5 + 0.4 * Math.sin(now / 150);
     }
@@ -1430,7 +1492,7 @@ function frame(now) {
     placeT = 0;
     const s = (driving.driving ? Math.round(Math.abs(driving.speed) * 3.6) + ' km/h  ·  ' + (autopilot.active ? apLine() : '') : '') + nearestPlace();
     if (s !== placeText) place.textContent = placeText = s;
-    carBtn();
+    carBtn(); swimBtn();
   }
 
   // only the 12 nearest signs, rescaled with distance
@@ -1472,7 +1534,8 @@ function frame(now) {
   // the town's own cars and people: where I am and whether I am on foot, in a car, or flying
   me.x = player.position.x; me.z = player.position.z; me.inCar = driving.driving || !!ride; me.onFoot = !me.inCar && !fly; me.fly = fly;
   traffic.update(dt, me); peds.update(dt, me);
-  player.position.y = 0.15 + jump.h + (fling.on ? fling.h : 0);
+  if (swim.on) { const y = wetAt(player.position.x, player.position.z); if (y === null || driving.driving || fly) stopSwim(); else swim.y = y; }
+  player.position.y = swim.on ? swim.y : 0.15 + jump.h + (fling.on ? fling.h : 0);
   // sharp shadows that follow the player
   const R = 40 + Math.min(dist, 150) * 0.9;
   sun.target.position.copy(player.position); sun.position.copy(player.position).add(SUN_OFFSET);
@@ -1517,7 +1580,7 @@ if (AGENT) window.__agent = {
   draw(n = 3) { AGENT.draw = n; },   // render the next few frames (for a screenshot)
   get drawing() { return AGENT.draw > 0; },
 };
-window.__city = { ovTiles, solids, driving, radio, nav, knockDown, card, fling, homes, health, traffic, peds, birds, setTraffic, nearestPlace, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, jump, toRD, rdToWgs, ORX, ORY, info, stats: null };
+window.__city = { ovTiles, solids, driving, radio, nav, knockDown, card, fling, homes, health, traffic, peds, birds, swim, startSwim, wetAt, setTraffic, nearestPlace, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, jump, toRD, rdToWgs, ORX, ORY, info, stats: null };
 // ---------- social layer: other people, voice and background sounds (web/mp/, ?mp=0 turns it off) ----------
 // It only reads the player's position and the trees and parked cars around it; nothing here depends on it.
 let social = null;
@@ -1541,7 +1604,7 @@ if (params.get('mp') !== '0') import('./mp/index.js').then(m => m.start({
   // off with the 📞 Calls button; an agent (?agent=1) has a voice only if it joined with one (&voice=1)
   body: { get caps() { return voiceCap ? 'v' : ''; }, setVoice(on) { voiceCap = on; if (!AGENT) localStorage.setItem('toycity.calls', on ? 'on' : 'off'); },
     get autoAnswer() { return !!AGENT && voiceCap; },
-    get card() { return card.level; }, get pose() { return homes.inside ? 3 : homes.busy ? 5 : health.out ? 4 : fling.on ? (fling.down ? 2 : 1) : 0; }, get y() { return +(fling.on ? fling.h : jump.h).toFixed(2); } },
+    get card() { return card.level; }, get pose() { return homes.inside ? 3 : homes.busy ? 5 : health.out ? 4 : fling.on ? (fling.down ? 2 : 1) : swim.on ? 6 : 0; }, get y() { return +(swim.on ? swim.y - 0.15 : fling.on ? fling.h : jump.h).toFixed(2); } },
 })).then(s => { social = s; window.__city.social = s; }).catch(e => { console.warn('multiplayer unavailable', e); document.getElementById('mp').textContent = 'Multiplayer unavailable right now'; });
 
 setFirstPerson(localStorage.getItem('toycity.view') === 'eyes');

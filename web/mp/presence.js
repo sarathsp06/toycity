@@ -60,8 +60,8 @@ export async function createPresence({ scene, player, toRD, fromRD, slug, vehicl
       const c = typeof car === 'string' && /^[a-z0-9_]{1,12}:[0-9a-f]{1,6}$/.test(car) ? car : '';   // "model:colour" while driving
       if (c !== p.car) { p.car = c; if (p.player) setVehicle(p.player, c, vehicle?.make); }
       // their card (1 yellow, 2 red), whether they are flying (1) or lying (2) after being hit, and how high
-      p.card = [0, 1, 2].includes(cardLevel) ? cardLevel : 0; p.pose = [0, 1, 2, 3, 4, 5].includes(pose) ? pose : 0;   // 4 knocked out, 5 going through a door
-      p.up = Number.isFinite(up) ? Math.max(0, Math.min(20, up)) : 0;
+      p.card = [0, 1, 2].includes(cardLevel) ? cardLevel : 0; p.pose = [0, 1, 2, 3, 4, 5, 6].includes(pose) ? pose : 0;   // 4 knocked out, 5 going through a door, 6 swimming
+      p.up = Number.isFinite(up) ? Math.max(-3, Math.min(20, up)) : 0;   // below 0: swimming, at the water level
       p.caps = typeof caps === 'string' ? caps.replace(/[^a-z]/g, '').slice(0, 8) : undefined;   // what they can do, e.g. 'v' voice
     });
     // call invitations and answers go straight to one player (see index.js)
