@@ -24,7 +24,7 @@ const MODEL = 'suv';
 const PAINTS = [0xd93a2f, 0x2d64c4, 0xf2f2f2, 0x24252a, 0x8c9299, 0x2e8b57, 0xf0b429, 0x6b3fa0, 0xc9d7e6, 0x7a4a2b, 0xe8743b, 0x1f6f8b];
 const RADIUS = 350;          // metres: seen within, dropped beyond
 const LOD = 90;              // metres: the low-detail body beyond this
-const AHEAD = 6, AHEAD_CAR = 7;   // metres of clear road in front of a person / a car before it rolls on
+const AHEAD = 6, AHEAD_CAR = 9;   // metres of clear road in front of a person / a car before it rolls on
 const HORN_AFTER = 3, HORN_AGAIN = 9;   // seconds blocked before a toot, and between toots
 const TOWN = 80;             // km/h: never faster than this, whatever the limit says
 const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
@@ -97,7 +97,8 @@ export function createTraffic({ scene, models, autopilot, solids, slug, T, toRD,
     const inWay = (x, z, inCar) => {
       const rx = x - p.x, rz = z - p.z; if (rx * rx + rz * rz > 1600) return false;   // 40 m
       const ahead = rx * p.dx + rz * p.dz, lat = Math.abs(-rx * p.dz + rz * p.dx);
-      return inCar ? ahead > -HL && ahead < HL + AHEAD_CAR + HL && lat < 2.6 : ahead > -HL && ahead < HL + AHEAD && lat < 1.5;   // a person on the kerb is not in the way
+      // a car anywhere alongside or ahead (it never drives through one); a person on the kerb is not in the way
+      return inCar ? ahead > -HL - 2 && ahead < HL + AHEAD_CAR + HL && lat < 3.2 : ahead > -HL && ahead < HL + AHEAD && lat < 1.5;
     };
     if (!me.fly && inWay(me.x, me.z, me.inCar)) return true;
     for (const o of others()) if (inWay(o.x, o.z, o.inCar)) return true;
@@ -131,6 +132,7 @@ export function createTraffic({ scene, models, autopilot, solids, slug, T, toRD,
     setCount: n => { fleet.setCount(n); for (let i = n; i < slots.length; i++) if (slots[i].agent) hide(slots[i]); },
     setNight: k => { night = k; for (const s of slots) for (const l of s.lights) l.visible = k > 0.3; },
     near: r => fleet.near(r),
+    bumped(x, z) { for (const a of fleet.active) if (a && Math.hypot(a.pos.x - x, a.pos.z - z) < 6) { a.wait = HORN_AFTER + 0.01; toot(a.d); break; } },   // you drove into one: a toot
     get count() { return fleet.count; },
     get active() { return fleet.active; },   // for tests and tools: { id, pos: { x, z, v, s }, d, lag }
     get agents() { return fleet.agents; },

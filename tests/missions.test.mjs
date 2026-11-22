@@ -93,7 +93,7 @@ test('live: offer, accept, walk to each stop, earn stars', async () => {
   assert.equal(m.stats.stars, rewards[0][0]);
   assert.equal(m.stats.done, 1);
   assert.equal(JSON.parse(localStorage.getItem('toycity.stars')).stars, m.stats.stars, 'stars are remembered');
-  assert.match(notes[notes.length - 1], /Gelukt/);
+  assert.match(notes[notes.length - 1], /Done!/);
 });
 
 test('live: stopping too far in a car does not count; stopped nearby does', async () => {
@@ -113,7 +113,7 @@ test('live: too late only says so and clears the mission', async () => {
   await m.offer(); m.accept();
   m.update(m.active.limit + 1);
   assert.equal(m.active, null);
-  assert.match(notes[notes.length - 1], /Te laat/);
+  assert.match(notes[notes.length - 1], /Too late/);
   assert.equal(m.stats.late, 1); assert.equal(m.stats.stars, 0);
   assert.ok(await m.offer(), 'and a new one is offered');
 });

@@ -102,7 +102,7 @@ function ticket() {
   return s;
 }
 
-export function createDriving({ scene, player, models, carTiles, solids, ground, note = () => {}, onHitPerson = () => {} }) {
+export function createDriving({ scene, player, models, carTiles, solids, ground, note = () => {}, onHitPerson = () => {}, onBumpCar = null }) {
   const taken = new Set();
   const st = { car: null, origin: null, speed: 0, steer: 0, heading: 0, model: null, color: 0 };
   let left = null;           // the car you got out of: { mesh, x, z, heading, model, color, origin, speed, ... }
@@ -202,15 +202,20 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
   // sample point against this list instead of asking every live source again for each point
   let live = [];
   function snapshot(x, z) { live = solids.liveNear(x, z, 8); if (live.length && solids.ignore.size) live = live.filter(f => !(f.id && solids.ignore.has(f.id))); return live; }
+  // the count is static hits (ground, buildings, parked cars) + 100 x live hits (moving cars, people),
+  // so a caller can tell the two apart: see update() for why
+  let liveHits = 0;
   function hitsAt(x, z, h, model) {
     const { hl, hw } = sizeOf(model), c = Math.cos(h), s = Math.sin(h);
-    let n = 0;
+    let n = 0, l = 0;
     for (const [a, b] of SAMPLES) {
       const lx = a * (hl - 0.15), lz = b * (hw - 0.1);
       const wx = x + lx * c + lz * s, wz = z - lx * s + lz * c;
-      if (ground(wx, wz) || (!ghost && (solids.at(wx, wz, 0.05).length || live.some(f => hits(f, wx, wz, 0.05))))) n++;
+      if (ground(wx, wz) || (!ghost && solids.at(wx, wz, 0.05).length)) n++;
+      else if (!ghost && live.some(f => hits(f, wx, wz, 0.05))) l++;
     }
-    return n;
+    liveHits = l;
+    return n + 100 * l;
   }
   // turn a car into its wreck (only models that have one, so far the SUV)
   function wreckOf(model) { return models.some(m => m.name === model + '_wreck') ? model + '_wreck' : null; }
@@ -390,8 +395,12 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
       }
       if (hit) live = live.filter(f => !(f.id && knocked.has(f.id)));   // they are no longer in the way
     }
-    const now = hitsAt(player.position.x, player.position.z, st.heading, st.model), next = hitsAt(x, z, h, st.model);
-    if (next === 0 || next < now) { player.position.x = x; player.position.z = z; st.heading = h; }
+    // A move is fine when it touches nothing, or touches less than now. Moving cars and people are a
+    // special case: driving into one is a bump, but once you are touching one (it drove into you, or
+    // you into it) any move is allowed, so you can always back out and never get wedged inside it.
+    const now = hitsAt(player.position.x, player.position.z, st.heading, st.model), nowL = liveHits, next = hitsAt(x, z, h, st.model), nextL = liveHits;
+    const nowS = now - 100 * nowL, nextS = next - 100 * nextL;
+    if ((nextS === 0 || nextS < nowS) && (nextL === 0 || nowL > 0)) { player.position.x = x; player.position.z = z; st.heading = h; }
     else {
       const impact = Math.abs(st.speed);
       st.speed *= -0.25;
@@ -402,6 +411,7 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
       // arcade help for tight spots: blocked, you can still turn a little on the spot to wiggle out
       const turn = st.heading + steer * 0.6 * dt;
       if (steer && hitsAt(player.position.x, player.position.z, turn, st.model) <= now) st.heading = turn;
+      if (nextL > nowL && impact > KNOCK) onBumpCar?.(x, z);   // you ran into a moving car: it minds
     }
     player.rotation.y = st.heading; ghost = false;
     // a motorbike leans into the turn
@@ -444,6 +454,7 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
   return {
     nearest, enter, exit, update, tick, taken, place, dented, release,
     get left() { return left; },   // the vehicle you got out of (tests)
+    get heading() { return st.heading; }, set heading(h) { st.heading = h; player.rotation.y = h; },   // (tests)
     get driving() { return !!st.car; },
     get speed() { return st.speed; },
     get model() { return st.model; },

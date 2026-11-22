@@ -47,9 +47,9 @@ export const SHOPS = [
   { cat: 'kapper', re: /kapper|hair|barber/i, item: 'een cadeaubon', emoji: '🎁', en: 'a gift card' },
   { cat: 'snackbar', re: /snack|friet|frituur|pizza/i, item: 'een zakje friet', emoji: '🍟', en: 'chips' },
 ];
-const PARCELS = [['een pakketje', '📦', 'a parcel'], ['een doos met puzzels', '🧩', 'a box of puzzles'], ['een brief', '✉️', 'a letter'], ['een taart', '🎂', 'a cake'], ['een plant', '🪴', 'a plant'], ['een doos ballonnen', '🎈', 'balloons']];
+const PARCELS = [['a parcel', '📦', 'a parcel'], ['a box of puzzles', '🧩', 'a box of puzzles'], ['a letter', '✉️', 'a letter'], ['a cake', '🎂', 'a cake'], ['a plant', '🪴', 'a plant'], ['a box of balloons', '🎈', 'balloons']];
 const NAMES = ['De Vries', 'Jansen', 'De Jong', 'Bakker', 'Visser', 'Smit', 'Meijer', 'Mulder', 'Bos', 'Vos', 'De Groot', 'Van Dijk', 'Peters', 'Hendriks', 'Dekker', 'Brouwer', 'Kok', 'Van den Berg', 'Willems', 'Van Leeuwen'];
-const WHO = ['Mevrouw', 'Meneer', 'Opa', 'Oma', 'Juf', 'Meester', 'Buurvrouw', 'Buurman'];
+const WHO = ['Mrs', 'Mr', 'Grandpa', 'Grandma', 'Miss', 'Mr', 'Neighbour', 'Neighbour'];
 const VISITS = /park|speeltuin|speelplaats|bibliotheek|school|kinderboerderij|zwembad|sporthal|ijsbaan|museum|station|kerk|molen|bakker|bloem|ijssalon/i;
 
 // pick a klusje from a search index ({ addr: [[street, nr, X, Y]], pois: [[name, X, Y]] }) around an RD
@@ -72,10 +72,10 @@ export function pickMission(index, X, Y, seed, { inside = () => true, kind } = {
       const home = house(shop.X, shop.Y); if (!home) return null;
       const total = Math.hypot(shop.X - X, shop.Y - Y) + Math.hypot(home.X - shop.X, home.Y - shop.Y);
       return { kind, who, emoji: s.emoji, item: s.item, reward: 2, limit: timeLimit(total * 1.3),
-        title: `${s.emoji} ${s.item} voor ${who}`,
-        line: `${who} op ${home.label} wil graag ${s.item} ${s.emoji}. Haal het bij ${shop.label}! (fetch ${s.en} at ${shop.label}, bring it to ${home.label})`,
-        stops: [{ X: shop.X, Y: shop.Y, label: shop.label, step: 'pickup', say: `${s.emoji} Opgehaald bij ${shop.label}! Nu naar ${who} op ${home.label}.` },
-                { X: home.X, Y: home.Y, label: home.label, step: 'drop', say: `${s.emoji} Dankjewel! ${who} is heel blij.` }] };
+        title: `${s.emoji} ${s.en} for ${who}`,
+        line: `${who} at ${home.label} would love ${s.en} ${s.emoji}. Fetch it at ${shop.label} and bring it over!`,
+        stops: [{ X: shop.X, Y: shop.Y, label: shop.label, step: 'pickup', say: `${s.emoji} Picked up at ${shop.label}! Now to ${who} at ${home.label}.` },
+                { X: home.X, Y: home.Y, label: home.label, step: 'drop', say: `${s.emoji} Thank you! ${who} is delighted.` }] };
     }
   }
   if (kind === 'rondje') {
@@ -87,10 +87,10 @@ export function pickMission(index, X, Y, seed, { inside = () => true, kind } = {
       // rough length: nearest-neighbour from the start
       let cx = X, cy = Y, total = 0, left = [...chosen];
       while (left.length) { left.sort((a, b) => Math.hypot(a.X - cx, a.Y - cy) - Math.hypot(b.X - cx, b.Y - cy)); const p = left.shift(); total += Math.hypot(p.X - cx, p.Y - cy); cx = p.X; cy = p.Y; }
-      return { kind, who, emoji: '🚲', item: 'een rondje', reward: 3, limit: timeLimit(total * 1.3), any: true,
-        title: '🗺️ Rondje langs drie plekken',
-        line: `Een rondje! Ga langs ${chosen.map(c => c.label).join(', ')} – in elke volgorde. (visit all three, any order)`,
-        stops: chosen.map(p => ({ X: p.X, Y: p.Y, label: p.label, step: 'visit', say: `✅ ${p.label} gezien!` })) };
+      return { kind, who, emoji: '🚲', item: 'a round', reward: 3, limit: timeLimit(total * 1.3), any: true,
+        title: '🗺️ A round of three places',
+        line: `A little round: visit ${chosen.map(c => c.label).join(', ')}, in any order.`,
+        stops: chosen.map(p => ({ X: p.X, Y: p.Y, label: p.label, step: 'visit', say: `✅ ${p.label}, done!` })) };
     }
   }
   // bezorging: a parcel from the shop next to you (within 120 m), else it is already in your hands
@@ -99,11 +99,11 @@ export function pickMission(index, X, Y, seed, { inside = () => true, kind } = {
   const shopNear = near(pois.filter(p => SHOPS.some(s => s.re.test(p.label)) || /post|pakket|winkel|shop|bruna|primera/i.test(p.label)), 15, 120)[0];
   const total = (shopNear ? Math.hypot(shopNear.X - X, shopNear.Y - Y) : 0) + Math.hypot(home.X - (shopNear || { X }).X, home.Y - (shopNear || { Y }).Y);
   const stops = [];
-  if (shopNear) stops.push({ X: shopNear.X, Y: shopNear.Y, label: shopNear.label, step: 'pickup', say: `${emoji} Pakketje opgehaald! Nu naar ${who} op ${home.label}.` });
-  stops.push({ X: home.X, Y: home.Y, label: home.label, step: 'drop', say: `${emoji} Bezorgd! ${who} zwaait je uit.` });
+  if (shopNear) stops.push({ X: shopNear.X, Y: shopNear.Y, label: shopNear.label, step: 'pickup', say: `${emoji} Parcel picked up! Now to ${who} at ${home.label}.` });
+  stops.push({ X: home.X, Y: home.Y, label: home.label, step: 'drop', say: `${emoji} Delivered! ${who} waves you goodbye.` });
   return { kind: 'bezorging', who, emoji, item, reward: total > 700 ? 2 : 1, limit: timeLimit(total * 1.3),
-    title: `${emoji} Bezorging voor ${who}`,
-    line: `${who} op ${home.label} wacht op ${item} ${emoji}.${shopNear ? ` Haal het op bij ${shopNear.label}.` : ''} (deliver ${en} to ${home.label})`,
+    title: `${emoji} Delivery for ${who}`,
+    line: `${who} at ${home.label} is waiting for ${en} ${emoji}.${shopNear ? ` Pick it up at ${shopNear.label} first.` : ''}`,
     stops };
 }
 
@@ -144,11 +144,11 @@ export function createMissions({ player, driving, scene, note = () => {}, index,
   async function offer({ kind } = {}) {
     if (active) return active;
     await loadIndex().catch(e => { console.warn('missions: no search index', e); });
-    if (!idx) { note('📦 Nog geen klusjes hier.'); return null; }
+    if (!idx) { note('📦 No errands here yet.'); return null; }
     const [X, Y] = here();
     const s = (seed ?? Math.floor(Date.now() / 864e5) * 131) + stats.done * 7 + n++;
     offered = pickMission(idx, X, Y, s, { inside, kind });
-    if (!offered) { note('📦 Geen klusje in de buurt, loop eens verder.'); changed(); return null; }
+    if (!offered) { note('📦 No errand nearby, try a bit further on.'); changed(); return null; }
     note(offered.line.replace(/\s*\(.*\)\s*$/, ''));   // the short line; the full one is in the offer card
     changed();
     return offered;
@@ -158,7 +158,7 @@ export function createMissions({ player, driving, scene, note = () => {}, index,
     active = offered; offered = null; active.i = 0; active.left = active.limit; active.t = 0;
     for (const s of active.stops) { s.done = false; toWorld(s); }
     const t = target();
-    note(`${active.emoji} Op weg naar ${t.label}. Je hebt ${fmtTime(active.limit)} minuten.`);
+    note(`${active.emoji} Off to ${t.label}. You have ${fmtTime(active.limit)}.`);
     place(); changed();
     return active;
   }
@@ -171,7 +171,7 @@ export function createMissions({ player, driving, scene, note = () => {}, index,
   function finish() {
     stats.stars += active.reward; stats.done++; save();
     const r = active.reward; active = null; place();
-    note(`🌟 Gelukt! +${r} ${r === 1 ? 'ster' : 'sterren'} (nu ${stats.stars}). Klaar voor het volgende klusje?`);
+    note(`🌟 Done! +${r} ${r === 1 ? 'star' : 'stars'} (${stats.stars} now). Ready for the next one?`);
     try { onReward(r, { ...stats }); } catch (e) { console.warn('onReward', e); }
     changed();
   }
@@ -189,7 +189,7 @@ export function createMissions({ player, driving, scene, note = () => {}, index,
         if (active.stops.every(s => s.done)) return finish();
         note(t.say); place(); changed(); return;
       }
-      if (active.left <= 0) { stats.late++; save(); return cancel('⏰ Te laat, volgende keer beter! Vraag gerust een nieuw klusje.'); }
+      if (active.left <= 0) { stats.late++; save(); return cancel('⏰ Too late this time, better luck next time! Ask for a new errand whenever you like.'); }
       if ((hudT += dt) > 0.25) { hudT = 0; const h = hint(p.x, p.z, t.x, t.z, heading ? heading() : 0); const s = `${active.emoji} ${t.label} · ${h} · ⏱ ${fmtTime(active.left)}`; if (s !== last) { last = s; changed(); } }
     },
     offer, accept, cancel,
@@ -207,13 +207,13 @@ export function createMissions({ player, driving, scene, note = () => {}, index,
 // HUD: a "📦 Klusje" button when you are on foot or stopped; the offer with "Doen!" / "Liever niet";
 // the running mission as a line with a small stop button. Markup: <div id="mission"></div>.
 export function mountMissions(container, missions) {
-  container.innerHTML = '<button type="button" class="ask">📦 Klusje</button><span class="offer" hidden><span class="text"></span><button type="button" class="yes">👍 Doen!</button><button type="button" class="no">Liever niet</button></span><span class="run" hidden><span class="text"></span><button type="button" class="stop" title="Stop dit klusje" aria-label="Stop">✖</button></span>';
+  container.innerHTML = '<button type="button" class="ask">📦 Errand</button><span class="offer" hidden><span class="text"></span><button type="button" class="yes">👍 Do it!</button><button type="button" class="no">Not now</button></span><span class="run" hidden><span class="text"></span><button type="button" class="stop" title="Stop dit klusje" aria-label="Stop">✖</button></span>';
   const ask = container.querySelector('.ask'), offer = container.querySelector('.offer'), run = container.querySelector('.run');
   const ot = offer.querySelector('.text'), rt = run.querySelector('.text');
   ask.addEventListener('click', e => { e.stopPropagation(); missions.offer(); });
   offer.querySelector('.yes').addEventListener('click', e => { e.stopPropagation(); missions.accept(); });
   offer.querySelector('.no').addEventListener('click', e => { e.stopPropagation(); missions.cancel(); });
-  run.querySelector('.stop').addEventListener('click', e => { e.stopPropagation(); missions.cancel('📦 Klusje gestopt. Geen probleem!'); });
+  run.querySelector('.stop').addEventListener('click', e => { e.stopPropagation(); missions.cancel('📦 Errand stopped. No problem!'); });
   const draw = () => {
     const a = missions.active, o = missions.offered;
     ask.hidden = !!a || !!o || !missions.idle;
