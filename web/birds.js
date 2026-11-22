@@ -14,6 +14,9 @@
 //
 // The pure parts (finding separate ponds, the chance, picking birds) are exported for tests.
 
+// the game's seeded PRNG and hash (ambient.js): the same pond gives the same birds everywhere
+import { rng, seed as hash } from './ambient.js';
+
 const SOVON = 'https://portal.sovon.nl/atlas/soorten/soort/';
 const STATS = 'https://stats.sovon.nl/stats/soort/';
 // breed: % of 5 x 5 km atlas squares with breeding, 2013-2015 (Sovon Vogelatlas, "Bezette blokken")
@@ -39,13 +42,6 @@ export const ATLAS = { squares: 1685, size: '5 × 5 km', fieldwork: '2013–2015
 // Ponds smaller than MIN_AREA get no birds at all.
 export const SIZE_HALF = 3000, MIN_AREA = 250;
 export const chance = (s, area) => area < MIN_AREA ? 0 : (s.breed / 100) * area / (area + SIZE_HALF);
-
-// a tiny seeded PRNG (mulberry32) and a string hash: the same pond gives the same birds everywhere
-export function rng(seed) {
-  let a = seed >>> 0;
-  return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
-}
-export function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; }
 
 // which species are on a pond of `area` m², and how many of each: [{ s, n }]
 export function pickBirds(area, seed) {
@@ -228,7 +224,7 @@ export function createBirds({ scene, THREE, loadModel }) {
     const bodies = waterBodies(pos, idx), flocks = [];
     bodies.slice(0, 40).forEach((w, bi) => {
       if (w.area < MIN_AREA) return;
-      const seed = hash(key + ':' + bi + ':' + Math.round(w.area)), picked = pickBirds(w.area, seed);
+      const seed = hash(key, bi, Math.round(w.area)), picked = pickBirds(w.area, seed);
       if (!picked.length) return;
       const spots = swimSpots(pos, w, seed ^ 0x9e3779b9);
       if (!spots.pts.length) return;

@@ -1,5 +1,7 @@
 // development aid: city.html?drive=<m/s>[&len=<m>][&angle=<rad>] moves the player in a straight line
 // through the town and records frame times and missing squares; the result lands in window.__driveResult
+import { squareKey } from './grid.js';
+
 export async function run(c, speed, len = 2400, angle = 0) {
   await new Promise(r => setTimeout(r, 100));
   const info = c.info, T = info.tile, N = info.overview?.n || 4;   // the region's own tiles.json (window.__city.info)
@@ -16,9 +18,9 @@ export async function run(c, speed, len = 2400, angle = 0) {
       if (frames.length % 6 === 0) {
         const [X, Y] = c.toRD(p.x, p.z); let hn = 0, hf = 0, ns = 0;
         for (const [i, j] of info.squares) {
-          const d = rect(i, j, X, Y), tl = c.tiles.get(i + '_' + j);
+          const d = rect(i, j, X, Y), tl = c.tiles.get(squareKey(i, j));
           if (d < 150 && (!tl || tl.level !== 'near')) hn++;
-          const ov = c.ovTiles.get(Math.floor(i / N) + '_' + Math.floor(j / N));
+          const ov = c.ovTiles.get(squareKey(Math.floor(i / N), Math.floor(j / N)));
           if (d < 800 && !tl && (!ov || ov === 'loading')) hf++;
           if (d < 800 && !tl) ns++;
         }

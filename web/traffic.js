@@ -17,7 +17,7 @@
 //   traffic.count, traffic.near(r)
 import * as THREE from 'three';
 import { makeCar, footprintOf, FRONT } from './vehicle.js';
-import { createFleet, buildLoop, cornerSpeed, usable, seed, rng, catchUp } from './ambient.js';
+import { createFleet, buildLoop, cornerSpeed, usable, nodesBySquare, seed, rng, catchUp } from './ambient.js';
 
 export const COUNT = { low: 6, mid: 12, high: 20 };
 const MODEL = 'suv';
@@ -42,12 +42,7 @@ export function createTraffic({ scene, models, autopilot, solids, slug, T, toRD,
   });
   fleet.setCount(count);
   autopilot.local.graph().then(g => {
-    graph = g; nodes = new Map();   // the car-usable road nodes of each map square, for the fleet
-    for (let n = 0; n < g.xs.length; n++) {
-      if (!usable(g, n, 4)) continue;
-      const [X, Y] = toRD(g.xs[n], g.zs[n]), key = Math.floor(X / T) + '_' + Math.floor(Y / T);
-      (nodes.get(key) || nodes.set(key, []).get(key)).push(n);
-    }
+    graph = g; nodes = nodesBySquare(g, toRD, T, n => usable(g, n, 4));   // the car-usable road nodes of each map square, for the fleet
   }).catch(e => console.warn('traffic: no road graph', e));
 
   // ---------- the pool ----------

@@ -15,6 +15,7 @@
 //   homes.connect(presence) once multiplayer is up
 //   homes.inside            true while you are at home
 import * as THREE from 'three';
+import { squareKey } from './grid.js';
 
 const NEAR = 2.2;            // metres from a door to knock or go in
 const POOL = 14;             // real doors around you
@@ -50,7 +51,7 @@ export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note,
     return out.sort((a, b) => a.dist - b.dist);
   }
   // a door's name in its square (for the pool), and in the world (RD metres, for knock rooms and the saved home)
-  const keyOf = d => d.tile.i + '_' + d.tile.j + ':' + d.n;
+  const keyOf = d => squareKey(d.tile.i, d.tile.j) + ':' + d.n;
   const idOf = d => { const [X, Y] = toRD(d.x, d.z); return Math.round(X) + ',' + Math.round(Y); };
   // is this door your own front door?
   const mine = d => { const h = homeDoor(); return !!h && Math.hypot(h.x - d.x, h.z - d.z) < 0.5; };
@@ -124,7 +125,7 @@ export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note,
     note(`🚪 You knock at ${label}…`);
     const id = idOf(d); let k = knocks.get(id);
     if (!k) {
-      k = { ch: presence.channel('home:' + id), timer: 0, answered: false }; knocks.set(id, k);
+      k = { ch: presence.room('home:' + id, { role: 'guest' }), timer: 0, answered: false }; knocks.set(id, k);   // a room (mp/room.js)
       k.ch.onMessage(m => {
         if (!m || typeof m !== 'object') return;
         const who = String(m.name || 'Someone').slice(0, 40);
@@ -147,7 +148,7 @@ export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note,
   function listen() {
     myRoom?.leave(); myRoom = null;
     if (!home || !presence) return;
-    myRoom = presence.channel('home:' + home.id);
+    myRoom = presence.room('home:' + home.id, { role: 'host' });   // the residents host their door's room
     myRoom.onMessage((m, from) => {
       if (m?.t !== 'knock') return;
       const who = String(m.name || 'Someone').slice(0, 40);

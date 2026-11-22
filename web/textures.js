@@ -2,9 +2,9 @@
 // Ground texture sizes all divide 500 m, so patterns continue seamlessly across square borders.
 import * as THREE from 'three';
 
-const PX = 128; // texture pixels per metre
+import { rng } from './ambient.js';   // the game's one seeded PRNG
 
-export function rng(seed) { let s = seed >>> 0 || 1; return () => ((s = Math.imul(s ^ (s >>> 15), 2246822519) ^ Math.imul(s ^ (s >>> 13), 3266489917)) >>> 0) / 4294967296; }
+const PX = 128; // texture pixels per metre
 
 function canvasTex(wm, hm, draw, renderer, px = PX) {
   const c = document.createElement('canvas'); c.width = Math.round(wm * px); c.height = Math.round(hm * px);

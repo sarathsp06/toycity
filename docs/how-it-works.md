@@ -212,7 +212,7 @@ There are two kinds of solid, and one question: "does a circle of radius r at (x
   unloads. Other players are a *live* source: a function asked on every test, because they move.
   Footprints sit in an 8 m grid, so a test looks at a handful of cells, not thousands of cars.
 
-`blocked()` in `city.js` asks the bitmap, then the registry. Flying ignores both.
+`blocked()` in `web/walker.js` asks the bitmap, then the registry. Flying ignores the registry.
 
 **Lesson:** one list of shapes and one test. Making a new kind of thing solid is one line in
 `FOOTPRINTS`, not another special case in the movement code.
@@ -268,6 +268,38 @@ you step through and others stop seeing you; "Step outside", or answering a knoc
 From the driver's seat (`V` while driving) the camera's near plane drops from 0.5 m to 6 cm and
 the lens widens, so the dashboard and steering wheel aren't clipped away; the car you drive gets
 nearly clear glass and a lighter cabin trim, and its interior is exported at higher detail.
+
+### Four small modules under the player
+
+`city.js` streams the world and runs the frame loop; four modules behind it each hide one thing that
+used to be spelled out by hand in many places. Each has no three.js in it, so `tests/` runs them in node.
+
+- **Player mode** (`web/player.js`). The player's state lives in nine places (the car, a ride along,
+  flying, swimming, being knocked over, the jump, a front door, home, health). `createPlayerMode()`
+  reads them through getters and answers the questions: `mode` (`foot`, `swim`, `car`, `bike`,
+  `passenger`, `fly`, `flung`, `down`, `door`, `home`, in the order the frame loop asks), `can('jump' |
+  'swim' | 'car' | 'walk' | 'hit' | 'door')`, `seated`, `onFoot`, `pose` (the number others see,
+  0 to 6, unchanged on the wire) and `halt()`, the stop-walking-and-drop-the-jump every change of mode
+  starts with. The Space key, the touch button and an agent used to disagree on when you may jump
+  (riding along, or swimming); now there is one answer. `FALL_DOWN`, the fall clip's moment of
+  hitting the ground, is exported here for everyone who plays that clip.
+- **Grid** (`web/grid.js`). `createGrid(ORX, ORY, T)` turns scene coordinates into RD metres and back,
+  names squares (`"i_j"`, from scene or RD points) and finds the bit of a 0.5 m cell in a square's
+  1000 × 1000 bitmap (`cellBit`, with `getBit`/`setBit`). Collision, hedges and water all use it;
+  `blockedAt` keeps its one-square cache.
+- **Walker** (`web/walker.js`). Walking takes one predicate, `blockedAt(x, z, h)` (feet `h` metres up,
+  so a jump clears a hedge), plus the solids registry: `blocked` (a 0.3 m cross of probes; while
+  swimming, water is open), `lineClear`, `localPath` (A* over a 0.5 m grid, then the string pulled
+  straight) and the jump (`startJump`, `stepJump`: crouch, air, land, on a hedge's top at 1.0 m).
+  The tests give it a fake bitmap: a way round a wall, no way into a walled yard, landing on a hedge.
+- **Parked cars** (`web/parked.js`). The squares list parked cars as 6 floats each; a car is known by
+  `"i_j:k"` so a car driven away, or dented, stays so when its square reloads. One module owns the
+  keys and the taken and dented state: `city.js` asks it what to draw (`isGone`, `stamp`), `vehicle.js`
+  asks it which car is nearest, where an empty spot is and which square a key belongs to.
+
+The ambient life, the birds and the textures share one seeded generator and hash (`rng`, `seed` in
+`web/ambient.js`), and the traffic and the people share one way of filing road nodes by square
+(`nodesBySquare`).
 
 ## 10. Phones
 

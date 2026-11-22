@@ -17,13 +17,13 @@
 import * as THREE from 'three';
 import { loadAvatar, poseLayer, randomLook } from './avatar.js';
 import { PERSON } from './solids.js';
-import { createFleet, buildLoop, usable, seed, rng, catchUp } from './ambient.js';
+import { createFleet, buildLoop, usable, nodesBySquare, seed, rng, catchUp } from './ambient.js';
+import { FALL_DOWN } from './player.js';
 
 export const COUNT = { low: 6, mid: 12, high: 20 };
 const RADIUS = 170;          // metres: seen within, dropped beyond
 const NEAR = 60;             // metres: animated every frame within this, every 0.2 s beyond
 const PAVEMENT = 4.8;        // metres right of the street's centre line (past a parked car or a cycle lane)
-const FALL_DOWN = 0.93;      // the fall clip's moment of hitting the ground (city.js uses the same)
 const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
 const base = new URL('./', import.meta.url);
 
@@ -43,14 +43,9 @@ export function createPeds({ scene, solids, autopilot, slug, T, toRD, others = (
   });
   fleet.setCount(count);
   autopilot.local.graph().then(g => {
-    graph = g; nodes = new Map();   // the road nodes of each map square, where streets have pavements
-    for (let n = 0; n < g.xs.length; n++) {
-      if (!usable(g, n, 4)) continue;
-      const o = g.out[n]; let slow = true; for (let k = 1; k < o.length; k += 2) if (o[k] >> 4 > 50) slow = false;
-      if (!slow) continue;
-      const [X, Y] = toRD(g.xs[n], g.zs[n]), key = Math.floor(X / T) + '_' + Math.floor(Y / T);
-      (nodes.get(key) || nodes.set(key, []).get(key)).push(n);
-    }
+    // the road nodes of each map square, where streets have pavements (nothing over 50 km/h meets there)
+    const slow = n => { const o = g.out[n]; for (let k = 1; k < o.length; k += 2) if (o[k] >> 4 > 50) return false; return true; };
+    graph = g; nodes = nodesBySquare(g, toRD, T, n => usable(g, n, 4) && slow(n));
   }).catch(e => console.warn('peds: no road graph', e));
 
   // ---------- the pool: one body per slot, made one at a time ----------

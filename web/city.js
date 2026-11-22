@@ -10,8 +10,14 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import * as BU from 'three/addons/utils/BufferGeometryUtils.js';
 import * as TX from './textures.js';
 import { loadAvatar, myLook, poseLayer } from './avatar.js';
-import { createSolids, footprintsOf, PERSON } from './solids.js';
-import { createDriving, makeCar, carKey, footprintOf, FRONT, PASSENGER, seatLocal } from './vehicle.js';
+import { createSolids, footprintsOf } from './solids.js';
+import { createDriving, makeCar, footprintOf, FRONT, PASSENGER, seatLocal } from './vehicle.js';
+import { createParked } from './parked.js';
+import { createGrid, squareKey, getBit, setBit, newBitmap, SIDE } from './grid.js';
+import { createPlayerMode, FALL_DOWN } from './player.js';
+import { POSE, isPassenger, carModel } from './mp/state.js';
+import { createWalker } from './walker.js';
+import { rng } from './ambient.js';
 import { createAutopilot } from './autopilot.js';
 import { createTraffic, COUNT as TRAFFIC_N } from './traffic.js';
 import { createPeds, COUNT as PEDS_N } from './peds.js';
@@ -41,7 +47,7 @@ progress(0.05, 'Reading the map');
 const info = await (await fetch(new URL('tiles.json', base))).json();
 if (spot) { info.title = spot.name; if (spot.start) info.start = spot.start; }
 const T = info.tile, QQ = info.quant;
-const HAVE = new Set(info.squares.map(([i, j]) => i + '_' + j));
+const HAVE = new Set(info.squares.map(([i, j]) => squareKey(i, j)));
 const CHARS = '0123456789abcdefghijklmnopqrstuvwxyz-/ ';
 document.getElementById('title').textContent = info.title;
 document.title = 'Toy City · ' + info.title;
@@ -51,7 +57,7 @@ document.title = 'Toy City · ' + info.title;
 const sx = info.start ? info.start.x : info.squares.reduce((s, [i]) => s + (i + 0.5) * T, 0) / info.squares.length;
 const sy = info.start ? info.start.y : info.squares.reduce((s, [, j]) => s + (j + 0.5) * T, 0) / info.squares.length;
 const ORX = Math.round(sx), ORY = Math.round(sy);
-const toRD = (x, z) => [x + ORX, ORY - z];
+const grid = createGrid(ORX, ORY, T), { toRD, fromRD } = grid;   // RD metres, square keys, 0.5 m bitmaps (grid.js)
 
 // ---------- quality presets ----------
 const QUALITY = {
@@ -162,7 +168,7 @@ const NO_SHADOW_CAST = new Set(['water', 'plates']);
 const SHAPES = {};
 {
   const trunk = new THREE.CylinderGeometry(0.14, 0.22, 3.2, 7).translate(0, 1.6, 0);
-  const parts = [], r = TX.rng(11);
+  const parts = [], r = rng(11);
   for (const [ox, oy, oz, rad] of [[0, 4.6, 0, 1.9], [0.9, 4.0, 0.5, 1.4], [-0.8, 4.1, -0.4, 1.5], [0.2, 5.6, -0.3, 1.3], [-0.3, 3.8, 0.9, 1.2]]) {
     const g = new THREE.IcosahedronGeometry(rad, 1), p = g.attributes.position, seed = r() * 100;
     for (let i = 0; i < p.count; i++) { const x = p.getX(i), y = p.getY(i), z = p.getZ(i); const k = 0.88 + 0.12 * Math.sin(x * 3.1 + seed) * Math.cos(z * 2.7 - seed) + 0.06 * Math.sin(y * 4.3 + seed * 2); p.setXYZ(i, x * k + ox, y * k * 0.9 + oy, z * k + oz); }
@@ -271,7 +277,7 @@ function carModelAt(x, z) {
   for (const c of CAR_MODELS) { if ((r -= c.w) < 0) return c; }
   return CAR_MODELS[0];
 }
-const carTiles = new Set();
+const parked = createParked();   // the squares' parked cars, and which are taken or dented (parked.js)
 const CAR_SPHERE = new THREE.Sphere(new THREE.Vector3(T / 2, 0, -T / 2), T * 0.75);   // the whole square: never recomputed
 function carMeshes(tile, parts, n) {
   return parts.map(([geo, mat, role]) => {
@@ -283,16 +289,15 @@ function carMeshes(tile, parts, n) {
 function carInstances(tile, data) {
   const fps = footprintsOf('car', data, tile.group.position);
   if (CAR_MODELS.length) fps.forEach((f, n) => { const m = carModelAt(data[n * 6], data[n * 6 + 2]).name; if (m === 'bike') Object.assign(f, footprintOf(m, f.x, f.z, f.yaw)); });
-  tile.carFps = fps; fps.forEach((f, n) => { if (driving?.taken.has(tile.i + '_' + tile.j + ':' + n * 6)) f.off = true; });
+  parked.footprints(tile, fps);   // a car someone drove off stays off
   solids.add(tile, fps);
   if (!CAR_MODELS.length) return shapeInstances(tile, 'car', data);   // no models: the simple box car
   const cars = [];
   for (let k = 0; k < data.length; k += 6) cars.push({ k, model: carModelAt(data[k], data[k + 2]) });
   const byModel = new Map();
   for (const c of cars) (byModel.get(c.model) || byModel.set(c.model, []).get(c.model)).push(c);
-  tile.cars = { data, groups: [], box: carMeshes(tile, SHAPES.car, cars.length), all: cars };
+  parked.add(tile, { data, groups: [], box: carMeshes(tile, SHAPES.car, cars.length), all: cars });
   for (const [model, list] of byModel) tile.cars.groups.push({ list, hi: carMeshes(tile, model.hi, list.length), lo: carMeshes(tile, model.lo, list.length) });
-  carTiles.add(tile);
   updateCars(tile);
 }
 const carCol = new THREE.Color();
@@ -311,14 +316,14 @@ function updateCars(tile) {
   const c = tile.cars, { data, groups, box, all } = c, ox = tile.group.position.x, oz = tile.group.position.z;
   const px = player.position.x - ox, pz = player.position.z - oz;
   const far = Math.hypot(Math.max(-px, 0, px - T), Math.max(-T - pz, 0, pz)) > CAR_MID;
-  const gone = driving && (driving.taken.size || driving.dented.size), stamp = gone ? driving.taken.size * 65536 + driving.dented.size : 0;
+  const stamp = parked.stamp;
   if (far && c.far && c.stamp === stamp) return false;
   let same = c.lv !== undefined;
   const lv = c.lv ||= new Uint8Array(all.length);
   for (const { k } of all) {
     let l = 3;
     if (!far) { const d = Math.hypot(data[k] - px, data[k + 2] - pz); l = d < CAR_NEAR ? 1 : d < CAR_MID ? 2 : 3; }
-    if (gone && (driving.taken.has(carKey(tile, k)) || driving.dented.has(carKey(tile, k)))) l = 0;
+    if (parked.isGone(tile, k)) l = 0;
     if (lv[k / 6] !== l) { lv[k / 6] = l; same = false; }
   }
   c.far = far; c.stamp = stamp;
@@ -342,7 +347,7 @@ const solids = createSolids();   // cars, trees, lamps, furniture and other play
 let driving = null;              // set up once the player exists (see 'driving' below)
 function instances(tile, name, data) {
   // cars wait for their models; by then the square may have gone again (the player moved on)
-  if (name === 'car') { carsReady.then(() => { if (tiles.get(tile.i + '_' + tile.j) === tile) carInstances(tile, data); }); return; }
+  if (name === 'car') { carsReady.then(() => { if (tiles.get(squareKey(tile.i, tile.j)) === tile) carInstances(tile, data); }); return; }
   solids.add(tile, footprintsOf(name, data, tile.group.position));
   if (name === 'tree') tile.trees = data;   // kept for the background sounds (more trees, more birds)
   shapeInstances(tile, name, data);
@@ -430,7 +435,7 @@ function requestSquare(key, level) {
 
 function disposeTile(t) {
   if (!t) return;
-  carTiles.delete(t); solids.drop(t); birds.drop(t); homes.release(t); driving?.release?.(t);
+  parked.drop(t); solids.drop(t); birds.drop(t); homes.release(t); driving?.release?.(t);
   // the ground plane and the sprites' geometry are shared by every square: those stay
   t.group.traverse(o => { if (o.isMesh && !o.isInstancedMesh && !o.userData.ground) o.geometry.dispose(); if (o.isInstancedMesh) { o.dispose(); pools.delete(o); } });
   for (const tx of t.textures) tx.dispose();
@@ -528,7 +533,7 @@ function updateOverview(X, Y) {
   if (!OV) return;
   const S = OV.size;
   for (const [oi, oj] of OV.tiles) {
-    const key = oi + '_' + oj, d = Math.hypot(Math.max(oi * S - X, 0, X - (oi + 1) * S), Math.max(oj * S - Y, 0, Y - (oj + 1) * S));
+    const key = squareKey(oi, oj), d = Math.hypot(Math.max(oi * S - X, 0, X - (oi + 1) * S), Math.max(oj * S - Y, 0, Y - (oj + 1) * S));
     const have = ovTiles.get(key);
     if (d > Q.horizon + 500) { if (have && have !== 'loading') { scene.remove(have.group); have.mesh.geometry.dispose(); have.mat.dispose(); have.groundMat.dispose(); have.tex.dispose(); ovTiles.delete(key); } continue; }
     if (have) continue;
@@ -560,7 +565,7 @@ function updateOverview(X, Y) {
 // hide the blocks of every square that has its own geometry loaded
 function maskOverview(t) {
   let m = 0;
-  for (let b = 0; b < OV.n; b++) for (let a = 0; a < OV.n; a++) if (tiles.has((t.oi * OV.n + a) + '_' + (t.oj * OV.n + b))) m |= 1 << (a + b * OV.n);
+  for (let b = 0; b < OV.n; b++) for (let a = 0; a < OV.n; a++) if (tiles.has(squareKey(t.oi * OV.n + a, t.oj * OV.n + b))) m |= 1 << (a + b * OV.n);
   t.uniforms.uHide.value = m;
 }
 function maskOverviews() { for (const t of ovTiles.values()) if (t !== 'loading') maskOverview(t); }
@@ -585,7 +590,7 @@ function updateWanted() {
   const R = Math.ceil((Q.far + KEEP * 2 + speed * AHEAD_S) / T) + 1, ci = Math.floor(X / T), cj = Math.floor(Y / T);
   const next = new Map(), score = new Map();
   for (let i = ci - R; i <= ci + R; i++) for (let j = cj - R; j <= cj + R; j++) {
-    const key = i + '_' + j; if (!HAVE.has(key)) continue;
+    const key = squareKey(i, j); if (!HAVE.has(key)) continue;
     const d = rectDist(i, j, X, Y);
     // distance to the path ahead (sampled in 25 m steps), and how soon the player gets near it:
     // metres still to travel plus the distance from there
@@ -668,7 +673,7 @@ function animateAvatar(dt, moved) {
 function pickPose() {
   const P = avatar.pose;
   if (driving.rider) return P.set('drive');
-  if (driving.driving || ride) return P.set(null);   // inside a car: not seen
+  if (you.seated) return P.set(null);   // inside a car: not seen
   if (fling.on || homes.busy) return;
   if (swim.on) return P.set(avatar.speed > 0.25 ? 'swim' : 'swim_idle', { fade: 0.3 });
   if (jump.phase === 'crouch') return P.set('jump_start', { once: true });
@@ -727,7 +732,7 @@ if (matchMedia('(pointer: coarse)').matches || params.get('touch')) {
   pad.addEventListener('pointerdown', e => { e.preventDefault(); joy.id = e.pointerId; try { pad.setPointerCapture(e.pointerId); } catch { /* synthetic or already released */ } move(e); });
   pad.addEventListener('pointermove', e => { if (e.pointerId === joy.id) move(e); });
   pad.addEventListener('pointerup', end); pad.addEventListener('pointercancel', end);
-  document.getElementById('jumpbtn').addEventListener('pointerdown', e => { e.preventDefault(); if (!jump.phase && !fly && !driving.driving && !swim.on) { jump.phase = 'crouch'; jump.t = 0; } });
+  document.getElementById('jumpbtn').addEventListener('pointerdown', e => { e.preventDefault(); if (you.can('jump')) walker.startJump(); });
 }
 function zoomBy(f) {
   if (fly) { const off = camera.position.clone().sub(orbit.target).multiplyScalar(f); if (off.length() > 8 && off.length() < 2500) camera.position.copy(orbit.target).add(off); }
@@ -744,10 +749,10 @@ function note(text) {
   h.textContent = text; h.classList.remove('gone'); clearTimeout(note.t); note.t = setTimeout(() => h.classList.add('gone'), 4500);
 }
 // ---------- front doors and homes (home.js) ----------
-const homes = createHomes({ scene, player, tiles, T, toRD, fromRD: (X, Y) => [X - ORX, ORY - Y], slug, note, loader: new GLTFLoader(),
+const homes = createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note, loader: new GLTFLoader(),
   look: y => { yaw = y; pitch = Math.min(pitch, 0.35); dist = Math.max(6, Math.min(dist, 12)); },
   onKnock: () => avatar.pose?.set('knock', { once: true }) });
-driving = createDriving({ scene, player, models: CAR_MODELS, carTiles, solids, ground: (x, z) => blockedAt(x, z), note, onHitPerson: hitPerson, onBumpCar: (x, z) => traffic?.bumped(x, z) });
+driving = createDriving({ scene, player, models: CAR_MODELS, parked, solids, ground: (x, z) => blockedAt(x, z), note, onHitPerson: hitPerson, onBumpCar: (x, z) => traffic?.bumped(x, z) });
 
 // ---------- knocking people over, and the card you get for it ----------
 // Drive into someone and they go flying (their own game plays it: see knockDown). The driver gets a card
@@ -771,7 +776,7 @@ function showCard(group, level, y) {
   if (level) { const sp = cardSprite(level); sp.position.y = y; group.add(sp); }
 }
 function hitPerson(id, vx, vz) {
-  const p = window.__city.social?.presence.peers.get(id);
+  const p = social?.presence.peers.get(id);
   if (!peds?.hit(id, vx, vz)) social?.presence.sendTo(id, { t: 'hit', vx, vz, by: social.presence.name });   // one of the town's people, or a player
   card.level = Math.min(2, card.level + 1); card.t = CARD_FOR;
   note(card.level > 1 ? `🟥 Red card! You hit ${p?.name || 'someone'} again. Everyone can see it.` : `🟨 Yellow card: you hit ${p?.name || 'someone'}. Drive carefully.`);
@@ -792,7 +797,7 @@ function showHealth() {
   document.body.classList.toggle('ko', health.out > 0);
 }
 function knockDown({ vx, vz, by }) {
-  if (driving.driving || ride || fly) return;
+  if (!you.can('hit')) return;   // in a car, or flying
   const who = typeof by === 'string' && by ? by.slice(0, 40) : 'Someone';
   if (!health.out && performance.now() - health.hitT > 400) {   // one hit counts once, even if the car lingers
     health.hitT = performance.now();
@@ -803,15 +808,14 @@ function knockDown({ vx, vz, by }) {
   if (fling.on) return;
   const sp = Math.min(14, Math.hypot(vx, vz) || 3), k = sp / (Math.hypot(vx, vz) || 1);
   Object.assign(fling, { on: true, vx: vx * k * 0.7, vz: vz * k * 0.7, vy: 3 + sp * 0.35, h: 0, down: 0 });
-  goal = null; marker.visible = false; jump.phase = null; jump.h = 0;
+  you.halt();
   avatar.pose?.set('hit', { once: true });
   const f = document.getElementById('ouch'); if (f) { f.classList.remove('on'); void f.offsetWidth; f.classList.add('on'); }
   if (!health.out) note(`🤕 Ouch! ${who} ran you over. Health ${Math.round(health.hp)}/${HEALTH}.`);
 }
 // one frame of flying or lying down; returns true while it runs (no walking meanwhile).
 // The clips: the hit's flinch, then the fall (its body collapses backwards over 0.93 s and lies flat
-// from 1.4 s; landing jumps to the moment it hits the ground), and sit_exit to get up again.
-const FALL_DOWN = 0.93;
+// from 1.4 s; landing jumps to the moment it hits the ground, FALL_DOWN), and sit_exit to get up again.
 function flingStep(dt) {
   if (!fling.on) return false;
   const P = avatar.pose;
@@ -839,10 +843,10 @@ let walkDist = dist;
 // Others see you as "ride:0" (hidden, you are inside the car). The driver's own game does the driving.
 let ride = null;   // the peer whose car you are in
 function driverNear() {
-  const peers = window.__city?.social?.presence?.peers; if (!peers) return null;
+  const peers = social?.presence?.peers; if (!peers) return null;
   let best = null, bd = 4;
   for (const p of peers.values()) {
-    if (!p.car || p.car.startsWith('ride') || !p.player) continue;
+    if (!p.car || isPassenger(p.car) || !p.player) continue;
     const g = p.player.group.position, d = Math.hypot(g.x - player.position.x, g.z - player.position.z);
     if (d < bd) { bd = d; best = p; }
   }
@@ -850,7 +854,7 @@ function driverNear() {
 }
 // the passenger seat: beside the driver (front right), or behind the rider on a motorbike
 function seat(p, out) {
-  const [name] = p.car.split(':'), g = p.player.group, h = g.rotation.y;
+  const name = carModel(p.car), g = p.player.group, h = g.rotation.y;
   const [along, across] = PASSENGER[name] || PASSENGER.suv, [lx, lz] = seatLocal(name, along, -across);   // left of the driver
   return out.set(g.position.x + lx * Math.cos(h) + lz * Math.sin(h), 0.15, g.position.z - lx * Math.sin(h) + lz * Math.cos(h));
 }
@@ -867,7 +871,7 @@ function toggleCar() {
     // a friend driving within reach wins over any parked car: they are waiting for you
     const d = driverNear();
     if (d) {
-      goal = null; marker.visible = false; jump.phase = null; jump.h = 0;
+      you.halt();
       ride = d; walkDist = dist; dist = Math.max(dist, 10); note('🚗 Riding along with ' + (d.name || 'a friend') + '. E to get out.');
       carBtn(true); return;
     }
@@ -878,23 +882,23 @@ function toggleCar() {
     player.position.x = spot.x; player.position.z = spot.z; dist = walkDist; needUnstick = false;
   } else {
     const car = driving.nearest(player.position); if (!car) return;
-    goal = null; marker.visible = false; jump.phase = null; jump.h = 0;
+    you.halt();
     driving.enter(car); walkDist = dist; dist = Math.max(dist, 10); pitch = firstPerson ? 0.5 : Math.min(pitch, 0.35);
   }
-  for (const t of carTiles) updateCars(t);
+  for (const t of parked.tiles) updateCars(t);
   shadowDirty = true; carBtn(true); apBtn();
 }
 const carButton = document.getElementById('carbtn');
 const btnAt = { x: NaN, z: NaN, mode: '' };   // where, and in what, the player was at the last look at the parked cars
 function carBtn(force) {
   if (!carButton) return;
-  const p = player.position, friend = !driving.driving && !ride && !fly && driverNear();
-  const mode = (driving.driving ? 'd' : '') + (ride ? 'r' : '') + (fly ? 'f' : '') + (friend ? 'p' : '');
+  const p = player.position, friend = you.onFoot && driverNear();
+  const mode = you.mode + (friend ? '+friend' : '');
   if (!force && mode === btnAt.mode && Math.hypot(p.x - btnAt.x, p.z - btnAt.z) < 0.5) return;
   btnAt.x = p.x; btnAt.z = p.z; btnAt.mode = mode;
-  const near = !driving.driving && !ride && !fly && driving.nearest(p);
-  const hidden = !driving.driving && !ride && !near && !friend;
-  const text = driving.driving || ride ? '🚶 Get out (E)' : friend ? '🙋 Ride along (E)' : '🚗 Get in (E)';
+  const near = you.onFoot && driving.nearest(p);
+  const hidden = !you.seated && !near && !friend;
+  const text = you.seated ? '🚶 Get out (E)' : friend ? '🙋 Ride along (E)' : '🚗 Get in (E)';
   if (carButton.hidden !== hidden) carButton.hidden = hidden;
   if (carButton.textContent !== text) carButton.textContent = text;
 }
@@ -905,10 +909,10 @@ carButton?.addEventListener('click', e => { e.stopPropagation(); toggleCar(); })
 // out takes the wheel back.
 const autopilot = createAutopilot({
   // ?v: the segments carry direction, vehicle and speed flags now; a cached older file would not parse
-  roadsUrl: new URL('roads.json?v=2', base).href, fromRD: (X, Y) => [X - ORX, ORY - Y],
+  roadsUrl: new URL('roads.json?v=2', base).href, fromRD,
   fromWGS: (la, lo) => { const [X, Y] = wgsToRd(la, lo); return [X - ORX, ORY - Y]; },
   toWGS: (x, z) => rdToWgs(...toRD(x, z)),
-  inside: (x, z) => { const [X, Y] = toRD(x, z); return HAVE.has(Math.floor(X / T) + '_' + Math.floor(Y / T)); },
+  inside: (x, z) => HAVE.has(grid.keyAt(x, z)),
 });
 // ---------- ambient life: cars on the streets and people on the pavements (traffic.js, peds.js) ----------
 // The same for everyone: fixed loops on the road graph, timed by the wall clock (see ambient.js).
@@ -922,7 +926,7 @@ function others() {
   othersList.length = 0;
   const peers = social?.presence?.peers; if (!peers) return othersList;
   for (const q of peers.values()) {
-    const g = q.player?.group; if (!g || !g.visible || q.car?.startsWith('ride')) continue;
+    const g = q.player?.group; if (!g || !g.visible || (q.car && isPassenger(q.car))) continue;
     othersList.push({ x: g.position.x, z: g.position.z, inCar: !!q.car });
   }
   return othersList;
@@ -946,7 +950,7 @@ setTraffic(trafficOn);
 const radio = createRadio();
 mountRadio(document.body, radio);
 // ---------- finding someone: a route line to another player (nav.js) ----------
-const nav = createNav({ scene, player, driving, autopilot, walksUrl: new URL('walks.json', base), fromRD: (X, Y) => [X - ORX, ORY - Y], heading: () => yaw, note });
+const nav = createNav({ scene, player, driving, autopilot, walksUrl: new URL('walks.json', base), fromRD, heading: () => yaw, note });
 mountNav(document.getElementById('nav'), nav);
 const apButton = document.getElementById('apbtn'), apForm = document.getElementById('apform'), apInput = document.getElementById('apq');
 async function autoTo(x, z, label) {
@@ -988,14 +992,14 @@ const keys = {};
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
   keys[e.key.toLowerCase()] = true;
-  if (e.key.toLowerCase() === 'e' && !e.repeat && !homes.inside && !homes.busy && !swim.on) toggleCar();
+  if (e.key.toLowerCase() === 'e' && !e.repeat && you.can('car')) toggleCar();
   if (e.key.toLowerCase() === 'g' && !e.repeat && !swim.on) startSwim();
   if (e.key.toLowerCase() === 'f') { if (driving.driving) toggleCar(); toggleFly(); }
   if (e.key.toLowerCase() === 'v') setFirstPerson(!firstPerson);
   if (e.key.toLowerCase() === 'm') toggleMap();
   if (e.key === '-' || e.key === '_') zoomBy(1.6); if (e.key === '=' || e.key === '+') zoomBy(1 / 1.6);
   if (e.key.startsWith('Arrow')) e.preventDefault();
-  if (e.key === ' ') { e.preventDefault(); if (!jump.phase && !fly && !driving.driving && !swim.on) { jump.phase = 'crouch'; jump.t = 0; } }
+  if (e.key === ' ') { e.preventDefault(); if (you.can('jump')) walker.startJump(); }
 });
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 function toggleFly() { fly = !fly; orbit.enabled = fly; if (fly) orbit.target.copy(player.position); }
@@ -1003,6 +1007,7 @@ function toggleFly() { fly = !fly; orbit.enabled = fly; if (fly) orbit.target.co
 // click (not drag) to walk somewhere; in fly mode, drop in at the spot
 const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
 let goal = null;
+function stopWalk() { goal = detour = null; marker.visible = false; }   // the click-to-go goal (and any way round it) is dropped
 // ?agent=1: an AI agent plays (tools/mcp). It moves only through what a person can do, at a person's speed:
 // walking or running to a point, the car and its autopilot, doors. It cannot jump to a place once in.
 const AGENT = params.get('agent') === '1' ? { run: false, draw: 0 } : null;
@@ -1024,25 +1029,24 @@ renderer.domElement.addEventListener('pointerup', e => {
   } else { const t = -ray.ray.origin.y / ray.ray.direction.y; if (!(t > 0)) return; pt = ray.ray.at(t, new THREE.Vector3()); }
   pt.y = 0.15;
   if (driving.driving) return;
-  if (fly) { toggleFly(); yaw = Math.atan2(camera.position.x - pt.x, camera.position.z - pt.z); player.position.copy(pt); goal = null; marker.visible = false; return; }
+  if (fly) { toggleFly(); yaw = Math.atan2(camera.position.x - pt.x, camera.position.z - pt.z); player.position.copy(pt); stopWalk(); return; }
   goal = pt; marker.position.set(pt.x, 0.35, pt.z); marker.visible = true;
 });
 
-// collision against the pre-built 0.5 m bitmaps of loaded near squares
-// coll always blocks (walls, water, fences, tree trunks, lamp posts); low (hedges) blocks only on foot
+// collision against the pre-built 0.5 m bitmaps of loaded near squares (grid.js has the layout)
+// coll always blocks (walls, water, fences, tree trunks, lamp posts); low (hedges) only feet below h = 0.5 m
 const bAt = { i: NaN, j: NaN, rev: -1, t: null };   // the square blockedAt last looked in (most tests stay in one)
-function blockedAt(x, z) {
+function blockedAt(x, z, h = 0) {
   const X = x + ORX, Y = ORY - z, i = Math.floor(X / T), j = Math.floor(Y / T);
-  if (i !== bAt.i || j !== bAt.j || bAt.rev !== tilesRev) { bAt.i = i; bAt.j = j; bAt.rev = tilesRev; bAt.t = tiles.get(i + '_' + j) || null; }
+  if (i !== bAt.i || j !== bAt.j || bAt.rev !== tilesRev) { bAt.i = i; bAt.j = j; bAt.rev = tilesRev; bAt.t = tiles.get(squareKey(i, j)) || null; }
   const t = bAt.t;
   if (!t || !t.coll) return false;
-  const col = Math.floor((X - i * T) / 0.5), row = Math.floor((Y - j * T) / 0.5), bit = row * 1000 + col;
-  if ((t.coll[bit >> 3] >> (bit & 7)) & 1) return true;
-  return jump.h < 0.5 && t.low && ((t.low[bit >> 3] >> (bit & 7)) & 1);
+  const bit = grid.cellBit(X, Y, i, j);
+  return getBit(t.coll, bit) === 1 || (h < 0.5 && !!t.low && getBit(t.low, bit) === 1);
 }
 // ---------- water you can swim in: a 0.5 m bitmap per near square, like coll, from its water triangles ----------
 function wetMask(tile, xz, idx) {
-  const bits = new Uint8Array(125000), ox = tile.i * T, oy = tile.j * T;
+  const bits = newBitmap(), ox = tile.i * T, oy = tile.j * T;
   for (let t = 0; t < idx.length; t += 3) {
     // the triangle in the square's own RD metres (X east, Y north from its corner)
     const P = [0, 1, 2].map(k => [xz[2 * idx[t + k]] + ORX - ox, ORY - xz[2 * idx[t + k] + 1] - oy]);
@@ -1052,16 +1056,15 @@ function wetMask(tile, xz, idx) {
     for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
       const x = c * 0.5 + 0.25, y = r * 0.5 + 0.25;
       const u = ((by - cy) * (x - cx) + (cx - bx) * (y - cy)) / d, v = ((cy - ay) * (x - cx) + (ax - cx) * (y - cy)) / d;
-      if (u >= -1e-6 && v >= -1e-6 && u + v <= 1 + 1e-6) { const bit = r * 1000 + c; bits[bit >> 3] |= 1 << (bit & 7); }
+      if (u >= -1e-6 && v >= -1e-6 && u + v <= 1 + 1e-6) setBit(bits, r * SIDE + c);
     }
   }
   return bits;
 }
 function wetAt(x, z) {   // the water level there, or null on dry land
-  const X = x + ORX, Y = ORY - z, i = Math.floor(X / T), j = Math.floor(Y / T), t = tiles.get(i + '_' + j);
+  const X = x + ORX, Y = ORY - z, i = Math.floor(X / T), j = Math.floor(Y / T), t = tiles.get(squareKey(i, j));
   if (!t || !t.wet) return null;
-  const bit = Math.floor((Y - j * T) / 0.5) * 1000 + Math.floor((X - i * T) / 0.5);
-  return (t.wet[bit >> 3] >> (bit & 7)) & 1 ? t.waterY : null;
+  return getBit(t.wet, grid.cellBit(X, Y, i, j)) ? t.waterY : null;
 }
 // Swimming: near the water a Swim button (or G) takes you in; you swim (W/A/S/D, click, Shift faster)
 // anywhere the water goes, and climb out by swimming onto the bank. Others see it too (pose 6).
@@ -1076,15 +1079,13 @@ function waterNear(r = 2.5) {   // the nearest swimmable spot within r metres, 0
   return null;
 }
 function startSwim() {
-  if (swim.on || driving.driving || ride || fly || homes.busy || homes.inside || fling.on) return;
+  if (!you.can('swim')) return;
   const w = waterNear(); if (!w) return;
-  player.position.x = w[0]; player.position.z = w[1]; goal = detour = null; marker.visible = false; jump.phase = null; jump.h = 0;
+  player.position.x = w[0]; player.position.z = w[1]; you.halt();
   swim.on = true; swim.y = wetAt(w[0], w[1]) ?? 0;
   note('🏊 Swimming. Swim onto the bank to climb out.'); swimBtn(true);
 }
 function stopSwim(say = true) { if (!swim.on) return; swim.on = false; if (say) note('💧 Out of the water.'); swimBtn(true); }
-// while swimming: water is open, dry land you may step onto ends the swim, walls stay walls
-const swimBlocked = (x, z) => [[0, 0], [R0, 0], [-R0, 0], [0, R0], [0, -R0]].some(([a, b]) => wetAt(x + a, z + b) === null && blockedAt(x + a, z + b));
 const swimButton = document.getElementById('swimbtn');
 const swimAt = { x: NaN, z: NaN, on: null };
 function swimBtn(force) {
@@ -1092,59 +1093,22 @@ function swimBtn(force) {
   const p = player.position;
   if (!force && swimAt.on === swim.on && Math.hypot(p.x - swimAt.x, p.z - swimAt.z) < 0.5) return;
   swimAt.x = p.x; swimAt.z = p.z; swimAt.on = swim.on;
-  const hidden = swim.on || driving.driving || !!ride || fly || homes.inside || !waterNear();
+  const hidden = !you.can('swim') || !waterNear();
   if (swimButton.hidden !== hidden) swimButton.hidden = hidden;
 }
 swimButton?.addEventListener('click', e => { e.stopPropagation(); startSwim(); });
-// jumping (Space): enough to clear a 1.1 m hedge; up to 1.3 m at the top of the arc
-const jump = { h: 0, v: 0, phase: null, t: 0 };   // phase: crouch -> air -> land -> null
-const GRAVITY = 14, JUMP_V = 6, CROUCH_T = 0.12, LAND_T = 0.16;
-const R0 = 0.3;
+// walking, bumping, jumping and finding a way round, over blockedAt (walker.js); while swimming, water is
+// open, dry land you may step onto ends the swim, walls stay walls
+const walker = createWalker({ blockedAt, wetAt, solids, swimming: () => swim.on, flying: () => fly });
+const { blocked, lineClear, localPath, jump } = walker;
+// what the player is doing, asked in one place (player.js): may I jump, swim, get in, walk, be hit?
+const you = createPlayerMode({ get driving() { return driving; }, get ride() { return ride; }, get fly() { return fly; }, swim, fling, jump, homes, health }, { stopWalk });
 let movedThisFrame = 0;
-const blocked = (x, z) => swim.on ? swimBlocked(x, z) : blockedAt(x, z) || blockedAt(x + R0, z) || blockedAt(x - R0, z) || blockedAt(x, z + R0) || blockedAt(x, z - R0)
-  || (!fly && solids.hit(x, z, PERSON.r));
 let stuck = 0, needUnstick = true;
 // An agent walks round what is in its way, as a person does: when the straight line to its goal is
 // blocked, a way is found over the 0.5 m collision grid (A*, within about 50 m) and pulled straight
 // where the view is clear; the points are walked one by one (detour). A few tries per goal, then it gives up.
 let detour = null, detourQ = [], detours = 0;
-const lineClear = (x0, z0, x1, z1) => { const n = Math.ceil(Math.hypot(x1 - x0, z1 - z0) / 0.4) || 1; for (let s = 1; s <= n; s++) if (blocked(x0 + (x1 - x0) * s / n, z0 + (z1 - z0) * s / n)) return false; return true; };
-function localPath(x0, z0, x1, z1) {
-  const S = 0.5, M = 16, minX = Math.min(x0, x1) - M, minZ = Math.min(z0, z1) - M;
-  const W = Math.min(240, Math.ceil((Math.abs(x1 - x0) + 2 * M) / S)), H = Math.min(240, Math.ceil((Math.abs(z1 - z0) + 2 * M) / S)), N = W * H;
-  const g = new Float32Array(N).fill(Infinity), from = new Int32Array(N).fill(-1), pass = new Int8Array(N), open = [];   // pass: 0 unknown, 1 clear, 2 blocked
-  const cell = (x, z) => Math.min(H - 1, Math.max(0, Math.round((z - minZ) / S))) * W + Math.min(W - 1, Math.max(0, Math.round((x - minX) / S)));
-  const wx = i => minX + (i % W) * S, wz = i => minZ + ((i / W) | 0) * S;
-  const ok = i => (pass[i] || (pass[i] = blocked(wx(i), wz(i)) ? 2 : 1)) === 1;
-  const a = cell(x0, z0); let b = cell(x1, z1);
-  if (!ok(b)) {   // the goal itself is in something: the nearest clear cell next to it
-    let best = -1, bd = 9; const bx = b % W, bz = (b / W) | 0;
-    for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) { const jx = bx + dx, jz = bz + dz; if (jx < 0 || jz < 0 || jx >= W || jz >= H) continue; const j = jz * W + jx, d = dx * dx + dz * dz; if (d < bd && ok(j)) { bd = d; best = j; } }
-    if (best < 0) return null; b = best;
-  }
-  const h = i => { const dx = Math.abs(i % W - b % W), dz = Math.abs(((i / W) | 0) - ((b / W) | 0)); return Math.max(dx, dz) + 0.414 * Math.min(dx, dz); };
-  const push = (f, i) => { open.push([f, i]); let k = open.length - 1; while (k) { const q = (k - 1) >> 1; if (open[q][0] <= open[k][0]) break; [open[q], open[k]] = [open[k], open[q]]; k = q; } };
-  const pop = () => { const top = open[0], last = open.pop(); if (open.length) { open[0] = last; let k = 0; for (;;) { const l = 2 * k + 1, r = l + 1; let m = k; if (l < open.length && open[l][0] < open[m][0]) m = l; if (r < open.length && open[r][0] < open[m][0]) m = r; if (m === k) break; [open[m], open[k]] = [open[k], open[m]]; k = m; } } return top; };
-  g[a] = 0; push(h(a), a);
-  for (let n = 0; open.length && n < 40000; n++) {
-    const [, i] = pop(); if (i === b) break;
-    const ix = i % W, iz = (i / W) | 0;
-    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
-      if (!dx && !dz) continue; const jx = ix + dx, jz = iz + dz; if (jx < 0 || jz < 0 || jx >= W || jz >= H) continue;
-      const j = jz * W + jx; if (!ok(j) || (dx && dz && (!ok(iz * W + jx) || !ok(jz * W + ix)))) continue;   // no cutting corners
-      const c = g[i] + (dx && dz ? 1.414 : 1); if (c < g[j]) { g[j] = c; from[j] = i; push(c + h(j), j); }
-    }
-  }
-  if (from[b] < 0) return null;
-  const cells = []; for (let i = b; i >= 0; i = from[i]) cells.push(i); cells.reverse();
-  const out = []; let k = 0;   // pull the string: the farthest cell still in clear view of the last kept one
-  while (k < cells.length - 1) {
-    let m = cells.length - 1; for (; m > k + 1; m--) if (lineClear(wx(cells[k]), wz(cells[k]), wx(cells[m]), wz(cells[m]))) break;
-    out.push([wx(cells[m]), wz(cells[m])]); k = m;
-  }
-  if (out.length) out[out.length - 1] = [x1, z1]; else out.push([x1, z1]);
-  return out;
-}
 function sidestep() {   // a way round, from here: false when there is none (or too many were needed)
   if (++detours > 3) return false;
   const p = player.position, path = localPath(p.x, p.z, goal.x, goal.z);
@@ -1157,7 +1121,7 @@ function sidestep() {   // a way round, from here: false when there is none (or 
 let arriveStreet = info.start ? info.start.label.split(',')[0].replace(/\s+\d+\s*\w?$/, '') : null;
 function unstick() {
   const p = player.position;
-  const [X, Y] = toRD(p.x, p.z), t = tiles.get(Math.floor(X / T) + '_' + Math.floor(Y / T));
+  const [X, Y] = toRD(p.x, p.z), t = tiles.get(grid.keyAtRD(X, Y));
   if (!t || !t.coll) return false;
   if (arriveStreet) {
     let best = 1e18, bx = 0, by = 0;
@@ -1195,7 +1159,7 @@ function unstick() {
 function arriveNear(X, Y, r = 2 + Math.random() * 2) {
   const a = Math.random() * Math.PI * 2, cx = X - ORX, cz = -(Y - ORY);
   if (fly) toggleFly();
-  goal = null; marker.visible = false; arriveStreet = null;
+  stopWalk(); arriveStreet = null;
   player.position.set(cx + Math.cos(a) * r, 0.15, cz + Math.sin(a) * r);
   yaw = Math.atan2(player.position.x - cx, player.position.z - cz);   // camera behind me, the spot ahead
   dist = Math.min(dist, 20); needUnstick = true; updateWanted();
@@ -1240,7 +1204,7 @@ async function findPlace(q) {
       + `&viewbox=${lo0},${la1},${lo1},${la0}&q=` + encodeURIComponent(q);
     for (const r of await (await fetch(u, { headers: { Accept: 'application/json' } })).json()) {
       const [X, Y] = wgsToRd(+r.lat, +r.lon);
-      if (HAVE.has(Math.floor(X / T) + '_' + Math.floor(Y / T))) return [X, Y, r.name || r.display_name.split(',')[0]];
+      if (HAVE.has(grid.keyAtRD(X, Y))) return [X, Y, r.name || r.display_name.split(',')[0]];
     }
   } catch { /* offline or rate-limited: not found */ }
   return null;
@@ -1251,7 +1215,7 @@ async function goTo(q) {
   if (hit[3]) arriveStreet = hit[3];
   if (driving.driving) return autoTo(hit[0] - ORX, -(hit[1] - ORY), hit[2]);   // in a car: drive there
   if (fly) toggleFly();
-  goal = null; marker.visible = false;
+  stopWalk();
   player.position.set(hit[0] - ORX, 0.15, -(hit[1] - ORY));
   dist = Math.min(dist, 20);
   needUnstick = true;
@@ -1311,11 +1275,11 @@ function initMap() {
   mini.on('dragstart', () => { followMini = false; setTimeout(() => followMini = true, 6000); });
   mini.on('click', e => {
     const [X, Y] = wgsToRd(e.latlng.lat, e.latlng.lng);
-    if (!HAVE.has(Math.floor(X / T) + '_' + Math.floor(Y / T))) return;
+    if (!HAVE.has(grid.keyAtRD(X, Y))) return;
     if (driving.driving) return autoTo(X - ORX, -(Y - ORY), 'the spot on the map');   // in a car: drive there
     if (fly) toggleFly();
     const far = Math.hypot(X - ORX - player.position.x, -(Y - ORY) - player.position.z) > 600;
-    if (far) { player.position.set(X - ORX, 0.15, -(Y - ORY)); goal = null; marker.visible = false; updateWanted(); return; } // jump, then stream in
+    if (far) { player.position.set(X - ORX, 0.15, -(Y - ORY)); stopWalk(); updateWanted(); return; } // jump, then stream in
     goal = new THREE.Vector3(X - ORX, 0.15, -(Y - ORY)); marker.position.set(goal.x, 0.35, goal.z); marker.visible = true;
   });
   document.getElementById('minibtn').onclick = () => { document.getElementById('mini').classList.toggle('big'); setTimeout(() => mini.invalidateSize(), 250); };
@@ -1346,7 +1310,7 @@ let last = performance.now(), placeT = 0, wantT = 0, signT = 0, frames = 0, fpsT
 // dragging still turns and tilts the head, and your own body is hidden
 function setFirstPerson(on) {
   firstPerson = on; localStorage.setItem('toycity.view', on ? 'eyes' : 'chase');
-  if (on && (driving?.driving || ride)) pitch = 0.5;   // look at the road, a touch below the horizon
+  if (on && you.seated) pitch = 0.5;   // look at the road, a touch below the horizon
   const b = document.getElementById('eyesbtn'); if (b) b.setAttribute('aria-pressed', on);
   dispatchEvent(new Event('toycity:view'));
 }
@@ -1359,7 +1323,7 @@ function lens(seat) {
 const crackEl = document.getElementById('cracks');
 function cracks(on) { if (crackEl && crackEl.hidden === !!on) crackEl.hidden = !on; }
 function chaseCam() {
-  lens(firstPerson && (driving.driving || !!ride));
+  lens(firstPerson && you.seated);
   if (firstPerson) {
     const look = 0.42 - pitch;                     // drag up and down to look up and down
     if (ride) {
@@ -1418,18 +1382,19 @@ function frame(now) {
   }
 
   if (needUnstick && unstick()) needUnstick = false;
-  if (fly) orbit.update();
-  else if (ride) {
+  const mode = you.mode;
+  if (mode === 'fly') orbit.update();
+  else if (mode === 'passenger') {
     // the driver's car carries you; if they get out or leave, so do you
-    if (!ride.player || !ride.car || ride.car.startsWith('ride') || !window.__city.social.presence.peers.has(ride.id)) toggleCar();
+    if (!ride.player || !ride.car || isPassenger(ride.car) || !social?.presence.peers.has(ride.id)) toggleCar();
     else {
       seat(ride, player.position); player.rotation.y = ride.player.group.rotation.y;
-      const h = ride.player.group.rotation.y, f = FRONT[ride.car.split(':')[0]] ?? 1, behind = Math.atan2(-Math.cos(h) * f, Math.sin(h) * f);
+      const h = ride.player.group.rotation.y, f = FRONT[carModel(ride.car)] ?? 1, behind = Math.atan2(-Math.cos(h) * f, Math.sin(h) * f);
       if (!dragging) { let d = behind - yaw; d = Math.atan2(Math.sin(d), Math.cos(d)); yaw += d * Math.min(1, dt * 2.5); }
     }
     chaseCam();
   }
-  else if (driving.driving) {
+  else if (mode === 'car' || mode === 'bike') {
     // W/S or the joystick forward/back: throttle and brake; A/D or sideways: steer; Shift: faster
     const jx = Math.abs(joy.x) > 0.15 ? joy.x : 0, jy = Math.abs(joy.y) > 0.15 ? -joy.y : 0;
     const throttle = THREE.MathUtils.clamp((keys['w'] || keys['arrowup'] ? 1 : 0) - (keys['s'] || keys['arrowdown'] ? 1 : 0) + jy, -1, 1);
@@ -1450,22 +1415,22 @@ function frame(now) {
     if ((Math.abs(driving.speed) > 0.5 || firstPerson) && !dragging) { let d = behind - yaw; d = Math.atan2(Math.sin(d), Math.cos(d)); yaw += d * Math.min(1, dt * (firstPerson ? 10 : 2.5)); }
     chaseCam();
   }
-  else if (flingStep(dt)) chaseCam();
-  else if (homes.busy || homes.inside) { homes.update(dt, false); chaseCam(); }
+  else if (mode === 'down' || mode === 'flung') { flingStep(dt); chaseCam(); }
+  else if (mode === 'door' || mode === 'home') { homes.update(dt, false); chaseCam(); }
   else {
     const fwd = tmpF.set(-Math.sin(yaw), 0, -Math.cos(yaw)), right = tmpR.set(-fwd.z, 0, fwd.x), v = tmpM.set(0, 0, 0);
     if (keys['w'] || keys['arrowup']) v.add(fwd); if (keys['s'] || keys['arrowdown']) v.sub(fwd);
     if (keys['a'] || keys['arrowleft']) v.sub(right); if (keys['d'] || keys['arrowright']) v.add(right);
     const jm = Math.hypot(joy.x, joy.y);
     if (jm > 0.15) v.addScaledVector(fwd, -joy.y).addScaledVector(right, joy.x);
-    if (v.lengthSq() > 0) { goal = null; marker.visible = false; }
+    if (v.lengthSq() > 0) stopWalk();
     // walk, or run with Shift or the joystick pushed to its edge; click-to-go speeds up for long trips
     let speed = swim.on ? (keys['shift'] || jm > 0.9 ? SWIM_FAST : SWIM_MS) : keys['shift'] || jm > 0.9 ? 6 : jm > 0.15 ? 1.2 + 0.8 * jm : 1.8;
     if (goal) {
       const to = (detour || goal).clone().sub(player.position); to.y = 0; const d = to.length();
       // a person's click-to-go speeds up on long trips; an agent walks (1.8 m/s) or runs (6 m/s) like anyone on foot
       const boost = swim.on ? speed : AGENT ? (AGENT.run ? 6 : 1.8) : Math.max(speed, d / 2.5);
-      if (d < 0.4) { if (detour) { const q = detourQ.shift(); detour = q ? new THREE.Vector3(q[0], 0.15, q[1]) : null; } else { goal = null; marker.visible = false; } } else { v.copy(to); speed = Math.min(boost * dt, d) / dt; }
+      if (d < 0.4) { if (detour) { const q = detourQ.shift(); detour = q ? new THREE.Vector3(q[0], 0.15, q[1]) : null; } else stopWalk(); } else { v.copy(to); speed = Math.min(boost * dt, d) / dt; }
       marker.material.opacity = 0.5 + 0.4 * Math.sin(now / 150);
     }
     if (v.lengthSq() > 0) {
@@ -1474,7 +1439,7 @@ function frame(now) {
       if (!blocked(p0.x, p0.z) && blocked(p0.x + v.x, p0.z + v.z)) {
         if (!blocked(p0.x + v.x, p0.z)) v.z = 0; else if (!blocked(p0.x, p0.z + v.z)) v.x = 0; else v.set(0, 0, 0);
       }
-      if (goal && v.lengthSq() < 1e-6) { if ((stuck += dt) > (AGENT ? 0.3 : 0.6)) { stuck = 0; if (!(AGENT && sidestep())) { goal = detour = null; marker.visible = false; } } } else stuck = 0;
+      if (goal && v.lengthSq() < 1e-6) { if ((stuck += dt) > (AGENT ? 0.3 : 0.6)) { stuck = 0; if (!(AGENT && sidestep())) stopWalk(); } } else stuck = 0;
       player.position.add(v);
       movedThisFrame = Math.hypot(v.x, v.z);
       if (v.lengthSq() > 1e-8) {
@@ -1486,8 +1451,8 @@ function frame(now) {
     }
     chaseCam();
   }
-  if (!homes.busy && !homes.inside) homes.update(dt, !driving.driving && !ride && !fly && !fling.on);
-  if ((wantT += dt) > 0.3) { wantT = 0; updateWanted(); for (const t of carTiles) if (updateCars(t)) shadowDirty = true; }
+  if (!you.atHome) homes.update(dt, you.can('door'));
+  if ((wantT += dt) > 0.3) { wantT = 0; updateWanted(); for (const t of parked.tiles) if (updateCars(t)) shadowDirty = true; }
   if ((placeT += dt) > 0.5) {
     placeT = 0;
     const s = (driving.driving ? Math.round(Math.abs(driving.speed) * 3.6) + ' km/h  ·  ' + (autopilot.active ? apLine() : '') : '') + nearestPlace();
@@ -1502,16 +1467,7 @@ function frame(now) {
     list.forEach(([s, d], k) => { s.visible = k < 12 && d < 260 + dist; const sc2 = THREE.MathUtils.clamp(d / 40, 0.6, 4); s.scale.set(s.userData.base * sc2, 2.2 * sc2, 1); });
   }
 
-  jump.t += dt;
-  if (jump.phase === 'crouch' && jump.t >= CROUCH_T) { jump.phase = 'air'; jump.v = JUMP_V; jump.t = 0; }
-  else if (jump.phase === 'land' && jump.t >= LAND_T) { jump.phase = null; }
-  const overHedge = () => { const h = jump.h; jump.h = 0; const b = blocked(player.position.x, player.position.z); jump.h = h; return b; };
-  if (jump.onHedge && !jump.phase && !overHedge()) { jump.onHedge = false; jump.phase = 'air'; jump.v = 0; jump.t = 0; }  // stepped off the top
-  if (jump.phase === 'air') {
-    jump.v -= GRAVITY * dt; jump.h += jump.v * dt;
-    const floor = overHedge() ? 1.0 : 0;   // a hedge is 1.1 m high; land on its top
-    if (jump.v < 0 && jump.h <= floor) { jump.h = floor; jump.v = 0; jump.onHedge = floor > 0; jump.phase = 'land'; jump.t = 0; }
-  }
+  walker.stepJump(dt, player.position.x, player.position.z);
   animateAvatar(dt, jump.phase === 'air' ? 0 : movedThisFrame); movedThisFrame = 0;
   social?.update(dt, driving.driving ? Math.abs(driving.speed) : ride ? ride.speed || 0 : fling.on && !fling.down ? Math.hypot(fling.vx, fling.vz) : avatar.speed);
   if (health.out) {
@@ -1521,7 +1477,7 @@ function frame(now) {
   // other people going in or out of a house: their door opens here too
   if ((health.doorT = (health.doorT || 0) + dt) > 0.25) {
     health.doorT = 0;
-    for (const q of social?.presence.peers.values() || []) if (q.pose === 5 && q.player) homes.openNear(q.player.group.position.x, q.player.group.position.z);
+    for (const q of social?.presence.peers.values() || []) if (q.pose === POSE.door && q.player) homes.openNear(q.player.group.position.x, q.player.group.position.z);
   }
   if (card.level && (card.t -= dt) <= 0) { card.level = 0; note('Card gone. Thanks for driving carefully.'); }
   showCard(player, card.level, driving.driving ? 2.3 : 2.25);
@@ -1532,7 +1488,7 @@ function frame(now) {
   radio.update(driving.driving && !driving.rider);   // a bike has no radio
   nav.update(dt);
   // the town's own cars and people: where I am and whether I am on foot, in a car, or flying
-  me.x = player.position.x; me.z = player.position.z; me.inCar = driving.driving || !!ride; me.onFoot = !me.inCar && !fly; me.fly = fly;
+  me.x = player.position.x; me.z = player.position.z; me.inCar = you.seated; me.onFoot = you.onFoot; me.fly = fly;
   traffic.update(dt, me); peds.update(dt, me);
   if (swim.on) { const y = wetAt(player.position.x, player.position.z); if (y === null || driving.driving || fly) stopSwim(); else swim.y = y; }
   player.position.y = swim.on ? swim.y : 0.15 + jump.h + (fling.on ? fling.h : 0);
@@ -1544,7 +1500,7 @@ function frame(now) {
   // the shadow map is redrawn when something in it moved: the camera (the map follows it), me, a car,
   // a door, someone nearby; a square or the time of day changing sets shadowDirty where it happens.
   // Standing still, it is kept as it is.
-  if (!camera.position.equals(camAt) || !camera.quaternion.equals(camQ) || driving.driving || ride || fling.on || jump.phase
+  if (!camera.position.equals(camAt) || !camera.quaternion.equals(camQ) || you.seated || fling.on || jump.phase
     || homes.busy || avatar.speed > 0.02 || peerNear() || traffic.near(R) || peds.near(R)) shadowDirty = true;
   camAt.copy(camera.position); camQ.copy(camera.quaternion);
   if (shadowDirty) { renderer.shadowMap.needsUpdate = true; shadowDirty = false; }
@@ -1566,21 +1522,22 @@ function frame(now) {
 if (AGENT) window.__agent = {
   // (the same goal again, as a follower sends every few hundred ms, keeps a detour in progress)
   walkTo(x, z, run) {
-    if (driving.driving || ride || fly || homes.inside) return false;
+    if (!you.can('walk')) return false;
     AGENT.run = !!run; const same = goal && Math.hypot(goal.x - x, goal.z - z) < 0.5; goal = new THREE.Vector3(x, 0.15, z); marker.position.set(x, 0.35, z); marker.visible = true;
     if (!same) { detour = null; detourQ = []; detours = 0; const p = player.position; if (!lineClear(p.x, p.z, x, z)) sidestep(); }   // round the hedges from the start
     return true;
   },
-  stop() { goal = detour = null; detourQ = []; marker.visible = false; },
+  stop() { stopWalk(); detourQ = []; },
   get walking() { return !!goal; },
   get riding() { return ride ? ride.name || 'a friend' : null; },   // riding along in someone's car
   get stuck() { return stuck; },
   face(y) { yaw = y; },
-  jump() { if (jump.phase || fly || driving.driving || ride || homes.inside) return false; jump.phase = 'crouch'; jump.t = 0; return true; },
+  jump() { if (!you.can('jump')) return false; walker.startJump(); return true; },
   draw(n = 3) { AGENT.draw = n; },   // render the next few frames (for a screenshot)
   get drawing() { return AGENT.draw > 0; },
 };
-window.__city = { ovTiles, solids, driving, radio, nav, knockDown, card, fling, homes, health, traffic, peds, birds, swim, startSwim, wetAt, setTraffic, nearestPlace, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, jump, toRD, rdToWgs, ORX, ORY, info, stats: null };
+if (AGENT) import('./agent.js').catch(e => console.warn('agent api', e));   // window.__agentApi for tools/mcp (it also loads it itself)
+window.__city = { ovTiles, solids, driving, radio, nav, knockDown, card, fling, homes, health, traffic, peds, birds, swim, startSwim, wetAt, setTraffic, nearestPlace, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, jump, toRD, rdToWgs, ORX, ORY, info, grid, you, stats: null };
 // ---------- social layer: other people, voice and background sounds (web/mp/, ?mp=0 turns it off) ----------
 // It only reads the player's position and the trees and parked cars around it; nothing here depends on it.
 let social = null;
@@ -1595,7 +1552,7 @@ function surroundings() {
   return { green: Math.min(1, trees / 25), street: Math.min(1, (cars + 4 * traffic.near(60)) / 30), traffic: traffic.near(60), inCar: (driving.driving && !driving.rider) || (!!ride && !ride.car?.startsWith('bike')) };
 }
 if (params.get('mp') !== '0') import('./mp/index.js').then(m => m.start({
-  scene, camera, player, toRD, fromRD: (X, Y) => [X - ORX, ORY - Y], slug, params, surroundings, useAvatar, solids, goToRD: arriveNear, find: who => nav.find(who),
+  scene, camera, player, toRD, fromRD, slug, params, surroundings, useAvatar, solids, goToRD: arriveNear, find: who => nav.find(who),
   vehicle: { get shared() { return ride ? 'ride:0' : driving.shared; }, make: (name, color) => makeCar(CAR_MODELS, name, color),
     get mine() { return driving.driving ? { model: driving.model, x: player.position.x, z: player.position.z, h: player.rotation.y } : null; } }, view: { get eyes() { return firstPerson; }, set eyes(v) { setFirstPerson(v); } },
   hud: document.getElementById('mp'), knockDown, homes,
@@ -1604,7 +1561,7 @@ if (params.get('mp') !== '0') import('./mp/index.js').then(m => m.start({
   // off with the 📞 Calls button; an agent (?agent=1) has a voice only if it joined with one (&voice=1)
   body: { get caps() { return voiceCap ? 'v' : ''; }, setVoice(on) { voiceCap = on; if (!AGENT) localStorage.setItem('toycity.calls', on ? 'on' : 'off'); },
     get autoAnswer() { return !!AGENT && voiceCap; },
-    get card() { return card.level; }, get pose() { return homes.inside ? 3 : homes.busy ? 5 : health.out ? 4 : fling.on ? (fling.down ? 2 : 1) : swim.on ? 6 : 0; }, get y() { return +(swim.on ? swim.y - 0.15 : fling.on ? fling.h : jump.h).toFixed(2); } },
+    get card() { return card.level; }, get pose() { return you.pose; }, get y() { return +(swim.on ? swim.y - 0.15 : fling.on ? fling.h : jump.h).toFixed(2); } },
 })).then(s => { social = s; window.__city.social = s; }).catch(e => { console.warn('multiplayer unavailable', e); document.getElementById('mp').textContent = 'Multiplayer unavailable right now'; });
 
 setFirstPerson(localStorage.getItem('toycity.view') === 'eyes');

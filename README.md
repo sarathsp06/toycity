@@ -92,7 +92,7 @@ Full tool list and limits: [tools/mcp/README.md](tools/mcp/README.md).
 
 Toy City is a static site: pre-baked map squares streamed into a three.js scene, with
 peer-to-peer multiplayer. The story behind it, including what went wrong, is in
-**[How it works](docs/how-it-works.md)**; the formal design is in
+**[How it works](docs/how-it-works.md)**; the module map is in **[Architecture](docs/architecture.md)**; the formal design is in
 **[Rendering architecture](docs/rendering-architecture.md)** and **[Multiplayer](docs/multiplayer.md)**.
 
 ```sh

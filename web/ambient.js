@@ -19,18 +19,21 @@
 //     schedule, so no browser ever diverges from the others; it is dropped once the thing is out of sight.
 //
 // Nothing in this file touches three.js, so the unit tests (tests/ambient.test.mjs) can run it in node.
+import { squareKey } from './grid.js';
 
 // ---------- deterministic numbers ----------
+// The one seeded generator and hash of the game: the ambient life, the birds (birds.js) and the textures
+// (textures.js) all use these, so the same seed gives the same numbers in every browser.
 // FNV-1a over the text of all parts: the same seed on every device for the same id
 export function seed(...parts) {
   let h = 2166136261;
   for (const p of parts) { const s = String(p); for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } h ^= 0x9e3779b9; h = Math.imul(h, 16777619); }
   return h >>> 0 || 1;
 }
-// xorshift32: a tiny generator giving 0 <= x < 1
+// mulberry32: a tiny generator giving 0 <= x < 1, good enough for neighbouring seeds to look unrelated
 export function rng(s) {
-  let x = s >>> 0 || 1;
-  return () => { x ^= x << 13; x >>>= 0; x ^= x >>> 17; x ^= x << 5; x >>>= 0; return x / 4294967296; };
+  let a = s >>> 0;
+  return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
 
 // ---------- the road graph ----------
@@ -41,6 +44,16 @@ export function limitOf(g, u, v) {
   let o = g.out[u]; for (let k = 0; k < o.length; k += 2) if (o[k] === v) return o[k + 1] >> 4;
   o = g.out[v]; for (let k = 0; k < o.length; k += 2) if (o[k] === u) return o[k + 1] >> 4;
   return 30;
+}
+// the nodes of each map square that pass ok(n): "i_j" -> [node ids], for a fleet's nodesOf
+export function nodesBySquare(g, toRD, T, ok) {
+  const out = new Map();
+  for (let n = 0; n < g.xs.length; n++) {
+    if (!ok(n)) continue;
+    const [X, Y] = toRD(g.xs[n], g.zs[n]), key = squareKey(Math.floor(X / T), Math.floor(Y / T));
+    (out.get(key) || out.set(key, []).get(key)).push(n);
+  }
+  return out;
 }
 // a usable node between min and max metres from node a, picked by r (a few tries, else -1)
 export function farNode(g, a, bit, r, min, max, tries = 80, ok = () => true) {
@@ -177,7 +190,7 @@ export function createFleet({ slug, T, toRD, nodesOf, plan, per = 1, show, radiu
     const [X, Y] = toRD(x, z), ci = Math.floor(X / T), cj = Math.floor(Y / T), c = cells(), out = [];
     for (let i = ci - c; i <= ci + c; i++) for (let j = cj - c; j <= cj + c; j++) {
       const d = Math.hypot(Math.max(i * T - X, 0, X - (i + 1) * T), Math.max(j * T - Y, 0, Y - (j + 1) * T));
-      if (d <= radius) out.push([i + '_' + j, d]);
+      if (d <= radius) out.push([squareKey(i, j), d]);
     }
     return out.sort((a, b) => a[1] - b[1]).map(e => e[0]);
   }

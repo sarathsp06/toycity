@@ -4,10 +4,13 @@
 // itself in the room of its 500 m square and the relays pass along WebRTC connection details.
 // Positions and names then go directly between browsers over WebRTC data channels.
 //
-// Emits: peer(id) objects with { id, name, dist, shown, player } for the other systems to use, and
-// exposes `connections` (id -> room) so a peer-to-peer voice transport can reuse the same links.
+// Emits: peer(id) objects with { id, name, dist, shown, player, car, card, pose, up, caps } for the
+// other systems to use, and linkFor(id) so a peer-to-peer voice transport reuses the same links.
+// The state tuple on the wire is encoded and checked in state.js; channels become rooms in room.js.
 import { MP } from './config.js';
 import { roomsFor, Track, visible, cleanName } from './logic.js';
+import { encodeState, decodeState, isInside, carModel } from './state.js';
+import { openRoom } from './room.js';
 import { ready as avatarsReady, makePlayer, setName, setLook, setVehicle, setCard, seatIn, animate, disposePlayer } from './players.js';
 import { PASSENGER, seatLocal } from '../vehicle.js';
 
@@ -21,11 +24,15 @@ export async function createPresence({ scene, player, toRD, fromRD, slug, vehicl
   // from a tiny Worker (toycity-turn); without them we fall back to direct connections only.
   // Only a few relay addresses: every one is gathered before an offer is sent, so a long list slows
   // down connecting (UDP 3478 is quickest; TLS on 443 gets through strict firewalls).
-  const iceServers = await fetch(MP.iceUrl).then(r => r.ok ? r.json() : null).then(d => d?.iceServers?.map(s => ({
-    ...s, urls: [].concat(s.urls).filter(u => /^stun:.*:3478$|^turn:.*:3478\?transport=udp$|^turns:.*:443\?transport=tcp$/.test(u)) }))).catch(() => null);
-  await avatarsReady;
+  // A slow or dead Worker must not hold up the game: 3 s at most, then once more in the background
+  // (Trystero reads roomConfig for every new connection, so connections made after that can use the relay.)
+  const ice = () => { const ac = new AbortController(), t = setTimeout(() => ac.abort(), MP.iceTimeout * 1000);
+    return fetch(MP.iceUrl, { signal: ac.signal }).then(r => r.ok ? r.json() : null).then(d => d?.iceServers?.map(s => ({
+      ...s, urls: [].concat(s.urls).filter(u => /^stun:.*:3478$|^turn:.*:3478\?transport=udp$|^turns:.*:443\?transport=tcp$/.test(u)) }))).catch(() => null).finally(() => clearTimeout(t)); };
+  const [iceServers] = await Promise.all([ice(), avatarsReady]);
 
   const roomConfig = { appId: MP.appId, relayUrls: MP.relays, relayRedundancy: MP.relays.length, ...(iceServers ? { rtcConfig: { iceServers } } : {}) };
+  if (!iceServers) setTimeout(() => ice().then(s => { if (s) { roomConfig.rtcConfig = { iceServers: s }; console.log('[mp] relay servers fetched on retry'); } }), 5000);
   const look = myLook();
   let myName = cleanName(localStorage.getItem('toycity.name')) || 'Visitor ' + (100 + Math.floor(Math.random() * 900));
   let myMic = false;
@@ -34,7 +41,10 @@ export async function createPresence({ scene, player, toRD, fromRD, slug, vehicl
   const sent = new Map(), gone = []; let lastState = null;   // scratch for update(), so nothing is allocated per frame
   const firstRoom = p => { let best = null; for (const k of p.rooms) if (rooms.has(k) && (best === null || k < best)) best = k; return best; };
   const peers = new Map();          // id -> peer
-  const listeners = { leave: [], room: [], call: [] };
+  const listeners = { leave: new Set(), room: new Set(), call: new Set(), beat: new Set() };
+  const sub = (set, f) => { set.add(f); return () => set.delete(f); };   // every on…() returns its unsubscribe
+  const channels = new Map();       // name -> trystero room, for links to players outside my squares
+  const st = {};                    // decodeState scratch, reused for every message
 
   function peer(id) {
     let p = peers.get(id);
@@ -47,22 +57,16 @@ export async function createPresence({ scene, player, toRD, fromRD, slug, vehicl
     const room = joinRoom(roomConfig, `nl:${key}`);   // one world for every region: the room is the RD square, never the map name
     const [send, receive] = room.makeAction('st');
     receive((d, id) => {
-      if (!Array.isArray(d) || d.length < 6) return;
-      const [s, x, y, h, v, n, look, micOn, car, cardLevel, pose, up, caps] = d;
-      if (![s, x, y, h, v].every(Number.isFinite)) return;
+      const s = decodeState(d, st); if (!s) return;
       const p = peer(id); p.rooms.add(key);
       p.last = performance.now() / 1000;
-      p.track.push(s, p.last, { x, y, h, v });
-      const name = cleanName(n), mic = micOn === 1;
-      if ((name && name !== p.name) || mic !== p.mic) { p.name = name || p.name; p.mic = mic; if (p.player) setName(p.player, tag(p)); }
-      const l = parseLook(look) ? look : 'classic';
+      p.track.push(s.seq, p.last, { x: s.x, y: s.y, h: s.h, v: s.v });
+      if ((s.name && s.name !== p.name) || s.mic !== p.mic) { p.name = s.name || p.name; p.mic = s.mic; if (p.player) setName(p.player, tag(p)); }
+      const l = parseLook(s.look) ? s.look : 'classic';
       if (l !== p.look) { p.look = l; if (p.player) setLook(p.player, l); }
-      const c = typeof car === 'string' && /^[a-z0-9_]{1,12}:[0-9a-f]{1,6}$/.test(car) ? car : '';   // "model:colour" while driving
-      if (c !== p.car) { p.car = c; if (p.player) setVehicle(p.player, c, vehicle?.make); }
-      // their card (1 yellow, 2 red), whether they are flying (1) or lying (2) after being hit, and how high
-      p.card = [0, 1, 2].includes(cardLevel) ? cardLevel : 0; p.pose = [0, 1, 2, 3, 4, 5, 6].includes(pose) ? pose : 0;   // 4 knocked out, 5 going through a door, 6 swimming
-      p.up = Number.isFinite(up) ? Math.max(-3, Math.min(20, up)) : 0;   // below 0: swimming, at the water level
-      p.caps = typeof caps === 'string' ? caps.replace(/[^a-z]/g, '').slice(0, 8) : undefined;   // what they can do, e.g. 'v' voice
+      if (s.car !== p.car) { p.car = s.car; if (p.player) setVehicle(p.player, s.car, vehicle?.make); }
+      // their card, pose (state.js POSE), metres up or down, and what they can do ('v' voice)
+      p.card = s.card; p.pose = s.pose; p.up = s.up; p.caps = s.caps;
     });
     // call invitations and answers go straight to one player (see index.js)
     const [sendCall, receiveCall] = room.makeAction('call');
@@ -90,7 +94,7 @@ export async function createPresence({ scene, player, toRD, fromRD, slug, vehicl
     for (const q of peers.values()) {
       if (q.id === not || !q.car || !q.player || q.player.inside) continue;
       const g = q.player.group.position, d = Math.hypot(g.x - x, g.z - z);
-      if (d < bd) { bd = d; best = { model: q.car.split(':')[0], x: g.x, z: g.z, h: q.player.group.rotation.y }; }
+      if (d < bd) { bd = d; best = { model: carModel(q.car), x: g.x, z: g.z, h: q.player.group.rotation.y }; }
     }
     return best;
   }
@@ -109,7 +113,7 @@ export async function createPresence({ scene, player, toRD, fromRD, slug, vehicl
     if (car !== lastCar || card !== lastExtra[0] || pose !== lastExtra[1] || up !== lastExtra[2] || caps !== lastExtra[3]) { lastCar = car; lastExtra = [card, pose, up, caps]; lastSent = null; }
     const extra = lastExtra;
     if (!lastSent || (sendT <= 0 && (speed > 0.05 || extra[1] === 1 || now - lastSent >= 1 / MP.idleHz))) {
-      const state = [++seq, +X.toFixed(2), +Y.toFixed(2), +player.rotation.y.toFixed(3), +speed.toFixed(2), myName, look, myMic ? 1 : 0, vehicle?.shared || '', ...extra];
+      const state = encodeState({ seq: ++seq, x: X, y: Y, h: player.rotation.y, v: speed, name: myName, look, mic: myMic, car: vehicle?.shared || '', card: extra[0], pose: extra[1], up: extra[2], caps: extra[3] });
       // once to each player, over the one connection they are reached by (two who share several
       // squares would otherwise get, and relay, every message several times)
       sent.clear();
@@ -128,7 +132,7 @@ export async function createPresence({ scene, player, toRD, fromRD, slug, vehicl
       const show = visible(p.shown, p.dist, MP.showWithin, MP.hideBeyond);
       if (show && !p.player) { p.player = makePlayer(p.id, tag(p), p.look); scene.add(p.player.group); if (p.car) setVehicle(p.player, p.car, vehicle?.make); }
       if (p.player) {
-        p.player.group.visible = show && p.pose !== 3;   // 3: at home, inside the house
+        p.player.group.visible = show && !isInside(p.pose);   // at home, inside the house
         const [x, z] = fromRD(s.x, s.y); p.player.group.position.set(x, 0.15 + (p.up || 0), z); p.player.group.rotation.y = s.h;
         setCard(p.player, p.card || 0, p.pose || 0, p.up || 0);
         // a passenger ("ride"): sit them in the car they are in, beside its driver, so the driver sees them
@@ -150,7 +154,9 @@ export async function createPresence({ scene, player, toRD, fromRD, slug, vehicl
   }
   // The frame loop stops in a background tab (phone locked, app switched), so from there this keeps
   // me alive for the others once a second, and forgets players who went quiet, as the loop would
+  // onBeat listeners run here every second, visible or not (calls time out, voice re-routes)
   const heartbeat = setInterval(() => {
+    for (const f of listeners.beat) { try { f(); } catch (e) { console.warn('[mp] beat handler', e); } }
     if (document.visibilityState !== 'hidden' || !lastState) return;
     const now = performance.now() / 1000;
     if (now - lastSent >= 1 / MP.idleHz) { lastState[0] = ++seq; for (const r of rooms.values()) r.send(lastState); lastSent = now; }
@@ -158,21 +164,35 @@ export async function createPresence({ scene, player, toRD, fromRD, slug, vehicl
   }, 1000);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') lastSent = null; });   // say hello again at once
 
-  return {
+  const presence = {
     peers, update,
     get name() { return myName; },
     setMic(on) { myMic = !!on; lastSent = null; },
     setName(n) { n = cleanName(n); if (!n) return; myName = n; localStorage.setItem('toycity.name', n); lastSent = null; },
-    // for a peer-to-peer voice transport: the same WebRTC connection, always through one room
-    rooms, roomFor(p) { const k = firstRoom(p); return k && rooms.get(k).room; },
+    selfId,
+    // for a peer-to-peer voice transport (transport.js): the one WebRTC connection that reaches this
+    // player, through my lowest square we share, else a channel we are both in; and whether it is still open
+    linkFor(id) {
+      const p = peers.get(id), k = p && firstRoom(p); if (k) return rooms.get(k).room;
+      for (const room of channels.values()) if (room.getPeers()[id]) return room;
+      return null;
+    },
+    isOpen: room => rooms.get(room.key)?.room === room || channels.get(room.chName) === room,
+    roomFor(p) { const k = firstRoom(p); return k && rooms.get(k).room; },   // (older name; linkFor covers channels too)
     sendTo(id, msg) { const p = peers.get(id); const k = p && firstRoom(p); if (k) rooms.get(k).sendCall(msg, id); return !!k; },
-    onCall(f) { listeners.call.push(f); },
-    onRoom(f) { listeners.room.push(f); for (const [k, r] of rooms) f(k, r.room); },
-    onLeave(f) { listeners.leave.push(f); },
+    onCall: f => sub(listeners.call, f),
+    onRoom(f) { for (const [k, r] of rooms) f(k, r.room); for (const [n, r] of channels) f('ch:' + n, r); return sub(listeners.room, f); },
+    onLeave: f => sub(listeners.leave, f),
+    onBeat: f => sub(listeners.beat, f),
     // a small room of its own, wherever you are on the map: a house uses one so knocks reach its residents
     channel(name) {
       const room = joinRoom(roomConfig, `toycity:${name}`), [send, receive] = room.makeAction('msg');
-      return { send, onMessage: receive, peers: () => Object.keys(room.getPeers()), leave: () => room.leave() };
+      if (channels.get(name) !== room) { room.chName = name; channels.set(name, room); for (const f of listeners.room) f('ch:' + name, room); }
+      return { send, onMessage: receive, peers: () => Object.keys(room.getPeers()), onPeerJoin: f => room.onPeerJoin(f), onPeerLeave: f => room.onPeerLeave(f),
+        leave: () => { if (channels.get(name) === room) channels.delete(name); room.leave(); } };
     },
+    // the same, with names and roles (room.js): what home.js knocks through, and later meeting rooms
+    room: (name, { role = 'guest' } = {}) => openRoom(presence.channel(name), { id: name, role, name: () => myName }),
   };
+  return presence;
 }

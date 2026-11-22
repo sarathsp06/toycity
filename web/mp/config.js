@@ -7,6 +7,7 @@ export const MP = {
   // others were down or refused. Fewer relays also means fewer duplicate connection offers.
   relays: ['wss://relay.primal.net', 'wss://nostr.data.haus', 'wss://nos.lol', 'wss://nostr.sathoarder.com', 'wss://yabu.me/v2'],
   iceUrl: 'https://toycity-turn.sarathsp.workers.dev/',   // STUN + TURN credentials (Cloudflare)
+  iceTimeout: 3,                  // wait this long for them at startup, then go on without (retried once)
   roomSize: 500,                  // one room per 500 m square of the RD grid
   roomJoinEdge: 20,               // also join the neighbouring square when this close to its edge
   roomLeaveEdge: 40,              // and leave it again only when this far away

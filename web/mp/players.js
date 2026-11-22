@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { loadAvatar, myLook, poseLayer } from '../avatar.js';
 import { FRONT } from '../vehicle.js';
+import { POSE, FALL_DOWN, isLying, isSwimming, isPassenger, isBike, carModel } from './state.js';
 
 const SHIRTS = [0x2f6fde, 0x2a9d5c, 0xe0a020, 0x8e44ad, 0x16a3b8, 0xd35400, 0xc0392b, 0x34495e];
 const base = new URL('../', import.meta.url);
@@ -85,12 +86,12 @@ function pickPose(p, speed) {
   if (p.riding || p.seat === 'bike') return P.set('drive');
   if (p.seat) return P.set('sit_idle');
   if (p.carMesh || p.inside) return P.set(null);
-  if (p.poseN === 6) return P.set(speed > 0.25 ? 'swim' : 'swim_idle', { fade: 0.3 });
-  if (p.poseN === 1) return P.set('hit', { once: true });
-  if (p.poseN === 2 || p.poseN === 4) { if (P.name !== 'fall') P.set('fall', { once: true, from: 0.93 }); return; }
+  if (isSwimming(p.poseN)) return P.set(speed > 0.25 ? 'swim' : 'swim_idle', { fade: 0.3 });
+  if (p.poseN === POSE.flung) return P.set('hit', { once: true });
+  if (isLying(p.poseN)) { if (P.name !== 'fall') P.set('fall', { once: true, from: FALL_DOWN }); return; }
   if (P.name === 'fall') return P.set('sit_exit', { once: true, fade: 0.3 });
   if (P.name === 'sit_exit' && !P.done && speed < 0.5) return;
-  if (p.up > 0 && p.poseN !== 5) return P.set('jump_loop');
+  if (p.up > 0 && p.poseN !== POSE.door) return P.set('jump_loop');
   P.set(p.speaking > 0.02 && speed < 0.3 ? 'talk' : null, { fade: P.name === 'sit_exit' ? 0.2 : 0.1 });
 }
 
@@ -111,13 +112,13 @@ export function animate(p, speed, dt) {
 // someone driving: show their car instead of their person (make builds it from the game's car models)
 export function setVehicle(p, car, make) {
   if (p.carMesh) { p.carMesh.removeFromParent(); p.carMesh.traverse(o => { if (o.isMesh && o.userData.own) o.material.dispose(); }); p.carMesh = null; }
-  const [name, col] = (car || '').split(':');
-  p.inside = name === 'ride';   // a passenger: inside someone else's car, so not drawn at all
+  const name = carModel(car), col = car ? car.slice(name.length + 1) : '';
+  p.inside = isPassenger(car);   // a passenger: inside someone else's car, so not drawn at all
   if (p.inside) { if (p.model) p.model.visible = false; p.ring.visible = false; p.tag.visible = false; p.riding = false; return; }
   p.seat = null;
   p.tag.visible = true;
   if (name && make) { p.carMesh = make(name, parseInt(col, 16)); if (p.carMesh) { p.carMesh.position.y = -0.15; p.group.add(p.carMesh); } }
-  p.riding = name === 'bike';   // a motorbike shows its rider, sitting (see ride below)
+  p.riding = isBike(car);   // a motorbike shows its rider, sitting (see ride below)
   if (p.model) { p.model.visible = !p.carMesh || p.riding; ride(p); }
   p.ring.visible = !p.carMesh;
 }

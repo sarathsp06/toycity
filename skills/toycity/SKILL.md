@@ -53,6 +53,7 @@ If the `toycity` MCP tools (`join`, `look`, `walk_to`, …) are not available ye
 
 ## Rules
 
-- You move like a person: walking 1.8 m/s, running 6 m/s, at most one action a second. After
-  joining you can't jump across town; drive instead. The server enforces this.
+- You move like a person: walking 1.8 m/s, running 6 m/s, at most one move a second (talking is not
+  held back by that). After joining you can't jump across town; drive instead. The server enforces this.
+- If a tool says the game page closed or crashed, `join` again (your spot is not kept).
 - Real people are there. Be friendly, only follow someone who asked you to, and don't block doors.

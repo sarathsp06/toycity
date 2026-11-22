@@ -16,7 +16,7 @@ does not depend on the agent behaving:
 | Long walks | click-to-go speeds up | no speed-up; 400 m at most per command |
 | Getting somewhere far | search jumps you there | only where it starts; after that it walks or drives |
 | Driving | up to 100 km/h | only with the autopilot: speed limits, one-way streets, at most 80 km/h |
-| Reacting | | at most one action a second |
+| Reacting | | at most one move a second (talking isn't held back) |
 | What it knows | what is on screen | what is around it (people within 60 m, the next door, a car in reach) |
 
 It is marked 🤖 so nobody mistakes it for a person. On the autopilot a car passes through people instead
@@ -89,7 +89,10 @@ stops cleanly. Speech and hearing run beside the server, so an agent can keep wa
 
 Try it: "Join Barendrecht near Dorpsstraat 141 as Robin, walk to the church, and tell me who you meet."
 
-Run `node try.mjs` for a quick check that the server works.
+Run `node try.mjs` for a quick check that the server works, and `node --test *.test.mjs` here for the unit tests.
+With a whisper.cpp install that has `whisper-server` (Homebrew's does), the model is loaded once and
+kept: words come back in well under a second. `TOYCITY_WHISPER_SERVER=0` uses `whisper-cli` per phrase
+instead; `TOYCITY_DEBUG=1` logs turn timings to stderr.
 
 ## Capabilities
 
@@ -103,3 +106,76 @@ cannot answer.
 `join` also takes `link`: a meeting link from the game's 📍 button. The agent then arrives next to
 whoever shared it. All agents on one computer share a single hidden, muted browser (each gets its own
 tab and storage). It starts with the first agent and closes itself two minutes after the last one leaves.
+
+## How it is built
+
+Four modules, each behind a small interface, so each can be tested and changed alone:
+
+| Module | Interface | What it hides |
+|---|---|---|
+| `server.mjs` | the MCP tools | arguments, limits (`pace`: one move a second, walks of 400 m), wording |
+| `session.mjs` | `Session`: `open`, `need`, `api(method, …)`, `close`; `pageBridge(page)` | the shared browser, the tab, its lease, recovery when the page dies |
+| `../../web/agent.js` | `window.__agentApi` in the page | how the game is read and the body moved |
+| `turn.mjs` | `createTurns({ bridge, tts, stt, clock })`: `say`, `hear`, `sayWav` | the conversation policy |
+| `speech.mjs` | TTS `speak(text, voice) -> { wavB64, seconds }`; STT `transcribe(wavB64, hint) -> string[] \| null` | which engines run, and keeping them alive |
+
+### Speech ports and adapters
+
+- TTS: `kokoroTTS` (one resident Python worker, `kokoro-worker.py`; every request has an id and the
+  reply echoes it, so a late reply can't answer the next request; 15 s per request), `systemTTS` (macOS
+  `say`, `espeak-ng`), `chainTTS` (the first that works, per request), `fakeTTS` (tests).
+- STT: `whisperServerSTT` (`whisper-server` on a private port, started at join, model kept loaded,
+  `POST /inference`, 20 s timeout), `whisperCliSTT` (one process per phrase), `whisperSTT` (the server,
+  else, or when it fails, the CLI), `fakeSTT` (tests). Not finding whisper is checked again after a
+  minute rather than remembered for good. The Silero VAD model is downloaded once, with a 20 s timeout.
+- Supervision: a worker that exits, or doesn't answer in time (it is then killed), is started again on
+  the next request after a backoff of 1, 2, 4 … 60 s; a success resets it. Leaving stops both.
+
+### Turn policy (`turn.mjs`)
+
+- `say` splits the text into sentences (`sentences`): sentence 1 is being synthesized before anything
+  else is awaited, and the next two while earlier ones play. Each clip goes out with one
+  `page.evaluate` that also checks the call is still on.
+- Echo: what I said in the last 30 s, including the sentence playing now, is remembered; a heard phrase
+  that is mostly those words (3+ shared content words, 60 %+) is my own voice coming back (`notMine`).
+  Whisper's descriptions of sounds and the phrases it makes up from silence (`MADE_UP`) are dropped.
+- Barge-in: the page stops me after half a second of sound over my voice. That is only a suspicion:
+  their turn is then heard to its end as in `listen`, and counts as an interruption with a stop word
+  (`CUES`) or 3+ words. Otherwise I carry on 0.4 s before where I stopped; after three false alarms in
+  one `say`, barge-in is off for the rest of it (a noisy room).
+- End of their turn (`hear`): after 400 ms of quiet the audio so far is taken and transcribed while the
+  page keeps listening; the words then set how long the quiet must last (`quietWindow`): a question
+  400 ms, a finished sentence 750 ms, a sentence left hanging ("and", "the", a comma) 1.2 s. If they go
+  on, everything is heard again as one recording. Waits run inside the page (checked every 30 ms), not
+  as polls from here.
+
+### Latency (`test-voice.mjs`, local, Kokoro + whisper small.en; seconds after the person stopped)
+
+| | before | after |
+|---|---|---|
+| `listen` returns their question | 1.9 | 0.8 |
+| interruption verdict ("Stop, stop … instead.") | 1.7 | 0.8 |
+| `say` returns their reply ("… Goodbye.") | 1.9 | 0.8 |
+
+Where it went: whisper-cli loaded the model for every phrase (~5 s cold, ~0.5–1.5 s warm); the
+resident server answers in ~0.4 s, and that now overlaps the quiet window instead of following a fixed
+1.1 s one. `say` no longer waits for the one-move-a-second gap (up to 1 s), and the call check and the
+first take are one round trip. What remains per turn is the agent's own thinking plus ~0.3–0.6 s for
+Kokoro to make the first sentence.
+
+### Supervision and recovery
+
+The session listens for the page crashing or closing and for the shared browser going away. It then
+forgets the page (and the conversation memory) and releases its lease, and every tool answers "The
+game page crashed; use join again." instead of failing on a dead page. Walking and following run inside
+the page, so they end with it; `leave` stops them and the speech workers.
+
+### In-page agent adapter (`web/agent.js`)
+
+Loaded after the game is up (`page.addScriptTag`, from the site, or this checkout's copy when the site
+doesn't serve it yet). It installs `window.__agentApi`: `snapshot()` (what `look` shows: me, people in
+sight with name, what they are doing, `can_talk` from the game's own `__agentCall.canTalk`, distance and
+bearing, the door, the car, calls, knocks), `walkPlace`, `walk`, `stop`, `follow` / `stopFollow` (the
+trail-following loop), `waitFor(event, ms)`, `toDoor`, `knock`, `liveHere`, `answerDoor`, `homeMove`,
+`getIn`, `rideWith`, `getOut`, `driveTo`, `where`, `names`. It moves the body only through the game's
+`window.__agent` (human speeds) and takes pose numbers from `web/mp/state.js` when the game has it.

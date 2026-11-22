@@ -12,6 +12,7 @@
 //   - leave it outside a parking spot and it gets a ticket on the windscreen, and the neighbours toot
 import * as THREE from 'three';
 import { hits } from './solids.js';
+import { STRIDE } from './parked.js';
 
 // which end of each model (along its local x axis) is the bonnet; from the head- and taillights in cars.glb
 export const FRONT = { golf: -1, camry: 1, fiat500: 1, jeep: 1, van: 1, suv: -1, suv_wreck: -1, bike: 1 };
@@ -87,9 +88,6 @@ export function disposeCar(g) {
   g?.traverse(o => { if ((o.isMesh || o.isSprite) && o.userData.own) { o.material.map?.dispose(); o.material.dispose(); } });
 }
 
-// parked cars are keyed by square and index, so a taken car stays taken when its square reloads
-export const carKey = (tile, k) => tile.i + '_' + tile.j + ':' + k;
-
 // the yellow ticket under the wiper
 function ticket() {
   const c = document.createElement('canvas'); c.width = 256; c.height = 128;
@@ -102,13 +100,13 @@ function ticket() {
   return s;
 }
 
-export function createDriving({ scene, player, models, carTiles, solids, ground, note = () => {}, onHitPerson = () => {}, onBumpCar = null }) {
-  const taken = new Set();
+// parked: the parked cars (parked.js), which also keeps which are taken (someone drives them) or dented
+export function createDriving({ scene, player, models, parked, solids, ground, note = () => {}, onHitPerson = () => {}, onBumpCar = null }) {
+  const { taken, dented } = parked;
   const st = { car: null, origin: null, speed: 0, steer: 0, heading: 0, model: null, color: 0 };
   let left = null;           // the car you got out of: { mesh, x, z, heading, model, color, origin, speed, ... }
-  // parked cars someone crashed into: key -> their wrecked mesh, standing in for the instance. The mesh is
-  // null while that square is unloaded (the key stays, so the spot is still dented when it comes back)
-  const dented = new Map();
+  // parked cars someone crashed into (parked.dented): key -> their wrecked mesh, standing in for the instance.
+  // The mesh is null while that square is unloaded (the key stays, so the spot is still dented when it comes back)
   let lost = 0;              // how many of those wait for their square to reload
   const knocked = new Map(); // person id -> seconds until they count as solid again
   let engine = null, ctx = null;
@@ -156,44 +154,11 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
   const ease = k => k * k * (3 - 2 * k);
 
   // ---------- parked cars ----------
+  // the car you got out of wins a tie; otherwise the nearest parked one that is still there
   function nearest(p) {
     let best = null, bd = REACH;
     if (left) { const d = Math.hypot(left.x - p.x, left.z - p.z); if (d < bd) { bd = d; best = { left: true }; } }
-    for (const tile of carTiles) {
-      const { data, all } = tile.cars, ox = tile.group.position.x, oz = tile.group.position.z, pre = tile.i + '_' + tile.j + ':';
-      for (const { k, model } of all) {
-        const d = Math.hypot(data[k] + ox - p.x, data[k + 2] + oz - p.z);
-        if (d >= bd || taken.has(pre + k)) continue;
-        bd = d; best = { tile, k, model, x: data[k] + ox, z: data[k + 2] + oz, yaw: data[k + 3], color: data[k + 5] };
-      }
-    }
-    return best;
-  }
-  // distance to the nearest parking spot (taken ones count: that is where you took it from)
-  function toSpot(x, z) {
-    let bd = Infinity;
-    for (const tile of carTiles) {
-      const { data } = tile.cars, ox = tile.group.position.x, oz = tile.group.position.z;
-      for (let k = 0; k < data.length; k += 6) bd = Math.min(bd, Math.hypot(data[k] + ox - x, data[k + 2] + oz - z));
-    }
-    return bd;
-  }
-  // the nearest parking spot within r metres whose car is out (yours, or another player's): { x, z, yaw }
-  function emptySpotNear(x, z, r) {
-    let best = null, bd = r;
-    for (const tile of carTiles) {
-      const { data } = tile.cars, ox = tile.group.position.x, oz = tile.group.position.z, pre = tile.i + '_' + tile.j + ':';
-      for (let k = 0; k < data.length; k += 6) {
-        if (!taken.has(pre + k)) continue;
-        const sx = data[k] + ox, sz = data[k + 2] + oz, d = Math.hypot(sx - x, sz - z);
-        if (d < bd) { bd = d; best = { x: sx, z: sz, yaw: data[k + 3] }; }
-      }
-    }
-    return best;
-  }
-  function setTaken(key, on, tiles) {
-    on ? taken.add(key) : taken.delete(key);
-    for (const t of tiles) if (t.carFps && key.startsWith(t.i + '_' + t.j + ':')) { const f = t.carFps[+key.split(':')[1] / 6]; if (f) f.off = on; }
+    return parked.nearest(p.x, p.z, bd) || best;
   }
   // collision: how many of 8 points around the body (corners and middles, slightly inside) touch something.
   // ghost (the autopilot): only buildings, water and hedges count; parked cars and people are driven through
@@ -227,30 +192,29 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
   }
   // a parked car you drove into: hide its instance and put its wreck in its place (it stays solid)
   function dentParked(tile, k) {
-    const key = carKey(tile, k); if (dented.has(key) || taken.has(key)) return;
-    const { data } = tile.cars, entry = tile.cars.all.find(c => c.k === k), w = entry && wreckOf(entry.model.name); if (!w) return;
-    const mesh = makeCar(models, w, data[k + 5]);
-    mesh.position.set(data[k] + tile.group.position.x, 0, data[k + 2] + tile.group.position.z); mesh.rotation.y = data[k + 3];
+    const key = parked.key(tile, k); if (dented.has(key) || taken.has(key)) return;
+    const model = parked.modelAt(tile, k), w = model && wreckOf(model.name); if (!w) return;
+    const at = parked.spot(tile, k), mesh = makeCar(models, w, at.color);
+    mesh.position.set(at.x, 0, at.z); mesh.rotation.y = at.yaw;
     scene.add(mesh); dented.set(key, mesh);
   }
   // a square unloads (city.js disposeTile): its wrecks go, their keys stay so the spots are still dented
   function release(tile) {
-    const pre = tile.i + '_' + tile.j + ':';
-    for (const [key, mesh] of dented) if (mesh && key.startsWith(pre)) { disposeCar(mesh); dented.set(key, null); lost++; }
+    for (const [key, mesh] of dented) if (mesh && parked.inSquare(key, tile)) { disposeCar(mesh); dented.set(key, null); lost++; }
   }
   // ...and when it is back, the wrecks are put back in their spots
   function restore() {
     for (const [key, mesh] of dented) {
       if (mesh) continue;
-      for (const t of carTiles) if (key.startsWith(t.i + '_' + t.j + ':')) { dented.delete(key); lost--; dentParked(t, +key.split(':')[1]); break; }
+      const at = parked.at(key); if (at) { dented.delete(key); lost--; dentParked(at.tile, at.k); }
     }
   }
   // which parked cars a box at x, z (heading h) touches, as [tile, k]
   function parkedAt(x, z, h, model) {
     const out = [], me = footprintOf(model, x, z, h);
-    for (const t of carTiles) {
+    for (const t of parked.tiles) {
       if (!t.carFps) continue;
-      t.carFps.forEach((f, n) => { if (!f.off && Math.hypot(f.x - x, f.z - z) < 7 && overlap(f, me)) out.push([t, n * 6]); });
+      t.carFps.forEach((f, n) => { if (!f.off && Math.hypot(f.x - x, f.z - z) < 7 && overlap(f, me)) out.push([t, n * STRIDE]); });
     }
     return out;
   }
@@ -268,10 +232,10 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
     else {
       if (left) {   // that car goes home, dents and all
         const home = left.origin, w = left.model.endsWith('_wreck');
-        setTaken(home, false, carTiles); disposeCar(left.mesh); left = null;
-        if (w) for (const t of carTiles) if (home.startsWith(t.i + '_' + t.j + ':')) dentParked(t, +home.split(':')[1]);
+        parked.setTaken(home, false); disposeCar(left.mesh); left = null;
+        const at = w && parked.at(home); if (at) dentParked(at.tile, at.k);
       }
-      origin = carKey(target.tile, target.k); setTaken(origin, true, carTiles);
+      origin = parked.key(target.tile, target.k); parked.setTaken(origin, true);
       x = target.x; z = target.z; heading = target.yaw; name = target.model.name; color = target.color;
       if (dented.has(origin)) { dented.get(origin).removeFromParent(); disposeCar(dented.get(origin)); dented.delete(origin); name = wreckOf(name) || name; }
     }
@@ -294,7 +258,7 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
     // stopped next to an empty parking spot: the vehicle is put in it neatly, the way you would, facing
     // whichever way along the bay is nearest to how you came in
     let [px, pz, ph] = [x, z, h];
-    if (!rolling) { const sp = emptySpotNear(x, z, SNAP); if (sp) { px = sp.x; pz = sp.z; ph = Math.abs(wrap(sp.yaw - h)) < Math.PI / 2 ? sp.yaw : sp.yaw + Math.PI; } }
+    if (!rolling) { const sp = parked.emptySpotNear(x, z, SNAP); if (sp) { px = sp.x; pz = sp.z; ph = Math.abs(wrap(sp.yaw - h)) < Math.PI / 2 ? sp.yaw : sp.yaw + Math.PI; } }
     mesh.position.set(px, 0, pz); mesh.rotation.y = ph; scene.add(mesh);
     if (st.model === 'bike') { mesh.rotation.order = 'YXZ'; mesh.rotation.x = STAND_LEAN; }   // on its side stand: turned to its heading first, then leaned about its own length
     left = { mesh, x: px, z: pz, heading: ph, model: st.model, color: st.color, origin: st.origin, speed: rolling ? st.speed : 0, t: 0, toots: 0, ticket: null };
@@ -342,7 +306,7 @@ export function createDriving({ scene, player, models, carTiles, solids, ground,
     // parked outside a spot: a ticket after a few seconds, then a few toots while you are near
     if (st.car) return;
     left.t += dt;
-    if (left.bad === undefined) left.bad = toSpot(left.x, left.z) > PARK_OK;
+    if (left.bad === undefined) left.bad = parked.toSpot(left.x, left.z) > PARK_OK;
     if (!left.bad) return;
     if (!left.ticket && left.t > TICKET_AFTER) {
       const f = FRONT[left.model] ?? 1, s = sizeOf(left.model);

@@ -1,0 +1,66 @@
+// node --test tests/*.test.mjs   (walking: collision probes, a way round a wall, the jump onto a hedge)
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createWalker, HEDGE_TOP } from '../web/walker.js';
+import { createGrid, getBit, setBit, newBitmap } from '../web/grid.js';
+
+// a fake square 0_0 with its origin at RD 0, 0: scene x = X, z = -Y. coll: walls; low: hedges; wet: water
+function fakeMap() {
+  const g = createGrid(0, 0, 500), coll = newBitmap(), low = newBitmap(), wet = newBitmap();
+  const fill = (bits, x0, z0, x1, z1) => { for (let x = x0; x < x1; x += 0.5) for (let z = z0; z < z1; z += 0.5) { const [X, Y] = g.toRD(x, z); setBit(bits, g.cellBit(X, Y, 0, 0)); } };
+  const blockedAt = (x, z, h = 0) => {
+    const [X, Y] = g.toRD(x, z); if (X < 0 || Y < 0 || X >= 500 || Y >= 500) return true;
+    const bit = g.cellBit(X, Y, 0, 0);
+    return getBit(coll, bit) === 1 || (h < 0.5 && getBit(low, bit) === 1);
+  };
+  const wetAt = (x, z) => { const [X, Y] = g.toRD(x, z); return X >= 0 && Y >= 0 && X < 500 && Y < 500 && getBit(wet, g.cellBit(X, Y, 0, 0)) ? 0 : null; };
+  return { coll, low, wet, fill, blockedAt, wetAt };
+}
+
+test('the body is a cross of probes: a wall 0.3 m to the side blocks, hedges only low feet', () => {
+  const m = fakeMap(); m.fill(m.coll, 100, -101, 100.5, -99); m.fill(m.low, 110, -101, 111, -99);
+  const w = createWalker({ blockedAt: m.blockedAt });
+  assert.ok(w.blocked(100.25, -100)); assert.ok(w.blocked(99.8, -100)); assert.ok(!w.blocked(99.5, -100));
+  assert.ok(w.blocked(110.5, -100));
+  w.jump.h = 0.6; assert.ok(!w.blocked(110.5, -100), 'over the hedge in a jump');
+  w.jump.h = 0; assert.ok(!w.lineClear(95, -100, 105, -100)); assert.ok(w.lineClear(95, -105, 105, -105));
+});
+
+test('swimming: water is open, a wall is still a wall', () => {
+  const m = fakeMap(); let swimming = false;
+  m.fill(m.coll, 200, -110, 220, -90); m.fill(m.wet, 200, -110, 220, -90);   // the canal is in coll too, as baked
+  m.fill(m.coll, 230, -110, 231, -90);
+  const w = createWalker({ blockedAt: m.blockedAt, wetAt: m.wetAt, swimming: () => swimming });
+  assert.ok(w.blocked(210, -100)); swimming = true; assert.ok(!w.blocked(210, -100)); assert.ok(w.blocked(230.2, -100));
+});
+
+test('localPath goes round a wall, and every leg of it is clear', () => {
+  const m = fakeMap(); m.fill(m.coll, 150, -160, 151, -140);   // a 20 m wall across the straight line
+  const w = createWalker({ blockedAt: m.blockedAt });
+  assert.ok(!w.lineClear(140, -150, 160, -150));
+  const path = w.localPath(140, -150, 160, -150);
+  assert.ok(path && path.length >= 2, JSON.stringify(path));
+  assert.deepEqual(path[path.length - 1], [160, -150]);
+  let [x, z] = [140, -150];
+  for (const [px, pz] of path) { assert.ok(w.lineClear(x, z, px, pz), `leg to ${px}, ${pz}`); [x, z] = [px, pz]; }
+});
+
+test('localPath: no way into a walled-in yard', () => {
+  const m = fakeMap();
+  m.fill(m.coll, 155, -155, 165, -154); m.fill(m.coll, 155, -146, 165, -145);
+  m.fill(m.coll, 155, -155, 156, -145); m.fill(m.coll, 164, -155, 165, -145);
+  const w = createWalker({ blockedAt: m.blockedAt });
+  assert.equal(w.localPath(140, -150, 160, -150), null);
+});
+
+test('a jump lands on top of a hedge, and walking off the top falls back down', () => {
+  const m = fakeMap(); m.fill(m.low, 300, -105, 310, -95);
+  const w = createWalker({ blockedAt: m.blockedAt }), j = w.jump;
+  w.startJump(); assert.equal(j.phase, 'crouch');
+  let top = 0;
+  for (let t = 0; t < 2; t += 0.01) { w.stepJump(0.01, 305, -100); top = Math.max(top, j.h); }
+  assert.ok(top > 1.1 && top < 1.4, 'clears a 1.1 m hedge: ' + top);
+  assert.equal(j.h, HEDGE_TOP); assert.equal(j.h, 1.0); assert.ok(j.onHedge); assert.equal(j.phase, null);
+  for (let t = 0; t < 1; t += 0.01) w.stepJump(0.01, 320, -100);   // stepped off
+  assert.equal(j.h, 0); assert.ok(!j.onHedge);
+});
