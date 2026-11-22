@@ -82,13 +82,23 @@ scene.add(sun, sun.target);
 const SUN_OFFSET = new THREE.Vector3(-250, 380, 200);
 const hemi = new THREE.HemisphereLight(0xdff0ff, 0x8a9a7a, 1.4), amb = new THREE.AmbientLight(0xffffff, 0.35);
 scene.add(hemi, amb);
+// The sky is baked, not drawn: the atmosphere shader (sunlight scattered per pixel) runs once into a
+// cubemap when the time of day changes, and every frame just samples that cube for the background
+// and, blurred, for the reflections on cars and windows. Drawing the shader directly would cost the
+// same scattering maths for half the screen on every frame.
 const sky = new Sky(); sky.scale.setScalar(5000);
+const skyScene = new THREE.Scene(); skyScene.add(sky);
+let skyRT = null;
 {
   const u = sky.material.uniforms; u.turbidity.value = 4; u.rayleigh.value = 1.4; u.mieCoefficient.value = 0.004; u.mieDirectionalG.value = 0.8;
   u.sunPosition.value.copy(SUN_OFFSET).normalize();
-  scene.add(sky);
-  const pm = new THREE.PMREMGenerator(renderer), env = new THREE.Scene(); env.add(sky.clone());
-  scene.environment = pm.fromScene(env).texture; scene.environmentIntensity = 0.45; pm.dispose();
+}
+function bakeSky() {
+  if (!skyRT) skyRT = new THREE.WebGLCubeRenderTarget(Q.shadow >= 4096 ? 1024 : 512, { generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter });
+  new THREE.CubeCamera(1, 20000, skyRT).update(renderer, skyScene);
+  scene.background = skyRT.texture;
+  const pm = new THREE.PMREMGenerator(renderer), old = scene.environment;
+  scene.environment = pm.fromCubemap(skyRT.texture).texture; pm.dispose(); old?.dispose();
 }
 
 // ---------- shared materials (one per kind for the whole city) ----------
@@ -1130,7 +1140,7 @@ function applyTime(name) {
   sun.color.setHex(t.sun); sun.intensity = t.si; hemi.intensity = t.hemi; amb.intensity = t.amb;
   scene.environmentIntensity = t.env; renderer.toneMappingExposure = t.exp; scene.fog.color.setHex(t.fog);
   sky.material.uniforms.sunPosition.value.set(Math.sin(az) * Math.cos(tel), Math.sin(tel), Math.cos(az) * Math.cos(tel));
-  sky.visible = t.el > -6; scene.background = sky.visible ? null : new THREE.Color(0x0b1124);
+  if (t.el > -6) bakeSky(); else scene.background = new THREE.Color(0x0b1124);
   nightK = t.night;
   M.winlit.emissiveIntensity = 1.3 * nightK; M.lamphead.emissiveIntensity = 4 * nightK; M.pool.opacity = 0.75 * nightK;
   M.chargerLight.emissiveIntensity = 0.6 + 2 * nightK;
