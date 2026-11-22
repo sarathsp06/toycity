@@ -29,6 +29,22 @@ export function hint(px, pz, tx, tz, yaw = 0) {
   const a = Math.atan2(right, fwd), k = ((Math.round(a / (Math.PI / 4)) % 8) + 8) % 8;
   return (d < 12 ? '📍' : ARROWS[k]) + ' ' + fmtDist(d);
 }
+// the next real turn along a path ([[x, z]], cumulative metres S) after index i, within `ahead` metres:
+// { dir: 'left' | 'right', in: metres } or null. Headings are taken over ~6 m either side, so the small
+// kinks of a lane offset do not count. x is east, z is south: a positive cross product is a right turn.
+export function nextTurn(P, S, i, at, ahead = 150) {
+  const n = P.length;
+  const back = k => { let j = k; while (j > 0 && S[k] - S[j] < 6) j--; return j; };
+  const fwd = k => { let j = k; while (j < n - 1 && S[j] - S[k] < 6) j++; return j; };
+  for (let k = Math.max(1, i + 1); k < n - 1 && S[k] - at < ahead; k++) {
+    if (S[k] - at < 4) continue;
+    const a = back(k), b = fwd(k); if (a === k || b === k) continue;
+    const ax = P[k][0] - P[a][0], az = P[k][1] - P[a][1], bx = P[b][0] - P[k][0], bz = P[b][1] - P[k][1];
+    const turn = Math.atan2(ax * bz - az * bx, ax * bx + az * bz);
+    if (Math.abs(turn) > 0.6) return { dir: turn > 0 ? 'right' : 'left', in: S[k] - at };
+  }
+  return null;
+}
 // a small deterministic PRNG (mulberry32): the same seed gives the same klusje
 export function rng(seed) {
   let a = seed >>> 0;
@@ -109,7 +125,7 @@ export function pickMission(index, X, Y, seed, { inside = () => true, kind } = {
 
 // ---------- the live part ----------
 const STARS = 'toycity.stars';
-export function createMissions({ player, driving, scene, note = () => {}, index, places, toRD, fromRD, inside, heading, onReward = () => {}, seed, THREE: THREE0 } = {}) {
+export function createMissions({ player, driving, scene, note = () => {}, index, places, toRD, fromRD, inside, heading, route, onReward = () => {}, seed, THREE: THREE0 } = {}) {
   const src = index || places;
   let idx = null, loading = null;
   const loadIndex = () => loading ||= Promise.resolve(typeof src === 'function' ? src() : src).then(i => (idx = i));
@@ -125,7 +141,7 @@ export function createMissions({ player, driving, scene, note = () => {}, index,
   // the beacon: a flat ring and a thin pillar of light, pulsing. three.js is loaded lazily so this
   // module also imports in node (tests) without it.
   let THREE = THREE0 || null, beacon = null;
-  if (scene) (THREE ? Promise.resolve(THREE) : import('three')).then(m => { THREE = m; makeBeacon(); }).catch(e => console.warn('missions: no beacon', e));
+  if (scene) (THREE ? Promise.resolve(THREE) : import('three')).then(m => { THREE = m; makeBeacon(); makeGps(); }).catch(e => console.warn('missions: no beacon', e));
   function makeBeacon() {
     if (beacon || !THREE) return;
     beacon = new THREE.Group();
@@ -136,6 +152,64 @@ export function createMissions({ player, driving, scene, note = () => {}, index,
     beacon.add(ring, pillar); beacon.renderOrder = 9; beacon.visible = false; scene.add(beacon);
     place();
   }
+  // ---------- the GPS line: the route to the next stop, drawn on the street as moving chevrons ----------
+  // route(from, to, mode) -> [[x, z], ...] | null, mode 'foot' or 'car'. Planned when a stop becomes the
+  // target, again when you wander 25 m off it or switch between foot and car (at most every 3 s).
+  // Per frame: a texture scroll; every 0.25 s: the nearest point (searched near the last one) and the turn.
+  let gps = null, gpsMat = null, P = null, S = null, at = 0, gi = 0, planned = null, planning = false, planAt = -1e9, turn = null;
+  const mode = () => (driving?.driving ? 'car' : 'foot');
+  function makeGps() {
+    if (gps || !THREE || !scene) return;
+    const c = document.createElement('canvas'); c.width = 64; c.height = 64;
+    const x = c.getContext('2d');
+    x.fillStyle = 'rgba(255,140,40,.55)'; x.fillRect(8, 0, 48, 64);
+    x.strokeStyle = '#fff'; x.lineWidth = 9; x.lineCap = 'round'; x.lineJoin = 'round';
+    x.beginPath(); x.moveTo(18, 42); x.lineTo(32, 20); x.lineTo(46, 42); x.stroke();   // a chevron pointing along +v (canvas up, as the texture is flipped)
+    const tex = new THREE.CanvasTexture(c); tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.colorSpace = THREE.SRGBColorSpace;
+    gpsMat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
+    gps = new THREE.Mesh(new THREE.BufferGeometry(), gpsMat); gps.renderOrder = 8; gps.frustumCulled = false; gps.visible = false;
+    scene.add(gps);
+  }
+  function setPath(pts) {
+    P = pts; S = new Float64Array(pts.length); gi = 0; at = 0; turn = null;
+    for (let k = 1; k < pts.length; k++) S[k] = S[k - 1] + Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
+    if (!gps) return;
+    const n = pts.length, pos = new Float32Array(n * 6), uv = new Float32Array(n * 4), idx = new Uint32Array((n - 1) * 6), W = mode() === 'car' ? 1.3 : 0.9;
+    for (let k = 0; k < n; k++) {
+      const a = pts[Math.max(0, k - 1)], b = pts[Math.min(n - 1, k + 1)];
+      let tx = b[0] - a[0], tz = b[1] - a[1]; const l = Math.hypot(tx, tz) || 1; tx /= l; tz /= l;
+      pos.set([pts[k][0] - tz * W, 0.25, pts[k][1] + tx * W, pts[k][0] + tz * W, 0.25, pts[k][1] - tx * W], k * 6);
+      uv.set([0, S[k] / 3, 1, S[k] / 3], k * 4);
+      if (k < n - 1) idx.set([2 * k, 2 * k + 2, 2 * k + 1, 2 * k + 1, 2 * k + 2, 2 * k + 3], k * 6);
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.BufferAttribute(uv, 2)); g.setIndex(new THREE.BufferAttribute(idx, 1));
+    gps.geometry.dispose(); gps.geometry = g; gps.visible = true;
+  }
+  function clearPath() { P = S = null; planned = null; turn = null; if (gps) gps.visible = false; }
+  async function plan(t) {
+    if (!route || planning) return;
+    planning = true; planAt = performance.now();
+    const key = planned = t.label + '|' + mode(), p = player.position;
+    const pts = await Promise.resolve(route({ x: p.x, z: p.z }, { x: t.x, z: t.z }, mode())).catch(e => { console.warn('missions: route', e); return null; });
+    planning = false;
+    if (!active || target() !== t || key !== planned) return;   // the errand moved on meanwhile
+    if (pts && pts.length > 1) setPath(pts); else clearPath(), planned = key;   // no route: the arrow points straight
+  }
+  // where you are along the path: the nearest segment, looked for a little behind and well ahead of the last
+  function follow(px, pz) {
+    let best = Infinity, bk = gi, bs = at;
+    for (let k = Math.max(0, gi - 3); k < Math.min(P.length - 1, gi + 60); k++) {
+      const [ax, az] = P[k], dx = P[k + 1][0] - ax, dz = P[k + 1][1] - az, l2 = dx * dx + dz * dz || 1;
+      const u = Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / l2)), ex = ax + dx * u - px, ez = az + dz * u - pz, d = ex * ex + ez * ez;
+      if (d < best) { best = d; bk = k; bs = S[k] + u * (S[k + 1] - S[k]); }
+    }
+    gi = bk; at = bs;
+    if (gps) gps.geometry.setDrawRange(bk * 6, (P.length - 1 - bk) * 6);
+    return Math.sqrt(best);
+  }
+  // the point ~20 m on along the path: what the screen arrow points at
+  function ahead(m = 20) { let k = gi + 1; while (k < P.length - 1 && S[k] - at < m) k++; return P[k]; }
   const toWorld = s => { if (s.x === undefined) { const [x, z] = fromRD ? fromRD(s.X, s.Y) : [s.X, s.Y]; s.x = x; s.z = z; } return s; };
   function target() { if (!active) return null; if (!active.any) return toWorld(active.stops[active.i]); let best = null, bd = Infinity; for (const s of active.stops) { if (s.done) continue; toWorld(s); const d = dist2d(player.position.x, player.position.z, s.x, s.z); if (d < bd) { bd = d; best = s; } } return best; }
   function place() { if (!beacon) return; const t = target(); beacon.visible = !!t; if (t) beacon.position.set(t.x, 0.2, t.z); }
@@ -157,21 +231,24 @@ export function createMissions({ player, driving, scene, note = () => {}, index,
     if (active || !offered) return active;
     active = offered; offered = null; active.i = 0; active.left = active.limit; active.t = 0;
     for (const s of active.stops) { s.done = false; toWorld(s); }
-    const t = target();
+    active.oops = 0; active.drove = false;
+    const t = target(); clearPath(); plan(t);
     note(`${active.emoji} Off to ${t.label}. You have ${fmtTime(active.limit)}.`);
     place(); changed();
     return active;
   }
   function cancel(why) {
     if (!active && !offered) return;
-    active = null; offered = null; place();
+    active = null; offered = null; place(); clearPath();
     if (why) note(why);
     changed();
   }
   function finish() {
-    stats.stars += active.reward; stats.done++; save();
-    const r = active.reward; active = null; place();
-    note(`🌟 Done! +${r} ${r === 1 ? 'star' : 'stars'} (${stats.stars} now). Ready for the next one?`);
+    // GTA, but for good behaviour: an errand driven without bumping anyone earns a star for being careful
+    const careful = active.drove && !active.oops ? 1 : 0, r = active.reward + careful;
+    stats.stars += r; stats.done++; save();
+    active = null; place(); clearPath();
+    note(`🌟 Done! +${r} ${r === 1 ? 'star' : 'stars'}${careful ? ' (one for careful driving 🛡️)' : ''}. ${stats.stars} now.`);
     try { onReward(r, { ...stats }); } catch (e) { console.warn('onReward', e); }
     changed();
   }
@@ -184,22 +261,43 @@ export function createMissions({ player, driving, scene, note = () => {}, index,
       const t = target();
       if (!t) return finish();
       const p = player.position, inCar = !!driving?.driving, speed = driving?.speed || 0;
+      if (inCar) active.drove = true;
       if (reached(p.x, p.z, t.x, t.z, { inCar, speed })) {
         t.done = true; active.i++;
         if (active.stops.every(s => s.done)) return finish();
-        note(t.say); place(); changed(); return;
+        note(t.say); place(); clearPath(); plan(target()); changed(); return;
       }
+      if (gpsMat) gpsMat.map.offset.y -= dt * (inCar ? 1.2 : 0.6);   // the chevrons flow toward the stop
       if (active.left <= 0) { stats.late++; save(); return cancel('⏰ Too late this time, better luck next time! Ask for a new errand whenever you like.'); }
-      if ((hudT += dt) > 0.25) { hudT = 0; const h = hint(p.x, p.z, t.x, t.z, heading ? heading() : 0); const s = `${active.emoji} ${t.label} · ${h} · ⏱ ${fmtTime(active.left)}`; if (s !== last) { last = s; changed(); } }
+      if ((hudT += dt) > 0.25) {
+        hudT = 0;
+        const key = t.label + '|' + mode(), off = P ? follow(p.x, p.z) : 0;
+        if (!planning && (key !== planned || off > 25) && performance.now() - planAt > 3000) plan(t);
+        turn = P ? nextTurn(P, S, gi, at) : null;
+        const s = api.line; if (s !== last) { last = s; changed(); }
+      }
     },
     offer, accept, cancel,
     get active() { return active; },
     get offered() { return offered; },
     get stats() { return { ...stats }; },
-    get line() { if (!active) return ''; const t = target(); return t ? `${active.emoji} ${t.label} · ${hint(player.position.x, player.position.z, t.x, t.z, heading ? heading() : 0)} · ⏱ ${fmtTime(active.left)}` : ''; },
+    // the running line: where to, the next turn when it is close (else an arrow along the route), time left
+    get line() {
+      if (!active) return ''; const t = target(); if (!t) return '';
+      const p = player.position, yaw = heading ? heading() : 0, d = dist2d(p.x, p.z, t.x, t.z);
+      let way;
+      if (P && d > 12) {
+        const left = S[S.length - 1] - at;
+        way = turn && turn.in < 120 ? `${turn.dir === 'left' ? '↰ Left' : '↱ Right'} in ${fmtDist(turn.in)} · ${fmtDist(left)}`
+          : hint(p.x, p.z, ...ahead(), yaw).split(' ')[0] + ' ' + fmtDist(left);
+      } else way = hint(p.x, p.z, t.x, t.z, yaw);
+      return `${active.emoji} ${t.label} · ${way} · ⏱ ${fmtTime(active.left)}`;
+    },
+    // something careless happened (you hit someone, bumped a car): no careful-driving star this time
+    oops() { if (active) active.oops++; },
     get idle() { return !active && !offered && (!driving?.driving || Math.abs(driving.speed || 0) < STOPPED); },
     onChange(f) { listeners.add(f); return () => listeners.delete(f); },
-    dispose() { listeners.clear(); if (beacon) { scene.remove(beacon); beacon = null; } active = offered = null; },
+    dispose() { listeners.clear(); if (beacon) { scene.remove(beacon); beacon = null; } if (gps) { scene.remove(gps); gps.geometry.dispose(); gpsMat.map.dispose(); gpsMat.dispose(); gps = null; } active = offered = null; },
   };
   return api;
 }
@@ -207,7 +305,7 @@ export function createMissions({ player, driving, scene, note = () => {}, index,
 // HUD: a "📦 Klusje" button when you are on foot or stopped; the offer with "Doen!" / "Liever niet";
 // the running mission as a line with a small stop button. Markup: <div id="mission"></div>.
 export function mountMissions(container, missions) {
-  container.innerHTML = '<button type="button" class="ask">📦 Errand</button><span class="offer" hidden><span class="text"></span><button type="button" class="yes">👍 Do it!</button><button type="button" class="no">Not now</button></span><span class="run" hidden><span class="text"></span><button type="button" class="stop" title="Stop dit klusje" aria-label="Stop">✖</button></span>';
+  container.innerHTML = '<button type="button" class="ask">🤝 Help out</button><span class="offer" hidden><span class="text"></span><button type="button" class="yes">👍 Do it!</button><button type="button" class="no">Not now</button></span><span class="run" hidden><span class="text"></span><button type="button" class="stop" title="Stop this errand" aria-label="Stop">✖</button></span>';
   const ask = container.querySelector('.ask'), offer = container.querySelector('.offer'), run = container.querySelector('.run');
   const ot = offer.querySelector('.text'), rt = run.querySelector('.text');
   ask.addEventListener('click', e => { e.stopPropagation(); missions.offer(); });

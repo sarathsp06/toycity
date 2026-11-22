@@ -117,3 +117,15 @@ test('live: too late only says so and clears the mission', async () => {
   assert.equal(m.stats.late, 1); assert.equal(m.stats.stars, 0);
   assert.ok(await m.offer(), 'and a new one is offered');
 });
+
+test('nextTurn finds left and right turns, ignoring small kinks', async () => {
+  const { nextTurn } = await import('../web/missions.js');
+  const cum = P => { const S = [0]; for (let k = 1; k < P.length; k++) S.push(S[k - 1] + Math.hypot(P[k][0] - P[k - 1][0], P[k][1] - P[k - 1][1])); return S; };
+  // east 50 m, then south (z grows): a right turn 50 m ahead
+  let P = [[0, 0], [10, 0], [20, 0], [30, 0], [40, 0], [50, 0], [50, 10], [50, 20], [50, 30]];
+  let t = nextTurn(P, cum(P), 0, 0); assert.equal(t.dir, 'right'); assert.equal(Math.round(t.in), 50);
+  P = P.map(([x, z]) => [x, -z]);   // east, then north: left
+  assert.equal(nextTurn(P, cum(P), 0, 0).dir, 'left');
+  P = [[0, 0], [20, 0], [21, 0.4], [40, 0.4], [80, 0.4]];   // a lane-offset kink is not a turn
+  assert.equal(nextTurn(P, cum(P), 0, 0), null);
+});

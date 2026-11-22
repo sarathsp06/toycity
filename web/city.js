@@ -712,7 +712,7 @@ function note(text) {
 const homes = createHomes({ scene, player, tiles, T, toRD, fromRD: (X, Y) => [X - ORX, ORY - Y], slug, note, loader: new GLTFLoader(),
   look: y => { yaw = y; pitch = Math.min(pitch, 0.35); dist = Math.max(6, Math.min(dist, 12)); },
   onKnock: () => avatar.pose?.set('knock', { once: true }) });
-driving = createDriving({ scene, player, models: CAR_MODELS, carTiles, solids, ground: (x, z) => blockedAt(x, z), note, onHitPerson: hitPerson, onBumpCar: (x, z) => traffic?.bumped(x, z) });
+driving = createDriving({ scene, player, models: CAR_MODELS, carTiles, solids, ground: (x, z) => blockedAt(x, z), note, onHitPerson: hitPerson, onBumpCar: (x, z) => { traffic?.bumped(x, z); missions?.oops(); } });
 
 // ---------- knocking people over, and the card you get for it ----------
 // Drive into someone and they go flying (their own game plays it: see knockDown). The driver gets a card
@@ -738,7 +738,7 @@ function showCard(group, level, y) {
 function hitPerson(id, vx, vz) {
   const p = window.__city.social?.presence.peers.get(id);
   if (!peds?.hit(id, vx, vz)) social?.presence.sendTo(id, { t: 'hit', vx, vz, by: social.presence.name });   // one of the town's people, or a player
-  card.level = Math.min(2, card.level + 1); card.t = CARD_FOR;
+  card.level = Math.min(2, card.level + 1); card.t = CARD_FOR; missions?.oops();
   note(card.level > 1 ? `🟥 Red card! You hit ${p?.name || 'someone'} again. Everyone can see it.` : `🟨 Yellow card: you hit ${p?.name || 'someone'}. Drive carefully.`);
 }
 // someone drove into you: fly, land, lie there a moment, get up (only when on foot)
@@ -910,7 +910,12 @@ mountRadio(document.body, radio);
 const missions = createMissions({ player, driving, scene, note, toRD, fromRD: (X, Y) => [X - ORX, ORY - Y],
   index: async () => searchIndex ||= await (await fetch(new URL('search.json', base))).json(),
   inside: (X, Y) => HAVE.has(Math.floor(X / T) + '_' + Math.floor(Y / T)),
-  heading: () => yaw });
+  heading: () => yaw,
+  // the GPS line: a walking route on foot, the road route by car or bike; null falls back to the arrow
+  route: async (from, to, mode) => {
+    const v = mode === 'foot' ? 'foot' : driving.model === 'bike' ? 'bike' : 'car';
+    return (await autopilot.plan(from, to, v).catch(() => null)) || (v === 'foot' ? await autopilot.plan(from, to, 'bike').catch(() => null) : null);
+  } });
 mountMissions(document.getElementById('mission'), missions);
 const apButton = document.getElementById('apbtn'), apForm = document.getElementById('apform'), apInput = document.getElementById('apq');
 async function autoTo(x, z, label) {
