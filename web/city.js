@@ -13,7 +13,11 @@ import { loadAvatar, myLook, poseLayer } from './avatar.js';
 import { createSolids, footprintsOf, PERSON } from './solids.js';
 import { createDriving, makeCar, carKey, footprintOf, FRONT, PASSENGER, seatLocal } from './vehicle.js';
 import { createAutopilot } from './autopilot.js';
+import { createTraffic, COUNT as TRAFFIC_N } from './traffic.js';
+import { createPeds, COUNT as PEDS_N } from './peds.js';
 import { createHomes } from './home.js';
+import { createRadio, mountRadio } from './radio.js';
+import { createMissions, mountMissions } from './missions.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 const params = new URLSearchParams(location.search);
@@ -733,7 +737,7 @@ function showCard(group, level, y) {
 }
 function hitPerson(id, vx, vz) {
   const p = window.__city.social?.presence.peers.get(id);
-  social?.presence.sendTo(id, { t: 'hit', vx, vz, by: social.presence.name });
+  if (!peds?.hit(id, vx, vz)) social?.presence.sendTo(id, { t: 'hit', vx, vz, by: social.presence.name });   // one of the town's people, or a player
   card.level = Math.min(2, card.level + 1); card.t = CARD_FOR;
   note(card.level > 1 ? `🟥 Red card! You hit ${p?.name || 'someone'} again. Everyone can see it.` : `🟨 Yellow card: you hit ${p?.name || 'someone'}. Drive carefully.`);
 }
@@ -871,6 +875,43 @@ const autopilot = createAutopilot({
   toWGS: (x, z) => rdToWgs(...toRD(x, z)),
   inside: (x, z) => { const [X, Y] = toRD(x, z); return HAVE.has(Math.floor(X / T) + '_' + Math.floor(Y / T)); },
 });
+// ---------- ambient life: cars on the streets and people on the pavements (traffic.js, peds.js) ----------
+// The same for everyone: fixed loops on the road graph, timed by the wall clock (see ambient.js).
+// ?traffic=0 or the 🚗 Traffic button turns it off; the counts follow the quality preset.
+const qName = params.get('quality') || 'mid';
+let trafficOn = params.get('traffic') !== '0' && localStorage.getItem('toycity.traffic') !== 'off';
+// the players everyone knows about besides me (other people in the square), so that a car waiting for
+// someone waits in every browser alike; the list is reused, filled once per frame at most
+const othersList = [];
+function others() {
+  othersList.length = 0;
+  const peers = social?.presence?.peers; if (!peers) return othersList;
+  for (const q of peers.values()) {
+    const g = q.player?.group; if (!g || !g.visible || q.car?.startsWith('ride')) continue;
+    othersList.push({ x: g.position.x, z: g.position.z, inCar: !!q.car });
+  }
+  return othersList;
+}
+const ambientOpts = { scene, autopilot, solids, slug, T, toRD, others };
+const traffic = createTraffic({ ...ambientOpts, models: CAR_MODELS, sounds: () => social?.ambience?.on ?? true, count: trafficOn ? TRAFFIC_N[qName] || TRAFFIC_N.mid : 0 });
+const peds = createPeds({ ...ambientOpts, count: trafficOn ? PEDS_N[qName] || PEDS_N.mid : 0 });
+const me = { x: 0, z: 0, onFoot: true, inCar: false, fly: false };   // what the ambient life needs to know of me
+const trafficBtn = document.getElementById('trafficbtn');
+function setTraffic(on) {
+  trafficOn = on; localStorage.setItem('toycity.traffic', on ? 'on' : 'off');
+  traffic.setCount(on ? TRAFFIC_N[qName] || TRAFFIC_N.mid : 0); peds.setCount(on ? PEDS_N[qName] || PEDS_N.mid : 0);
+  if (trafficBtn) { trafficBtn.textContent = on ? '🚗 Traffic' : '🚗 Traffic off'; trafficBtn.setAttribute('aria-pressed', on); }
+}
+trafficBtn?.addEventListener('click', () => setTraffic(!trafficOn));
+setTraffic(trafficOn);
+// ---------- car radio (radio.js) and klusjes, small street errands (missions.js) ----------
+const radio = createRadio();
+mountRadio(document.body, radio);
+const missions = createMissions({ player, driving, scene, note, toRD, fromRD: (X, Y) => [X - ORX, ORY - Y],
+  index: async () => searchIndex ||= await (await fetch(new URL('search.json', base))).json(),
+  inside: (X, Y) => HAVE.has(Math.floor(X / T) + '_' + Math.floor(Y / T)),
+  heading: () => yaw });
+mountMissions(document.getElementById('mission'), missions);
 const apButton = document.getElementById('apbtn'), apForm = document.getElementById('apform'), apInput = document.getElementById('apq');
 async function autoTo(x, z, label) {
   note('🧭 Planning a route to ' + label + '…');
@@ -1145,6 +1186,7 @@ function applyTime(name) {
   M.winlit.emissiveIntensity = 1.3 * nightK; M.lamphead.emissiveIntensity = 4 * nightK; M.pool.opacity = 0.75 * nightK;
   M.chargerLight.emissiveIntensity = 0.6 + 2 * nightK;
   for (const p of pools) p.visible = nightK > 0.02;
+  traffic?.setNight(nightK);
   shadowDirty = true;
 }
 document.getElementById('tod').onchange = e => applyTime(e.target.value);
@@ -1391,6 +1433,11 @@ function frame(now) {
   if (card.level && (card.t -= dt) <= 0) { card.level = 0; note('Card gone. Thanks for driving carefully.'); }
   showCard(player, card.level, driving.driving ? 2.3 : 2.25);
   driving.tick(dt, player.position);
+  radio.update(driving.driving && !driving.rider);   // a bike has no radio
+  missions.update(dt);
+  // the town's own cars and people: where I am and whether I am on foot, in a car, or flying
+  me.x = player.position.x; me.z = player.position.z; me.inCar = driving.driving || !!ride; me.onFoot = !me.inCar && !fly; me.fly = fly;
+  traffic.update(dt, me); peds.update(dt, me);
   player.position.y = 0.15 + jump.h + (fling.on ? fling.h : 0);
   // sharp shadows that follow the player
   const R = 40 + Math.min(dist, 150) * 0.9;
@@ -1401,7 +1448,7 @@ function frame(now) {
   // a door, someone nearby; a square or the time of day changing sets shadowDirty where it happens.
   // Standing still, it is kept as it is.
   if (!camera.position.equals(camAt) || !camera.quaternion.equals(camQ) || driving.driving || ride || fling.on || jump.phase
-    || homes.busy || avatar.speed > 0.02 || peerNear()) shadowDirty = true;
+    || homes.busy || avatar.speed > 0.02 || peerNear() || traffic.near(R) || peds.near(R)) shadowDirty = true;
   camAt.copy(camera.position); camQ.copy(camera.quaternion);
   if (shadowDirty) { renderer.shadowMap.needsUpdate = true; shadowDirty = false; }
 
@@ -1436,7 +1483,7 @@ if (AGENT) window.__agent = {
   draw(n = 3) { AGENT.draw = n; },   // render the next few frames (for a screenshot)
   get drawing() { return AGENT.draw > 0; },
 };
-window.__city = { ovTiles, solids, driving, knockDown, card, fling, homes, health, nearestPlace, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, jump, toRD, rdToWgs, ORX, ORY, info, stats: null };
+window.__city = { ovTiles, solids, driving, radio, missions, knockDown, card, fling, homes, health, traffic, peds, setTraffic, nearestPlace, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, jump, toRD, rdToWgs, ORX, ORY, info, stats: null };
 // ---------- social layer: other people, voice and background sounds (web/mp/, ?mp=0 turns it off) ----------
 // It only reads the player's position and the trees and parked cars around it; nothing here depends on it.
 let social = null;
@@ -1448,7 +1495,7 @@ function surroundings() {
     if (t.trees) for (let k = 0; k < t.trees.length; k += 6) if (Math.hypot(t.trees[k] + ox - p.x, t.trees[k + 2] + oz - p.z) < 40) trees++;
     if (t.cars) for (let k = 0; k < t.cars.data.length; k += 6) if (Math.hypot(t.cars.data[k] + ox - p.x, t.cars.data[k + 2] + oz - p.z) < 60) cars++;
   }
-  return { green: Math.min(1, trees / 25), street: Math.min(1, cars / 30), inCar: (driving.driving && !driving.rider) || (!!ride && !ride.car?.startsWith('bike')) };
+  return { green: Math.min(1, trees / 25), street: Math.min(1, (cars + 4 * traffic.near(60)) / 30), traffic: traffic.near(60), inCar: (driving.driving && !driving.rider) || (!!ride && !ride.car?.startsWith('bike')) };
 }
 if (params.get('mp') !== '0') import('./mp/index.js').then(m => m.start({
   scene, camera, player, toRD, fromRD: (X, Y) => [X - ORX, ORY - Y], slug, params, surroundings, useAvatar, solids, goToRD: arriveNear,

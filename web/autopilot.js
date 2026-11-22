@@ -35,6 +35,34 @@ function decode(str) {
   return out;
 }
 
+// ---------- the path a vehicle follows ----------
+// Drop points closer than 2 m, then move the line to the right-hand side of the road, square to the
+// average of the two neighbouring directions. In a corner the offset shrinks (a right turn would
+// otherwise cut over the inside kerb), and near the start and the end it fades out.
+// Also used by the ambient traffic (traffic.js) and exported for it.
+export function lanePath(pts, lane, steps = []) {
+  const path = [], map = [];   // map: shape index -> path index, for the turn-by-turn steps
+  for (let i = 0; i < pts.length; i++) {
+    const q = path[path.length - 1];
+    if (!q || Math.hypot(pts[i][0] - q[0], pts[i][1] - q[1]) > 2) path.push([pts[i][0], pts[i][1]]);
+    map[i] = path.length - 1;
+  }
+  const s = [0]; for (let i = 1; i < path.length; i++) s.push(s[i - 1] + Math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1]));
+  const L = s[s.length - 1], out = [];
+  for (let i = 0; i < path.length; i++) {
+    const p = path[Math.max(0, i - 1)], n = path[Math.min(path.length - 1, i + 1)];
+    let dx = n[0] - p[0], dz = n[1] - p[1]; const d = Math.hypot(dx, dz) || 1; dx /= d; dz /= d;
+    // a segment's own direction, to scale the mitre
+    const a = path[i], b = path[Math.min(path.length - 1, i + 1)], sd = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const cos = sd ? Math.max(0, (dx * (b[0] - a[0]) + dz * (b[1] - a[1])) / sd) : 1;
+    const fade = Math.min(1, s[i] / 12, (L - s[i]) / 12), o = lane * fade * cos * cos;
+    out.push([a[0] - dz * o, a[1] + dx * o]);   // right of the direction (dx, dz) is (-dz, dx)
+  }
+  return { path: out, s, steps: steps.map(st => ({ ...st, s: s[map[Math.min(st.at, map.length - 1)]] })) };
+}
+
+const laneOffset = lanePath;
+
 export function createAutopilot({ roadsUrl, fromRD, fromWGS, toWGS, inside }) {
   let graph = null, route = null;
 
@@ -118,41 +146,18 @@ export function createAutopilot({ roadsUrl, fromRD, fromWGS, toWGS, inside }) {
       }
     }
     if (from[b] < 0 && a !== b) return null;
-    const out = []; for (let v = b; v >= 0; v = from[v]) out.push([xs[v], zs[v]]);
+    const out = []; for (let v = b; v >= 0; v = from[v]) out.push(v);   // node ids, destination first
     return out.reverse();
   }
   async function local(car, to, vehicle) {
     const g = await load(), bit = vehicle === 'bike' ? 8 : 4;
     const a = g.nearest(car.x, car.z, bit), b = g.nearest(to.x, to.z, bit);
     if (a < 0 || b < 0) return null;
-    const pts = astar(g, a, b, bit); if (!pts) return null;
-    return { pts, steps: [], source: 'local' };
+    const ids = astar(g, a, b, bit); if (!ids) return null;
+    return { pts: ids.map(v => [g.xs[v], g.zs[v]]), steps: [], source: 'local' };
   }
 
-  // ---------- the path the car follows ----------
-  // Drop points closer than 2 m, then move the line to the right-hand side of the road, square to the
-  // average of the two neighbouring directions. In a corner the offset shrinks (a right turn would
-  // otherwise cut over the inside kerb), and near the start and the end it fades out.
-  function lanePath(pts, lane, steps) {
-    const path = [], map = [];   // map: shape index -> path index, for the turn-by-turn steps
-    for (let i = 0; i < pts.length; i++) {
-      const q = path[path.length - 1];
-      if (!q || Math.hypot(pts[i][0] - q[0], pts[i][1] - q[1]) > 2) path.push([pts[i][0], pts[i][1]]);
-      map[i] = path.length - 1;
-    }
-    const s = [0]; for (let i = 1; i < path.length; i++) s.push(s[i - 1] + Math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1]));
-    const L = s[s.length - 1], out = [];
-    for (let i = 0; i < path.length; i++) {
-      const p = path[Math.max(0, i - 1)], n = path[Math.min(path.length - 1, i + 1)];
-      let dx = n[0] - p[0], dz = n[1] - p[1]; const d = Math.hypot(dx, dz) || 1; dx /= d; dz /= d;
-      // a segment's own direction, to scale the mitre
-      const a = path[i], b = path[Math.min(path.length - 1, i + 1)], sd = Math.hypot(b[0] - a[0], b[1] - a[1]);
-      const cos = sd ? Math.max(0, (dx * (b[0] - a[0]) + dz * (b[1] - a[1])) / sd) : 1;
-      const fade = Math.min(1, s[i] / 12, (L - s[i]) / 12), o = lane * fade * cos * cos;
-      out.push([a[0] - dz * o, a[1] + dx * o]);   // right of the direction (dx, dz) is (-dz, dx)
-    }
-    return { path: out, s, steps: steps.map(st => ({ ...st, s: s[map[Math.min(st.at, map.length - 1)]] })) };
-  }
+  const lanePath = laneOffset;   // see the top of the file
 
   // Ask the online router and load the local graph at the same time. The online route wins when it
   // answers within GRACE; after that the local one is used as soon as it is ready, and `late` gets the
@@ -250,6 +255,9 @@ export function createAutopilot({ roadsUrl, fromRD, fromWGS, toWGS, inside }) {
 
   return {
     start, stop, drive, plan,
+    // the region's own road graph and A* over it, for the ambient traffic and people (ambient.js):
+    // graph() loads it once; route(a, b, bit) is the node list a..b for that vehicle bit (sync, once loaded)
+    local: { graph: load, route: (a, b, bit) => (graph ? astar(graph, a, b, bit) : null) },
     get active() { return !!route; },
     get label() { return route?.label; },
     // what is left of the trip, in metres

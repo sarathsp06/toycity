@@ -53,7 +53,8 @@ const DRIVER_GLASS = new THREE.MeshStandardMaterial({ color: 0xdfe8ee, roughness
 
 // one car model as a group of meshes; the paint gets its own material (each car has its own colour).
 // driven: the car you are in, built with opening doors and its interior when the model has them
-export function makeCar(models, name, color, driven = false) {
+// lo: the far-away version (fewer parts, no doors), for the ambient traffic beyond a hundred metres
+export function makeCar(models, name, color, driven = false, lo = false) {
   const model = models.find(m => m.name === name) || models[0]; if (!model) return null;
   const g = new THREE.Group(); g.userData.car = true;
   const add = (parent, parts, cabin = false) => {
@@ -67,7 +68,8 @@ export function makeCar(models, name, color, driven = false) {
     }
   };
   // a car with separate doors (see tools/blendswap_cars.py): the body plus one pivot per door, on its hinge
-  if (model.open) {
+  if (lo) add(g, model.lo);
+  else if (model.open) {
     add(g, model.open.body);
     if (driven && model.open.interior) {   // mirrored: the steering wheel goes to the right
       const cab = new THREE.Group(); cab.scale.z = -1; add(cab, model.open.interior, true); g.add(cab);

@@ -120,6 +120,10 @@ What that needs, which is why it isn't done now:
 
 Worth it once more than about 15–20 people gather in the same 500 m square, or for players whose networks block direct connections.
 
+## Ambient traffic and people
+
+The cars driving the streets and the people on the pavements (`web/traffic.js`, `web/peds.js`, shared machinery in `web/ambient.js`) are not sent over the network at all, yet everyone sees the same ones in the same places. Each has a stable id (map square + number); its route is a closed loop over the region's road graph (`roads.json`) chosen by a PRNG seeded from the region, square and id, planned there and back with the autopilot's local A*; and its position is the progress along that loop at `Date.now() / 1000` plus a seeded phase, modulo the loop's period. Every browser computes the same thing from the same file and the same clock, so they agree within clock drift and no state is shared. Which loops exist near you follows from which squares are within reach, not from random spawns. Stopping for a player in the road (any known player: you and the peers in presence, so every browser derives the same stop), the horn, stepping aside and being knocked over are a *local lag* on the schedule (made up at 1.5x afterwards) and local offsets; the schedule itself never changes, so browsers never diverge. The card a driver gets for hitting one of them goes through the existing card mechanism, which is shared.
+
 ## Limits of the current version
 
 - Everyone in a room connects to everyone else in it. That's fine for small groups, but it won't scale to crowds.
