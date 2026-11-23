@@ -8,6 +8,8 @@
 //     wetAt(x, z)         the water level there, or null on dry land (only asked while swimming)
 //     solids              solids.js registry (parked cars, trees, people), or null
 //     swimming(), flying()
+//     step()              the highest top you walk up onto without jumping (default STEP; lower indoors)
+//     ceiling()           the highest the feet may go (a room: its height less a body's); default none
 //   walker.blocked(x, z)                     the body (a 0.3 m cross of probes) at x, z touches something
 //   walker.lineClear(x0, z0, x1, z1)         nothing in the way, every 0.4 m
 //   walker.localPath(x0, z0, x1, z1)         [[x, z], ...] round what is in the way, or null
@@ -33,7 +35,7 @@ export const GRAVITY = 14, JUMP_V = 6.5, CROUCH_T = 0.12, LAND_T = 0.16;
 // and the body's feet radius for what it stands on
 export const HEDGE_TOP = 1.1, STEP = 0.55, FEET = 0.2;
 
-export function createWalker({ blockedAt, wetAt = () => null, ground = () => 0, solids = null, swimming = () => false, flying = () => false, standing = () => true }) {
+export function createWalker({ blockedAt, wetAt = () => null, ground = () => 0, step = () => STEP, ceiling = () => Infinity, solids = null, swimming = () => false, flying = () => false, standing = () => true }) {
   const jump = { h: 0, v: 0, phase: null, t: 0, onHedge: false };
   // the top of the baked map at a point: open ground its own height, a hedge HEDGE_TOP, a wall or water never
   const groundTop = (x, z) => !blockedAt(x, z, 0) ? ground(x, z) : blockedAt(x, z, 99) ? Infinity : HEDGE_TOP;
@@ -48,8 +50,9 @@ export function createWalker({ blockedAt, wetAt = () => null, ground = () => 0, 
       for (let k = 0; k < PROBES.length; k += 2) { const px = x + PROBES[k], pz = z + PROBES[k + 1]; if (wetAt(px, pz) === null && blockedAt(px, pz, h)) return true; }
       return false;
     }
-    for (let k = 0; k < PROBES.length; k += 2) if (groundTop(x + PROBES[k], z + PROBES[k + 1]) > h + STEP) return true;
-    return !flying() && !!solids && solids.hitAbove(x, z, PERSON.r, h + STEP);
+    const up = h + step();
+    for (let k = 0; k < PROBES.length; k += 2) if (groundTop(x + PROBES[k], z + PROBES[k + 1]) > up) return true;
+    return !flying() && !!solids && solids.hitAbove(x, z, PERSON.r, up);
   }
   const blocked = (x, z) => blockedAs(x, z, jump.h);
   const lineClear = (x0, z0, x1, z1) => { const n = Math.ceil(Math.hypot(x1 - x0, z1 - z0) / 0.4) || 1; for (let s = 1; s <= n; s++) if (blocked(x0 + (x1 - x0) * s / n, z0 + (z1 - z0) * s / n)) return false; return true; };
@@ -57,7 +60,8 @@ export function createWalker({ blockedAt, wetAt = () => null, ground = () => 0, 
   // A* over a 0.5 m grid around both ends (16 m margin, 120 m across at most), cells tested lazily, then
   // the string pulled straight where the view is clear. Called once per detour, not per frame.
   function localPath(x0, z0, x1, z1) {
-    const S = 0.5, M = 16, minX = Math.min(x0, x1) - M, minZ = Math.min(z0, z1) - M;
+    // a finer grid in a room (it has a ceiling): the gaps between sofas and tables are under a metre
+    const fine = ceiling() < 50, S = fine ? 0.25 : 0.5, M = fine ? 6 : 16, minX = Math.min(x0, x1) - M, minZ = Math.min(z0, z1) - M;
     const W = Math.min(240, Math.ceil((Math.abs(x1 - x0) + 2 * M) / S)), H = Math.min(240, Math.ceil((Math.abs(z1 - z0) + 2 * M) / S)), N = W * H;
     const g = new Float32Array(N).fill(Infinity), from = new Int32Array(N).fill(-1), pass = new Int8Array(N), open = [];   // pass: 0 unknown, 1 clear, 2 blocked
     const cell = (x, z) => Math.min(H - 1, Math.max(0, Math.round((z - minZ) / S))) * W + Math.min(W - 1, Math.max(0, Math.round((x - minX) / S)));
@@ -65,8 +69,9 @@ export function createWalker({ blockedAt, wetAt = () => null, ground = () => 0, 
     const ok = i => (pass[i] || (pass[i] = blocked(wx(i), wz(i)) ? 2 : 1)) === 1;
     const a = cell(x0, z0); let b = cell(x1, z1);
     if (!ok(b)) {   // the goal itself is in something: the nearest clear cell next to it
-      let best = -1, bd = 9; const bx = b % W, bz = (b / W) | 0;
-      for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) { const jx = bx + dx, jz = bz + dz; if (jx < 0 || jz < 0 || jx >= W || jz >= H) continue; const j = jz * W + jx, d = dx * dx + dz * dz; if (d < bd && ok(j)) { bd = d; best = j; } }
+      let best = -1, bd = 99; const bx = b % W, bz = (b / W) | 0;
+      const R = fine ? 4 : 2;
+      for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) { const jx = bx + dx, jz = bz + dz; if (jx < 0 || jz < 0 || jx >= W || jz >= H) continue; const j = jz * W + jx, d = dx * dx + dz * dz; if (d < bd && ok(j)) { bd = d; best = j; } }
       if (best < 0) return null; b = best;
     }
     const h = i => { const dx = Math.abs(i % W - b % W), dz = Math.abs(((i / W) | 0) - ((b / W) | 0)); return Math.max(dx, dz) + 0.414 * Math.min(dx, dz); };
@@ -104,9 +109,10 @@ export function createWalker({ blockedAt, wetAt = () => null, ground = () => 0, 
     const floor = floorAt(x, z);
     if (jump.phase === 'air') {
       jump.v -= GRAVITY * dt; jump.h += jump.v * dt;
+      const top = ceiling(); if (jump.h > top) { jump.h = top; if (jump.v > 0) jump.v = 0; }   // the head meets the ceiling
       if (jump.v < 0 && jump.h <= floor) { jump.h = floor; jump.v = 0; jump.phase = 'land'; jump.t = 0; }
     } else if (jump.h > floor + 0.02) { if (jump.phase !== 'crouch') { jump.phase = 'air'; jump.v = 0; jump.t = 0; } }   // walked off the top
-    else jump.h = floor;   // stepped up, or something moved in under the feet: stand on it
+    else if (floor - jump.h <= step() + 0.02 || jump.phase !== 'crouch') jump.h = floor;   // stepped up, or something moved in under the feet: stand on it
     jump.onHedge = jump.h > 0;
   }
   return { jump, blocked, lineClear, localPath, startJump, stepJump, floorAt };

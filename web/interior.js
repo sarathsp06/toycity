@@ -27,6 +27,9 @@ export const DEPTH = -40;          // metres below the street
 // while you are in a house the camera draws only this layer: the room, the people in it and the
 // lights, so none of the town is drawn (city.js indoorView)
 export const INDOORS = 1;
+// a body is 1.8 m tall: in a 2.7 m room the feet go no higher than 0.85 m (a jump onto the sofa or the
+// tea table, not through the ceiling); indoors you step up only a threshold, a sofa needs a jump
+export const HEAD = 1.85, STEP_IN = 0.2;
 const R = 0.3;                      // a body's radius: how close to a wall the centre may come
 
 export function createInterior({ scene, loader, createSolids }) {
@@ -100,6 +103,7 @@ export function createInterior({ scene, loader, createSolids }) {
     get group() { return group; },
     get door() { return door; },
     get floorY() { return DEPTH; },
+    get ceiling() { return H - HEAD; },
     get floor() { return floor; },
     get seats() { return seats; },
     blockedAt: (x, z) => !door || !inRoom(x, z, R),

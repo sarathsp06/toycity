@@ -282,11 +282,15 @@ export function install(w = window) {
       const taken = peers().filter(q => q.player?.sitting).map(q => [q.player.group.position.x, q.player.group.position.z]);
       const free = room.seats.filter(s => !taken.some(([x, z]) => Math.hypot(x - s.x, z - s.z) < 0.35) && (!kind || s.kind === kind))
         .sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z));
-      const s = free[0]; if (!s) return 'Every seat is taken.';
-      const [x, z] = room.standSpot(s, (x, z) => !city.blocked(x, z));
-      A().walkTo(x, z, false);
-      await until(() => !A().walking, 10000, 250);
-      return city.sitDown(s) ? `You sat down on the ${s.kind === 'chair' ? 'chair at the table' : s.kind}.` : 'Could not reach that seat.';
+      if (!free.length) return 'Every seat is taken.';
+      // the nearest free seat you can get to: some are behind a table or another sofa, so try the next
+      for (const s of free.slice(0, 4)) {
+        const [x, z] = room.standSpot(s, (x, z) => !city.blocked(x, z));
+        A().walkTo(x, z, false);
+        await until(() => !A().walking, 10000, 250);
+        if (city.sitDown(s)) return `You sat down on the ${s.kind === 'chair' ? 'armchair' : s.kind}.`;
+      }
+      return 'Could not reach a free seat.';
     },
     stand() { const city = c(); if (!city.sitting) return 'You are not sitting.'; city.standUp(); return 'You stood up.'; },
     leave() { stopFollow(); endWalk(); },

@@ -3,8 +3,8 @@
 Run: /Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup -P tools/interior_model.py
 
 Every house has the same ground floor, 6 x 8 m and 2.7 m high: a hall, a kitchen along the right-hand
-wall, a dining table for six (the meeting table), and a living room at the back with a sofa, an
-armchair, a TV, a rug, shelves and plants. The room itself (laminate floor, plastered walls, skirting,
+wall, and a lounge to sit and talk in: three sofas round a tea table facing the TV, and two armchairs
+at a small tea table by the back window (nine seats), with a rug, shelves and plants. The room itself (laminate floor, plastered walls, skirting,
 ceiling, windows, the inside of the front door), the kitchen and the TV are built here; the furniture
 and decorations are photo-scanned CC0 models from Poly Haven, and the floor, wall and wood textures
 are Poly Haven's too, downloaded on first run into data/interior/ (credits in web/models/CREDITS.txt).
@@ -31,11 +31,12 @@ W, D, H = 6.0, 8.0, 2.7          # the room
 WALL = 0.15
 DOOR_W, DOOR_H = 0.94, 2.12      # as door.glb
 TEX = 512                        # texture size in the export
+S1_H, S2_H, S3_H, A_H = 0.38, 0.4, 0.56, 0.48   # seat heights, measured in the game (Sofa 01, sofa 02, sofa 03, Arm Chair 01)
 
 # name -> Poly Haven model id (https://polyhaven.com/a/<id>, CC0)
 MODELS = {
-    "sofa": "Sofa_01", "armchair": "ArmChair_01", "coffee": "modern_coffee_table_01", "table": "dining_table",
-    "chair": "painted_wooden_chair_01", "shelves": "wooden_display_shelves_01", "plant": "potted_plant_04",
+    "sofa": "Sofa_01", "sofa2": "sofa_02", "sofa3": "sofa_03", "armchair": "ArmChair_01",
+    "coffee": "coffee_table_round_01", "tea": "chinese_tea_table", "shelves": "wooden_display_shelves_01", "plant": "potted_plant_04",
     "lamp": "modern_ceiling_lamp_01", "picture": "hanging_picture_frame_01", "clock": "wall_clock",
     "side": "side_table_01",
 }
@@ -171,6 +172,10 @@ for (x0, x1, y0, y1) in ((-W / 2, -DOOR_W / 2, 0, 0.02), (DOOR_W / 2, W / 2, 0, 
 
 # ---------- furniture ----------
 FACING = {"+y": 0, "-x": -math.pi / 2, "-y": math.pi, "+x": math.pi / 2}   # where its front looks
+# the same direction as a three.js yaw (rotation.y; yaw 0 faces +z, which is Blender -y): what a sitter turns to
+# ...and as an angle in Blender's ground plane (atan2(y, x)), for turning a model's measured front
+ANGLE = {"+y": math.pi / 2, "-x": math.pi, "-y": -math.pi / 2, "+x": 0}
+YAW3 = {"+y": math.pi, "-x": -math.pi / 2, "-y": 0, "+x": math.pi / 2}
 
 
 def place(name, x, y, facing="+y", z=0.0, solid=True, top=None, seat=None, seat_h=0.45, scale=1.0):
@@ -182,7 +187,19 @@ def place(name, x, y, facing="+y", z=0.0, solid=True, top=None, seat=None, seat_
     for o in new:
         if o.parent is None: o.parent = root
     root.scale = (scale,) * 3
-    root.rotation_euler = (0, 0, FACING[facing] + math.pi)   # Poly Haven's fronts look down -y in Blender
+    # which way its front looks: for seating, away from the backrest (the high part); models differ,
+    # so it is measured, not assumed. Anything else is taken to face -y, as most of Poly Haven does.
+    front = -math.pi / 2
+    if seat:
+        bpy.context.view_layer.update()
+        vs = [o.matrix_world @ v.co for o in new if o.type == "MESH" for v in o.data.vertices]
+        top = max(v.z for v in vs); cx = sum(v.x for v in vs) / len(vs); cy = sum(v.y for v in vs) / len(vs)
+        hi = [v for v in vs if v.z > 0.8 * top]
+        bx = sum(v.x for v in hi) / len(hi) - cx; by = sum(v.y for v in hi) / len(hi) - cy
+        # only across the seat (its shorter side): the arms, at both ends, cancel out along the length
+        wx = max(v.x for v in vs) - min(v.x for v in vs); wy = max(v.y for v in vs) - min(v.y for v in vs)
+        front = (0 if bx < 0 else math.pi) if wx < wy else (math.pi / 2 if by < 0 else -math.pi / 2)
+    root.rotation_euler = (0, 0, ANGLE[facing] - front)   # turn its measured front onto the wanted direction
     bpy.context.view_layer.update()
     meshes = [o for o in new if o.type == "MESH"]
     pts = [o.matrix_world @ Vector(c) for o in meshes for c in o.bound_box]
@@ -193,7 +210,7 @@ def place(name, x, y, facing="+y", z=0.0, solid=True, top=None, seat=None, seat_
         solids.append({"name": name, "x": round(x, 3), "z": round(-y, 3), "hx": round(hx, 3), "hz": round(hy, 3), "top": round(top if top is not None else z + h, 3)})
     if seat:    # where a person sits, facing like the furniture; h: seat height
         for sx, sy in seat:
-            seats.append({"kind": "sofa" if name == "armchair" else name, "x": round(x + sx, 3), "z": round(-(y + sy), 3), "yaw": round(FACING[facing], 4), "h": seat_h})   # h: the top of the seat
+            seats.append({"kind": "chair" if name == "armchair" else "sofa", "x": round(x + sx, 3), "z": round(-(y + sy), 3), "yaw": round(YAW3[facing], 4), "h": seat_h})   # h: the top of the seat
     return root, hx, hy, h
 
 
@@ -225,34 +242,35 @@ box("fridge_gap", kx - 0.002, kx, K1 - 0.64, K1, 1.2, 1.21, SHADOWLINE)
 box("fridge_handle", kx - 0.04, kx, K1 - 0.12, K1 - 0.09, 0.9, 1.5, STEEL)
 solids.append({"name": "kitchen", "x": round(kx + KD / 2, 3), "z": round(-(K0 + K1) / 2, 3), "hx": round(KD / 2, 3), "hz": round((K1 - K0) / 2, 3), "top": 0.92})
 
-# the dining table, for meetings: six chairs round it, a lamp above
-TX, TY = -1.25, 3.3   # off the line from the front door into the room
-place("table", TX, TY, "+x")
-chairs = [(TX - 1.0, TY - 0.55, "+x"), (TX - 1.0, TY + 0.55, "+x"), (TX + 1.0, TY - 0.55, "-x"), (TX + 1.0, TY + 0.55, "-x"),
-          (TX, TY - 1.45, "+y"), (TX, TY + 1.45, "-y")]
-for cx, cy, f in chairs:
-    place("chair", cx, cy, f, seat=[(0, 0)])
-place("lamp", TX, TY, "+y", z=H - 0.95, solid=False)
-place("plant", TX, TY + 0.3, "+y", z=0.88, solid=False)
-lights.append([TX, H - 0.65, -TY])
+# the lounge: three sofas round a big round tea table, the TV on the left-hand wall facing them all
+# (sofa tops are their seats: you can climb onto one, not onto its back)
+CX, CY = -1.0, 5.0
+box("rug", CX - 1.5, CX + 1.4, CY - 1.7, CY + 1.7, 0, 0.012, RUG)   # with a walkway of at least 0.75 m round the table
+place("coffee", CX - 0.1, CY, "+x")
+box("tvunit", -W / 2, -W / 2 + 0.42, CY - 0.85, CY + 0.85, 0, 0.45, TVWOOD)
+box("tv", -W / 2 + 0.12, -W / 2 + 0.17, CY - 0.62, CY + 0.62, 0.75, 1.47, SCREEN)
+box("tvstand", -W / 2 + 0.1, -W / 2 + 0.22, CY - 0.15, CY + 0.15, 0.45, 0.47, SCREEN)
+box("tvneck", -W / 2 + 0.14, -W / 2 + 0.16, CY - 0.04, CY + 0.04, 0.47, 0.76, SCREEN)
+solids.append({"name": "tvunit", "x": round(-W / 2 + 0.21, 3), "z": round(-CY, 3), "hx": 0.21, "hz": 0.85, "top": 0.45})
+place("sofa3", CX + 1.75, CY, "-x", seat=[(-0.12, -0.85), (-0.12, 0), (-0.12, 0.85)], seat_h=S3_H, top=S3_H)    # three seats, facing the TV
+place("sofa", CX - 0.2, CY - 1.95, "+y", seat=[(-0.38, 0.1), (0.38, 0.1)], seat_h=S1_H, top=S1_H)
+place("sofa2", CX - 0.15, CY + 1.95, "-y", seat=[(-0.45, -0.12), (0.45, -0.12)], seat_h=S2_H, top=S2_H)
+place("lamp", CX, CY, "+y", z=H - 0.95, solid=False)
+lights.append([CX, H - 0.65, -CY])
 
-# the living room at the back: the TV on the left wall, the sofa facing it, an armchair, a rug,
-# a coffee table, shelves on the right-hand wall and a side table with a plant
-LY = 6.4
-box("rug", -1.9, 0.6, LY - 1.3, LY + 1.3, 0, 0.012, RUG)
-box("tvunit", -W / 2, -W / 2 + 0.42, LY - 0.85, LY + 0.85, 0, 0.45, TVWOOD)
-box("tv", -W / 2 + 0.12, -W / 2 + 0.17, LY - 0.62, LY + 0.62, 0.75, 1.47, SCREEN)
-box("tvstand", -W / 2 + 0.1, -W / 2 + 0.22, LY - 0.15, LY + 0.15, 0.45, 0.47, SCREEN)
-box("tvneck", -W / 2 + 0.14, -W / 2 + 0.16, LY - 0.04, LY + 0.04, 0.47, 0.76, SCREEN)
-solids.append({"name": "tvunit", "x": round(-W / 2 + 0.21, 3), "z": round(-LY, 3), "hx": 0.21, "hz": 0.85, "top": 0.45})
-place("coffee", -0.85, LY, "+x")
-place("sofa", 0.75, LY, "-x", seat=[(-0.1, -0.38), (-0.1, 0.38)], seat_h=0.38)   # on the cushions, in front of the back
-place("armchair", -0.9, LY + 1.25, "-y", seat=[(0, -0.08)], seat_h=0.42)
-place("side", 0.8, LY + 1.25, "-x")
-place("plant", 0.8, LY + 1.25, "+y", z=0.55, solid=False)
-place("shelves", W / 2 - 0.22, D - 1.0, "-x")
-place("picture", W / 2 - 0.03, LY - 1.2, "+x", z=1.25, solid=False)
-lights.append([-0.3, H - 0.3, -LY])
+# by the back window: two armchairs at a small tea table
+TX, TY = 2.1, 6.45
+place("tea", TX, TY, "+y")
+place("armchair", TX, TY - 1.05, "+y", seat=[(0, 0.08)], seat_h=A_H, top=A_H)
+place("armchair", TX, TY + 1.05, "-y", seat=[(0, -0.08)], seat_h=A_H, top=A_H)
+place("plant", TX, TY, "+y", z=0.5, solid=False)
+
+# shelves, a side table and plants in the corners, a picture over the sofas
+place("shelves", -W / 2 + 0.2, D - 0.6, "+x")
+place("side", -W / 2 + 0.35, 2.2, "+x")
+place("plant", -W / 2 + 0.35, 2.2, "+x", z=0.55, solid=False)
+place("picture", W / 2 - 0.03, CY - 0.3, "+x", z=1.4, solid=False)
+lights.append([TX, H - 0.3, -TY])
 
 # ---------- export: one object per material keeps the draw calls few ----------
 for o in list(bpy.data.objects):

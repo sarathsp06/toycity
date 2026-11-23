@@ -17,13 +17,13 @@ import { createGrid, squareKey, getBit, setBit, newBitmap, SIDE, eachCell } from
 import { createPlayerMode, FALL_DOWN } from './player.js';
 import { POSE, SEATED, isPassenger, carModel } from './mp/state.js';
 import { sitOffset } from './mp/players.js';
-import { createWalker } from './walker.js';
+import { createWalker, STEP } from './walker.js';
 import { rng } from './ambient.js';
 import { createAutopilot } from './autopilot.js';
 import { createTraffic, COUNT as TRAFFIC_N } from './traffic.js';
 import { createPeds, COUNT as PEDS_N } from './peds.js';
 import { createHomes } from './home.js';
-import { createInterior, INDOORS } from './interior.js';
+import { createInterior, INDOORS, STEP_IN } from './interior.js';
 import { createRadio, mountRadio } from './radio.js';
 import { createNav, mountNav } from './nav.js';
 import { createBirds } from './birds.js';
@@ -1169,7 +1169,8 @@ swimButton?.addEventListener('click', e => { e.stopPropagation(); startSwim(); }
 // open, dry land you may step onto ends the swim, walls stay walls
 // what you bump into and stand on: the town's things outside, the furniture in a house
 const walkSolids = { topAt: (x, z, r) => (room.active ? room.solids : solids).topAt(x, z, r), hitAbove: (x, z, r, y) => (room.active ? room.solids : solids).hitAbove(x, z, r, y) };
-const walker = createWalker({ blockedAt, wetAt, ground: groundAt, solids: walkSolids, swimming: () => swim.on, flying: () => fly, standing: () => you.onFoot && !swim.on && !fling.on && !homes.busy && !sat });   // seated: the chair holds you
+const walker = createWalker({ blockedAt, wetAt, ground: groundAt, solids: walkSolids,
+  step: () => room.active ? STEP_IN : STEP, ceiling: () => room.active ? room.ceiling : Infinity, swimming: () => swim.on, flying: () => fly, standing: () => you.onFoot && !swim.on && !fling.on && !homes.busy && !sat });   // seated: the chair holds you
 const { blocked, lineClear, localPath, jump } = walker;
 // what the player is doing, asked in one place (player.js): may I jump, swim, get in, walk, be hit?
 const you = createPlayerMode({ get driving() { return driving; }, get ride() { return ride; }, get fly() { return fly; }, swim, fling, jump, homes, health }, { stopWalk });

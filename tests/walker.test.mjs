@@ -104,3 +104,16 @@ test('the feet stand on the ground\'s own height: up the kerb onto the pavement,
   w.stepJump(1 / 60, 3, -10); for (let k = 0; k < 30; k++) w.stepJump(1 / 60, 3, -10);
   assert.equal(w.jump.h, 0);                    // stepped off the kerb: down on the road
 });
+
+test('indoors: the head meets the ceiling, and a sofa needs a jump (a low step), then you stand on its seat', () => {
+  const m = fakeMap();
+  const sofa = { topAt: (x, z) => (Math.abs(x - 10) < 1 && Math.abs(z + 10) < 0.4 ? 0.42 : 0), hitAbove: (x, z, r, y) => Math.abs(x - 10) < 1 + r && Math.abs(z + 10) < 0.4 + r && 0.42 > y };
+  const w = createWalker({ blockedAt: m.blockedAt, solids: sofa, step: () => 0.2, ceiling: () => 0.85 });
+  assert.equal(w.blocked(10, -9.3), true);       // walking into the sofa: it is in the way
+  let peak = 0; w.startJump();
+  for (let t = 0; t < 2; t += 1 / 60) { w.stepJump(1 / 60, 10, -12); peak = Math.max(peak, w.jump.h); }
+  assert.equal(peak, 0.85);                      // not through the ceiling
+  w.startJump(); for (let t = 0; t < 0.3; t += 1 / 60) w.stepJump(1 / 60, 10, -12);
+  for (let t = 0; t < 1.5; t += 1 / 60) w.stepJump(1 / 60, 10, -10);   // over the sofa while in the air
+  assert.equal(w.jump.h, 0.42);                  // landed on the seat
+});
