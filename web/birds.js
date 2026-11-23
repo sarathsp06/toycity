@@ -130,6 +130,14 @@ const LEG = 14;          // seconds per swim (out to a spot, or back home), half
 const SEEN = 180;        // birds farther than this are not drawn
 const CAP = 96;          // birds of one kind drawn at once
 export const MODELS = { canada: { url: 'models/goose.glb', len: 0.85, water: 0.36 }, mallard: { url: 'models/mallard.glb', len: 0.55, water: 0.3 } };
+// Swans move between waters. A pond without resident swans gets a visiting pair now and then: time is cut
+// into VISIT-second stays, and in each stay a pair is there with the same chance chance() gives a mute
+// swan on that pond (our assumption, not survey data; see facts.html). They fly in over FLY seconds,
+// swim around, and fly off again at the end of the stay. Like everything here it follows the clock.
+export const VISIT = 600, FLY = 20;
+// the clock the birds follow, wrapped where both a stay and a swim leg end, so the wrap shows no jump
+const CLOCK = 4.2e6;
+export const visiting = (seedN, area, t, swan = SPECIES[0]) => rng(seedN + Math.floor(t / VISIT) * 7907)() < chance(swan, area);
 export function createBirds({ scene, THREE, loadModel }) {
   const live = new Map();   // tile -> flocks
   const kinds = new Map();  // kind -> InstancedMesh
@@ -191,7 +199,20 @@ export function createBirds({ scene, THREE, loadModel }) {
     if (L.chin) parts.push([sphere(0.06 * s, 1.4, 0.6, 1.3, 6, 4), L.chin, M(0.34 * s, hy - 0.06 * s, 0)]);
     return merge(parts);
   }
+  // a swan in flight: neck stretched forward, broad wings out to the side
+  function swanFlying() {
+    const W = 0xf6f6f2;
+    return merge([
+      [sphere(0.5, 1.15, 0.4, 0.55, 14, 10), W, M(0, 0, 0)],
+      [new THREE.CylinderGeometry(0.045, 0.07, 0.75, 8).rotateZ(-Math.PI / 2), W, M(0.85, 0.05, 0)],
+      [sphere(0.07, 1.4, 0.9, 0.85), W, M(1.25, 0.06, 0)],
+      [new THREE.ConeGeometry(0.032, 0.14, 8), 0xe8702a, M(1.37, 0.05, 0, -Math.PI / 2)],
+      [sphere(0.5, 0.55, 0.06, 1.1, 12, 6), W, M(-0.05, 0.08, 0.62, 0, -0.15)],
+      [sphere(0.5, 0.55, 0.06, 1.1, 12, 6), W, M(-0.05, 0.08, -0.62, 0, 0.15)],
+    ]);
+  }
   const BUILD = {
+    swanfly: swanFlying,
     swan: () => swan(0xf6f6f2, 0xe8702a, 0x161616), cygnet: () => swan(0x9c968c, 0x3a3a3a, 0x3a3a3a, 0.48),
     blackswan: () => swan(0x1d1d24, 0xc9302c, 0xeeeeee, 0.95),
   };
@@ -225,9 +246,13 @@ export function createBirds({ scene, THREE, loadModel }) {
     bodies.slice(0, 40).forEach((w, bi) => {
       if (w.area < MIN_AREA) return;
       const seed = hash(key, bi, Math.round(w.area)), picked = pickBirds(w.area, seed);
-      if (!picked.length) return;
       const spots = swimSpots(pos, w, seed ^ 0x9e3779b9);
       if (!spots.pts.length) return;
+      if (!picked.some(p => p.s.id === 'swan')) {   // no swans of its own: a visiting pair now and then
+        const r = rng(seed ^ 0x5bd1e995), home = Math.floor(r() * spots.pts.length);
+        flocks.push({ s: SPECIES[0], visit: { area: w.area, cx: w.cx, cz: w.cz }, birds: [0, 1].map(k => ({ kind: 'swan', off: [-0.4 * k, (k ? 1 : -1) * 0.35], phase: r() * 10, size: 0.92 + r() * 0.16 })),
+          spots, home, phase: r() * LEG * 2, seed: seed ^ 0x5bd1e995, y, x: spots.pts[home][0], z: spots.pts[home][1], h: r() * 6.28 });
+      }
       picked.forEach(({ s, n }, fi) => {
         const r = rng(seed + fi * 7919), home = Math.floor(r() * spots.pts.length), birds = [];
         for (let k = 0; k < n; k++) {
@@ -243,8 +268,21 @@ export function createBirds({ scene, THREE, loadModel }) {
   }
   function drop(tile) { live.delete(tile); }
 
+  // a visiting pair: null while away; flying in at the start of a stay, off again at its end
+  function visitAt(f, t) {
+    if (!visiting(f.seed, f.visit.area, t)) return null;
+    const u = t % VISIT, out = u > VISIT - FLY;
+    if (u >= FLY && !out) return swimAt(f, t);
+    const stay = Math.floor(t / VISIT), a = rng(f.seed + stay * 31 + (out ? 17 : 0))() * 6.283, far = 140;
+    const w = swimAt(f, out ? Math.floor(t / VISIT) * VISIT + VISIT - FLY : Math.floor(t / VISIT) * VISIT + FLY);
+    const sx = w[0] + Math.cos(a) * far, sz = w[1] + Math.sin(a) * far;
+    const k = out ? (u - (VISIT - FLY)) / FLY : 1 - u / FLY, e = k * k * (3 - 2 * k);   // 0 on the water, 1 far away
+    const x = w[0] + (sx - w[0]) * e, z = w[1] + (sz - w[1]) * e;
+    return [x, z, 1, out ? Math.atan2(-(sz - w[1]), sx - w[0]) : Math.atan2(-(w[1] - sz), w[0] - sx), 24 * Math.sqrt(e)];
+  }
+  const at = (f, t) => f.visit ? visitAt(f, t) : swimAt(f, t);
   // where a flock is at time t: leg 2k swims home -> spot k, leg 2k+1 back; half of each leg resting
-  function at(f, t) {
+  function swimAt(f, t) {
     const { pts, links } = f.spots, L = links[f.home];
     const u = (t + f.phase) / LEG, k = Math.floor(u), frac = u - k;
     if (!L.length) return [pts[f.home][0], pts[f.home][1], 0];
@@ -257,28 +295,32 @@ export function createBirds({ scene, THREE, loadModel }) {
   return {
     add, drop,
     update(dt, px, pz) {
-      const t = (Date.now() / 1000) % 1e6;   // the wall clock: everyone sees the same swim
+      const t = (Date.now() / 1000) % CLOCK;   // the wall clock: everyone sees the same swim
       for (const m of kinds.values()) m.count = 0;
       for (const flocks of live.values()) for (const f of flocks) {
         if (Math.abs(f.x - px) > SEEN || Math.abs(f.z - pz) > SEEN) continue;
-        const [x, z, swimming, dir] = at(f, t);
+        const p = at(f, t); if (!p) continue;   // a visiting pair that is somewhere else now
+        const [x, z, swimming, dir, up = 0] = p, flying = up > 0.05;
         f.x = x; f.z = z;
+        if (flying) f.h = dir;
         if (swimming && dir !== undefined) { let d = dir - f.h; d = Math.atan2(Math.sin(d), Math.cos(d)); f.h += d * Math.min(1, dt * 2.5); }
         const c = Math.cos(f.h), s = Math.sin(f.h), nod = f.s.id === 'coot' || f.s.id === 'moorhen';
         for (const b of f.birds) {
-          const m = kind(b.kind); if (m.count >= CAP) continue;
+          const m = kind(flying ? 'swanfly' : b.kind); if (m.count >= CAP) continue;
           const w = t * 1.6 + b.phase;   // offsets turn with the flock; a gentle bob; coots nod as they swim
-          _p.set(x + b.off[0] * c + b.off[1] * s, f.y + 0.015 * Math.sin(w), z - b.off[0] * s + b.off[1] * c);
-          _e.set(0, f.h + 0.15 * Math.sin(w * 0.3), (swimming && nod ? 0.12 * Math.sin(w * 6) : 0.03 * Math.sin(w * 0.9)));
+          const spread = flying ? 3 : 1;   // in the air the pair flies side by side, wing to wing
+          _p.set(x + b.off[0] * c + b.off[1] * spread * s, f.y + up + (flying ? 0.25 * Math.sin(w * 3) : 0.015 * Math.sin(w)), z - b.off[0] * s + b.off[1] * spread * c);
+          if (flying) _e.set(0.08 * Math.sin(w * 3), f.h, 0.05);
+          else _e.set(0, f.h + 0.15 * Math.sin(w * 0.3), (swimming && nod ? 0.12 * Math.sin(w * 6) : 0.03 * Math.sin(w * 0.9)));
           m.setMatrixAt(m.count++, _m.compose(_p, _q.setFromEuler(_e), _s.setScalar(b.size)));
         }
       }
       for (const m of kinds.values()) if (m.count) m.instanceMatrix.needsUpdate = true;
     },
     kind,   // the InstancedMesh of one kind (made on first use): for previews
-    get count() { let n = 0; for (const flocks of live.values()) for (const f of flocks) n += f.birds.length; return n; },
+    get count() { const t = (Date.now() / 1000) % CLOCK; let n = 0; for (const flocks of live.values()) for (const f of flocks) if (at(f, t)) n += f.birds.length; return n; },
     get drawCalls() { let n = 0; for (const m of kinds.values()) if (m.count) n++; return n; },
     // where every flock is right now (also the ones too far away to be drawn)
-    get flocks() { const t = (Date.now() / 1000) % 1e6, out = []; for (const flocks of live.values()) for (const f of flocks) { const [x, z] = at(f, t); out.push({ species: f.s.en, n: f.birds.length, x, z }); } return out; },
+    get flocks() { const t = (Date.now() / 1000) % CLOCK, out = []; for (const flocks of live.values()) for (const f of flocks) { const p = at(f, t); if (p) out.push({ species: f.s.en, n: f.birds.length, x: p[0], z: p[1], visiting: !!f.visit, up: +(p[4] || 0).toFixed(1) }); } return out; },
   };
 }

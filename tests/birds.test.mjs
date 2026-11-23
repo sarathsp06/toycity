@@ -36,3 +36,13 @@ test('waterBodies splits separate ponds and measures them', () => {
   const sp = swimSpots(pos, w[0], 7);
   assert.ok(sp.pts.length > 3); for (const [x, z] of sp.pts) assert.ok(x > 0 && x < 20 && z > 0 && z < 20);
 });
+
+test('visiting swans: a pond without its own is visited about as often as chance() says, the same for everyone', async () => {
+  const { visiting, VISIT } = await import('../web/birds.js');
+  const swan = SPECIES.find(s => s.id === 'swan');
+  let n = 0; const N = 4000;
+  for (let k = 0; k < N; k++) if (visiting(12345, 3000, k * VISIT + 5)) n++;
+  assert.ok(Math.abs(n / N - chance(swan, 3000)) < 0.03);
+  assert.equal(visiting(7, 3000, 1000), visiting(7, 3000, 1000));
+  assert.equal(visiting(7, 3000, 1000), visiting(7, 3000, 1000 + 1));   // one stay: no flicker within it
+});
