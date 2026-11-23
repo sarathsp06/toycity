@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <title>Toy City · Facts behind the town</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta name="description" content="The real numbers Toy City uses, and where they come from: which birds you meet on a Dutch pond, and how likely each one is." />
+<meta name="description" content="The real numbers Toy City uses, and where they come from: the town itself, Dutch road rules and speed limits, how fast people walk, and which birds you meet on a pond." />
 <style>
   :root { --ink: #f3f6f8; --muted: #a9b8c4; --accent: #ffb547; --bg: #0d141b; --card: #16212b; --line: rgba(255,255,255,.1); }
   * { box-sizing: border-box; }
@@ -12,9 +12,15 @@
   a { color: var(--accent); }
   main { max-width: 980px; margin: 0 auto; padding: 28px 22px 60px; }
   header a.back { color: var(--muted); text-decoration: none; font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 6px; }
+  nav.toc a { background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; text-decoration: none; font-size: 14px; }
+  .tag { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+  .tag.real { background: rgba(80,200,140,.18); color: #7fe0ae; }
+  .tag.ours { background: rgba(255,181,71,.16); color: var(--accent); }
   .kicker { font-size: 13px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); font-weight: 700; margin-top: 26px; }
   h1 { font-size: clamp(34px, 6vw, 56px); line-height: 1; letter-spacing: -.03em; margin: 8px 0 14px; }
-  h2 { margin: 42px 0 10px; font-size: 26px; letter-spacing: -.01em; }
+  h2 { margin: 42px 0 10px; font-size: 26px; letter-spacing: -.01em; scroll-margin-top: 16px; }
+  h3 { margin: 28px 0 8px; font-size: 19px; }
   p.lead { color: #dbe4ea; font-size: 18px; max-width: 700px; }
   .note { color: var(--muted); font-size: 14px; }
   .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin: 18px 0; }
@@ -40,14 +46,67 @@
 <main>
   <header><a class="back" href="./">← Toy City</a></header>
   <div class="kicker">Facts behind the town</div>
-  <h1>Who's on the pond?</h1>
-  <p class="lead">The swans, geese, ducks and coots on Toy City's water aren't placed at random. Which birds a pond gets comes from the Dutch national bird survey. Here are the numbers, where they come from, and the one step we had to estimate ourselves.</p>
+  <h1>The numbers behind the town</h1>
+  <p class="lead">Toy City tries to get the real things right: where the houses and trees stand, which side of the road you drive on, how fast people walk, which birds are on the pond. Here is every number the game takes from the real world, where it comes from, and the ones we chose ourselves.</p>
+  <p class="note"><span class="tag real">Real</span> measured or the law, with its source &nbsp; <span class="tag ours">Our choice</span> set by us to make the game work or feel right</p>
+  <nav class="toc"><a href="#town">The town</a><a href="#road">On the road</a><a href="#foot">On foot and in the water</a><a href="#birds">Birds on the pond</a></nav>
 
-  <h2>How common each bird is</h2>
+  <h2 id="town">The town</h2>
+  <p>Counted from the files the game loads for Rotterdam, Barendrecht and Amsterdam.</p>
+  <table>
+    <thead><tr><th>What</th><th>In the game</th><th></th><th>Source</th></tr></thead>
+    <tbody>
+      <tr><td>Buildings, each with its real height and roof shape</td><td class="n">332,000</td><td><span class="tag real">Real</span></td><td><a href="https://3dbag.nl" target="_blank" rel="noopener">3D BAG</a> (TU Delft), from the national building register and laser height scans</td></tr>
+      <tr><td>Addresses, each at its front door</td><td class="n">946,000</td><td><span class="tag real">Real</span></td><td>BAG, the national address register, via <a href="https://www.pdok.nl" target="_blank" rel="noopener">PDOK</a></td></tr>
+      <tr><td>Trees, where they really stand</td><td class="n">333,000</td><td><span class="tag real">Real</span></td><td>BGT, the government's large-scale map (its tree points), via <a href="https://www.pdok.nl" target="_blank" rel="noopener">PDOK</a></td></tr>
+      <tr><td>Pavements, gardens, hedges, lamp posts and water</td><td class="n">as drawn</td><td><span class="tag real">Real</span></td><td>BGT via <a href="https://www.pdok.nl" target="_blank" rel="noopener">PDOK</a>; aerial photos at 25 cm per pixel colour the ground and roofs</td></tr>
+      <tr><td>Roads you can drive</td><td class="n">4,100 km</td><td><span class="tag real">Real</span></td><td><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>, with its one-way streets and who may drive where</td></tr>
+      <tr><td>Named places: shops, cafés, schools, bus stops</td><td class="n">27,700</td><td><span class="tag real">Real</span></td><td><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a></td></tr>
+      <tr><td>Area of the three towns in the game</td><td class="n">268 km²</td><td><span class="tag ours">Our choice</span></td><td>Which 500 m squares we built</td></tr>
+      <tr><td>Windows and brickwork</td><td class="n">a row of windows every 2.8 m of height</td><td><span class="tag ours">Our choice</span></td><td>The building's height and roof are real; how many floors of windows it gets, and its Dutch stretcher-bond brick, are drawn by us</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="road">On the road</h2>
+  <table>
+    <thead><tr><th>What</th><th>In the game</th><th></th><th>Source</th></tr></thead>
+    <tbody>
+      <tr><td>Which side of the road</td><td>Everyone keeps right</td><td><span class="tag real">Real</span></td><td>Dutch traffic rules, <a href="https://wetten.overheid.nl/BWBR0004825" target="_blank" rel="noopener">RVV 1990</a> article 3: drivers keep as far right as possible</td></tr>
+      <tr><td>Speed limits</td><td>The street's own limit</td><td><span class="tag real">Real</span></td><td>The limit mapped on that street in <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>, used by the town's traffic and the autopilot</td></tr>
+      <tr><td>A main street with no limit on the map</td><td class="n">50 km/h</td><td><span class="tag real">Real</span></td><td>The legal limit in a built-up area, <a href="https://wetten.overheid.nl/BWBR0004825" target="_blank" rel="noopener">RVV 1990</a> article 20</td></tr>
+      <tr><td>A motorway with no limit on the map</td><td class="n">100 km/h</td><td><span class="tag real">Real</span></td><td>The daytime limit (06:00 to 19:00) on almost all Dutch motorways since March 2020, <a href="https://www.rijksoverheid.nl/onderwerpen/verkeersveiligheid/vraag-en-antwoord/wat-is-de-maximumsnelheid-voor-auto-s-op-de-snelweg" target="_blank" rel="noopener">Rijksoverheid</a></td></tr>
+      <tr><td>A residential street with no limit on the map</td><td class="n">30 km/h</td><td><span class="tag ours">Our choice</span></td><td>The legal default is 50, but many Dutch residential streets are 30 km/h zones, so we use 30</td></tr>
+      <tr><td>A living street (woonerf) or a service road</td><td class="n">15 km/h</td><td><span class="tag ours">Our choice</span></td><td>The law says walking pace there; we use 15 km/h</td></tr>
+      <tr><td>The autopilot's top speed</td><td class="n">80 km/h</td><td><span class="tag ours">Our choice</span></td><td>The same as the legal limit outside built-up areas (<a href="https://wetten.overheid.nl/BWBR0004825" target="_blank" rel="noopener">RVV 1990</a> article 21)</td></tr>
+      <tr><td>Your car's top speed</td><td class="n">50 km/h · 100 with Shift · 18 reversing</td><td><span class="tag ours">Our choice</span></td><td>A town speed most of the time, faster when you ask for it</td></tr>
+      <tr><td>Size of a car</td><td class="n">4.3 × 1.76 m, roof at 1.45 m</td><td><span class="tag ours">Our choice</span></td><td>The size of our car models, about a family hatchback</td></tr>
+      <tr><td>Steering wheel</td><td>On the right</td><td><span class="tag ours">Our choice</span></td><td>Dutch cars have it on the left; ours are right-hand drive</td></tr>
+      <tr><td>A bump that dents a car</td><td class="n">above 16 km/h</td><td><span class="tag ours">Our choice</span></td><td>Slower knocks only bounce; above 4 km/h a person in the way falls over</td></tr>
+      <tr><td>A parking ticket</td><td class="n">€95, after 8 s</td><td><span class="tag ours">Our choice</span></td><td>Leave a car outside a parking bay and a ticket follows. The amount is ours: real fines depend on the town and the offence</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="foot">On foot and in the water</h2>
+  <table>
+    <thead><tr><th>What</th><th>In the game</th><th></th><th>Source</th></tr></thead>
+    <tbody>
+      <tr><td>How fast the town's people walk</td><td class="n">1.2 to 1.6 m/s, each their own pace</td><td><span class="tag real">Real</span></td><td>Measured walking speeds: a median of 1.2 m/s for 967 pedestrians (<a href="https://onlinepubs.trb.org/Onlinepubs/trr/1994/1438/1438-009.pdf" target="_blank" rel="noopener">Transportation Research Record 1438, 1994</a>); 1.25 m/s on average on footways, from 0.68 to 1.92 (<a href="https://www.academia.edu/26583913/Estimation_of_pedestrian_walking_speeds_on_footways" target="_blank" rel="noopener">Estimation of pedestrian walking speeds on footways</a>)</td></tr>
+      <tr><td>How fast you walk and run</td><td class="n">1.8 m/s · 6 m/s running</td><td><span class="tag ours">Our choice</span></td><td>A brisk walk, so a street goes by quickly. AI players walk and run at exactly the same speeds, never faster</td></tr>
+      <tr><td>How fast you swim</td><td class="n">1.1 m/s · 2 m/s with Shift</td><td><span class="tag ours">Our choice</span></td><td>An easy swim</td></tr>
+      <tr><td>How high you jump</td><td class="n">about 1.5 m</td><td><span class="tag ours">Our choice</span></td><td>Far higher than a real standing jump (about half a metre), so you can get onto a car roof</td></tr>
+      <tr><td>What you can step onto without jumping</td><td class="n">up to 0.55 m</td><td><span class="tag ours">Our choice</span></td><td>A kerb, a step or a bench; higher things need a jump</td></tr>
+      <tr><td>Height of a hedge</td><td class="n">1.1 m</td><td><span class="tag ours">Our choice</span></td><td>The map says where hedges are, not how tall they are</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="birds">Birds on the pond</h2>
+  <p>The swans, geese, ducks and coots on Toy City's water aren't placed at random. Which birds a pond gets comes from the Dutch national bird survey. Here are the numbers, where they come from, and the one step we had to estimate ourselves.</p>
+
+  <h3>How common each bird is</h3>
   <p>Sovon, the Dutch bird-monitoring organisation, divides the country into <span id="squares"></span> squares of <span id="size"></span>. In the <span id="years"></span> survey, volunteers checked every square for breeding birds. This is the share of squares where each species breeds.</p>
   <div class="cards" id="cards"></div>
 
-  <h2>Your pond, your chances</h2>
+  <h3>Your pond, your chances</h3>
   <p>A bird breeding somewhere in a 5 × 5 km square doesn't mean it's on every pond in it. Bigger water holds more birds, and a narrow ditch fewer. Slide to see the chance of meeting each bird on a pond of that size, as the game calculates it.</p>
   <div class="calc">
     <label for="area">Pond size: <span class="size" id="areaOut"></span></label>
@@ -57,20 +116,20 @@
     <p class="note">Chance of at least one kind of water bird on this pond: <b id="any"></b></p>
   </div>
 
-  <h2>The numbers, with sources</h2>
+  <h3>The numbers, with sources</h3>
   <table>
     <thead><tr><th>Bird</th><th>Breeds in (% of squares, 2013–15)</th><th>Seen in winter (% of squares)</th><th>Breeding pairs in NL</th><th>Group size in the game</th><th>Source</th></tr></thead>
     <tbody id="rows"></tbody>
   </table>
 
-  <h2>What's measured and what's ours</h2>
+  <h3>What's measured and what's ours</h3>
   <p><b>Measured (Sovon):</b> the percentages of atlas squares, from each species' page in the <a id="atlasLink">Sovon Vogelatlas</a>, and the national breeding-pair estimates from the <a href="https://stats.sovon.nl/">Sovon species statistics</a>.</p>
   <p><b>Our estimate:</b> how a square's chance carries over to one pond. In the game, chance on a pond = <i>share of squares where it breeds</i> × <i>area ÷ (area + <span id="half"></span> m²)</i>. So a pond of <span id="half2"></span> m² (about 55 × 55 m) gets half its square's chance, and a big lake nearly all of it. Water smaller than <span id="min"></span> m² gets no birds. The survey doesn't measure single ponds, so this step is a reasonable guess, not survey data.</p>
   <p><b>Swans that visit (our estimate):</b> mute swans fly between waters, so a pond without swans of its own gets a visiting pair now and then. Time is cut into 10-minute stays; in each one a pair is there with the same chance the slider above gives a mute swan on that pond. They fly in, swim around, and fly off again at the end of the stay.</p>
   <p><b>Our choice:</b> how many birds come together (a swan pair, sometimes with cygnets; geese in groups), how they look (toy models, not field-guide drawings), and that the game uses the breeding-season numbers all year round.</p>
   <p class="note">Everyone in a town sees the same birds: which birds a pond has, and where they swim, follow from the pond and the clock, the same way the town's traffic does.</p>
 
-  <footer>Bird data: Sovon Vogelonderzoek Nederland, <i>Vogelatlas van Nederland</i> (2018), fieldwork 2013–2015, and Sovon species statistics (breeding-pair estimates 2015–2020). Read on <span id="checked">22 November 2026</span>.</footer>
+  <footer>Sources checked on 23 November 2026. Bird data: Sovon Vogelonderzoek Nederland, <i>Vogelatlas van Nederland</i> (2018), fieldwork 2013–2015, and Sovon species statistics (breeding-pair estimates 2015–2020). Bird data read on <span id="checked">22 November 2026</span>.</footer>
 </main>
 
 <script type="module">
