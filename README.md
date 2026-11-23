@@ -16,7 +16,7 @@ Wander the street you grew up on, send a friend a link, and meet them there. No 
 ![Tests](https://img.shields.io/badge/tests-100%20passing-brightgreen)
 ![Licence](https://img.shields.io/badge/licence-MIT-lightgrey)
 
-[![Two players meeting on a street in Barendrecht and talking](docs/img/talk.gif)](https://toycity.pages.dev)
+[![Talking with an AI player, jumping onto a car, driving, swimming, then the town from above](docs/img/tour.gif)](https://toycity.pages.dev)
 
 </div>
 
