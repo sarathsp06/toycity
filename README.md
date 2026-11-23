@@ -68,7 +68,7 @@ Wander the street you grew up on, send a friend a link, and meet them there. No 
 - 🧭 **Find a friend**: a route line on the pavement (or the road, if you drive) that follows them as they move.
 - 📍 **Send a meeting link**: friends who open it arrive right beside you.
 - 🙋 **Ride along** in a friend's passenger seat (`E` next to them).
-- 🚪 **Knock on doors** (`K`) or **make a house your home** (`L`): go inside and hear it wherever you are when someone knocks.
+- 🚪 **Knock on doors** (`K`) or **make a house your home** (`L`): go inside and walk around your house (a kitchen, a table for six, a sofa and a TV), and hear it wherever you are when someone knocks. **Let them in** and meet around the table.
 - 🤖 **AI players** can join too, and talk with you by voice (see below).
 
 | Keys | |
@@ -220,6 +220,7 @@ you play, except for the minimap tiles, and the place search and route planner t
 | Zuri (persona), from [BlenderKit](https://www.blenderkit.com) | Richie Kirui | CC0 |
 | Xbot (the classic figure and the shared walk, run and idle animations) | from the [three.js examples](https://github.com/mrdoob/three.js/tree/dev/examples/models/gltf) | as distributed with three.js |
 | Goose, Mallard duck (low-poly birds) | [Poly by Google](https://poly.pizza) | CC BY 3.0 |
+| House furniture (sofa, kitchen, table and chairs, TV, lamps, plants; list in `web/models/CREDITS.txt`) | [Kenney](https://kenney.nl) and [Quaternius](https://quaternius.com) via [Poly Pizza](https://poly.pizza) | CC0 |
 | [Universal Animation Library](https://quaternius.com/packs/universalanimationlibrary.html) (jumping, sitting, riding, falling, knocking, talking, crouching, dancing, swimming) | Quaternius | CC0 |
 
 Every parked car is that one SUV in its own paint (plus the odd motorbike), so the vehicles load in a

@@ -22,6 +22,7 @@ import { createAutopilot } from './autopilot.js';
 import { createTraffic, COUNT as TRAFFIC_N } from './traffic.js';
 import { createPeds, COUNT as PEDS_N } from './peds.js';
 import { createHomes } from './home.js';
+import { createInterior } from './interior.js';
 import { createRadio, mountRadio } from './radio.js';
 import { createNav, mountNav } from './nav.js';
 import { createBirds } from './birds.js';
@@ -751,8 +752,11 @@ function note(text) {
   h.textContent = text; h.classList.remove('gone'); clearTimeout(note.t); note.t = setTimeout(() => h.classList.add('gone'), 4500);
 }
 // ---------- front doors and homes (home.js) ----------
+// the inside of every house (interior.js): you walk about in it while you are in a house
+const room = createInterior({ scene, loader: new GLTFLoader(), createSolids });
 const homes = createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note, loader: new GLTFLoader(),
-  look: y => { yaw = y; pitch = Math.min(pitch, 0.35); dist = Math.max(6, Math.min(dist, 12)); },
+  room: { enter: d => room.load().then(() => { const p = room.enter(d); dist = 3.2; pitch = 0.3; return p; }), leave: () => { room.leave(); dist = 8; } },
+  look: y => { yaw = y; pitch = Math.min(pitch, 0.35); dist = room.active ? 3.2 : Math.max(6, Math.min(dist, 12)); },
   onKnock: () => avatar.pose?.set('knock', { once: true }) });
 driving = createDriving({ scene, player, models: CAR_MODELS, parked, solids, ground: (x, z) => blockedAt(x, z), note, onHitPerson: hitPerson, onBumpCar: (x, z) => traffic?.bumped(x, z) });
 
@@ -1022,23 +1026,25 @@ renderer.domElement.addEventListener('pointerup', e => {
   mouse.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
   ray.setFromCamera(mouse, camera);
   const targets = [];
-  for (const t of tiles.values()) t.group.traverse(o => { if (o.userData.ground || o.userData.solid) targets.push(o); });
+  if (room.active) targets.push(...room.floor);   // in a house: its floor
+  else for (const t of tiles.values()) t.group.traverse(o => { if (o.userData.ground || o.userData.solid) targets.push(o); });
   const hit = ray.intersectObjects(targets, false)[0];
   let pt;
   if (hit) {
     pt = hit.point.clone();
     if (hit.object.userData.solid && hit.face) { const n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld); n.y = 0; pt.add(n.lengthSq() > 0.01 ? n.normalize().multiplyScalar(2.5) : new THREE.Vector3(camera.position.x - pt.x, 0, camera.position.z - pt.z).normalize().multiplyScalar(3)); }
-  } else { const t = -ray.ray.origin.y / ray.ray.direction.y; if (!(t > 0)) return; pt = ray.ray.at(t, new THREE.Vector3()); }
+  } else { const y0 = room.active ? room.floorY : 0, t = (y0 - ray.ray.origin.y) / ray.ray.direction.y; if (!(t > 0)) return; pt = ray.ray.at(t, new THREE.Vector3()); }
   pt.y = 0.15;
   if (driving.driving) return;
   if (fly) { toggleFly(); yaw = Math.atan2(camera.position.x - pt.x, camera.position.z - pt.z); player.position.copy(pt); stopWalk(); return; }
-  goal = pt; marker.position.set(pt.x, 0.35, pt.z); marker.visible = true;
+  goal = pt; marker.position.set(pt.x, (room.active ? room.floorY : 0) + 0.35, pt.z); marker.visible = true;
 });
 
 // collision against the pre-built 0.5 m bitmaps of loaded near squares (grid.js has the layout)
 // coll always blocks (walls, water, fences, tree trunks, lamp posts); low (hedges) only feet below h = 0.5 m
 const bAt = { i: NaN, j: NaN, rev: -1, t: null };   // the square blockedAt last looked in (most tests stay in one)
 function blockedAt(x, z, h = 0) {
+  if (room.active) return room.blockedAt(x, z);   // in a house: its walls are the map
   const X = x + ORX, Y = ORY - z, i = Math.floor(X / T), j = Math.floor(Y / T);
   if (i !== bAt.i || j !== bAt.j || bAt.rev !== tilesRev) { bAt.i = i; bAt.j = j; bAt.rev = tilesRev; bAt.t = tiles.get(squareKey(i, j)) || null; }
   const t = bAt.t;
@@ -1075,10 +1081,12 @@ function groundMap(tile) {
 }
 // metres above the road at x, z (0 on the road, or where the map is not loaded yet)
 function groundAt(x, z) {
+  if (room.active) return 0;   // the house's floor
   const X = x + ORX, Y = ORY - z, i = Math.floor(X / T), j = Math.floor(Y / T), t = tiles.get(squareKey(i, j));
   return t && t.ground ? t.ground[grid.cellBit(X, Y, i, j)] / 100 : 0;
 }
 function wetAt(x, z) {   // the water level there, or null on dry land
+  if (room.active) return null;
   const X = x + ORX, Y = ORY - z, i = Math.floor(X / T), j = Math.floor(Y / T), t = tiles.get(squareKey(i, j));
   if (!t || !t.wet) return null;
   return getBit(t.wet, grid.cellBit(X, Y, i, j)) ? t.waterY : null;
@@ -1116,7 +1124,9 @@ function swimBtn(force) {
 swimButton?.addEventListener('click', e => { e.stopPropagation(); startSwim(); });
 // walking, bumping, jumping and finding a way round, over blockedAt (walker.js); while swimming, water is
 // open, dry land you may step onto ends the swim, walls stay walls
-const walker = createWalker({ blockedAt, wetAt, ground: groundAt, solids, swimming: () => swim.on, flying: () => fly, standing: () => you.onFoot && !swim.on && !fling.on && !homes.inside });
+// what you bump into and stand on: the town's things outside, the furniture in a house
+const walkSolids = { topAt: (x, z, r) => (room.active ? room.solids : solids).topAt(x, z, r), hitAbove: (x, z, r, y) => (room.active ? room.solids : solids).hitAbove(x, z, r, y) };
+const walker = createWalker({ blockedAt, wetAt, ground: groundAt, solids: walkSolids, swimming: () => swim.on, flying: () => fly, standing: () => you.onFoot && !swim.on && !fling.on && !homes.busy });
 const { blocked, lineClear, localPath, jump } = walker;
 // what the player is doing, asked in one place (player.js): may I jump, swim, get in, walk, be hit?
 const you = createPlayerMode({ get driving() { return driving; }, get ride() { return ride; }, get fly() { return fly; }, swim, fling, jump, homes, health }, { stopWalk });
@@ -1360,10 +1370,11 @@ function chaseCam() {
     camera.lookAt(camera.position.x - Math.sin(yaw) * Math.cos(look), camera.position.y + Math.sin(look), camera.position.z - Math.cos(yaw) * Math.cos(look));
     return;
   }
-  for (const c of player.children) c.visible = c.userData.card !== undefined ? !ride && !homes.inside : ride || homes.inside ? false : !driving.driving || !!c.userData.car || driving.rider;   // in a car you see the car, not the person (and your card, if you have one)
+  for (const c of player.children) c.visible = c.userData.card !== undefined ? !ride && !homes.inside : ride ? false : !driving.driving || !!c.userData.car || driving.rider;   // in a car you see the car, not the person (and your card, if you have one)
   cracks(false);
   const pe = pitch + Math.max(0, 1.2 - pitch) * THREE.MathUtils.smoothstep(dist, 30, 300);
-  camera.position.lerp(tmpC.set(Math.sin(yaw) * Math.cos(pe), Math.sin(pe), Math.cos(yaw) * Math.cos(pe)).multiplyScalar(dist).add(player.position), 0.18);
+  camera.position.lerp(tmpC.set(Math.sin(yaw) * Math.cos(pe), Math.sin(pe), Math.cos(yaw) * Math.cos(pe)).multiplyScalar(dist).add(player.position), room.active ? 0.5 : 0.18);
+  room.camera(camera.position);   // in a house the camera stays inside its walls
   camera.lookAt(player.position.x, player.position.y + 1.6, player.position.z);
 }
 // scratch vectors for the frame loop (nothing is made per frame)
@@ -1433,7 +1444,7 @@ function frame(now) {
     chaseCam();
   }
   else if (mode === 'down' || mode === 'flung') { flingStep(dt); chaseCam(); }
-  else if (mode === 'door' || mode === 'home') { homes.update(dt, false); chaseCam(); }
+  else if (mode === 'door') { homes.update(dt, false); chaseCam(); }
   else {
     const fwd = tmpF.set(-Math.sin(yaw), 0, -Math.cos(yaw)), right = tmpR.set(-fwd.z, 0, fwd.x), v = tmpM.set(0, 0, 0);
     if (keys['w'] || keys['arrowup']) v.add(fwd); if (keys['s'] || keys['arrowdown']) v.sub(fwd);
@@ -1508,7 +1519,7 @@ function frame(now) {
   me.x = player.position.x; me.z = player.position.z; me.inCar = you.seated; me.onFoot = you.onFoot; me.fly = fly;
   traffic.update(dt, me); peds.update(dt, me);
   if (swim.on) { const y = wetAt(player.position.x, player.position.z); if (y === null || driving.driving || fly) stopSwim(); else swim.y = y; }
-  player.position.y = swim.on ? swim.y : 0.15 + jump.h + (fling.on ? fling.h : 0);
+  player.position.y = swim.on ? swim.y : (room.active ? room.floorY : 0.15) + jump.h + (fling.on ? fling.h : 0);
   // sharp shadows that follow the player
   const R = 40 + Math.min(dist, 150) * 0.9;
   sun.target.position.copy(player.position); sun.position.copy(player.position).add(SUN_OFFSET);
@@ -1554,7 +1565,7 @@ if (AGENT) window.__agent = {
   get drawing() { return AGENT.draw > 0; },
 };
 if (AGENT) import('./agent.js').catch(e => console.warn('agent api', e));   // window.__agentApi for tools/mcp (it also loads it itself)
-window.__city = { ovTiles, solids, walker, driving, radio, nav, knockDown, card, fling, homes, health, traffic, peds, birds, swim, startSwim, wetAt, groundAt, setTraffic, nearestPlace, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, jump, toRD, rdToWgs, ORX, ORY, info, grid, you, stats: null };
+window.__city = { ovTiles, solids, walker, driving, radio, nav, knockDown, card, fling, homes, health, traffic, peds, birds, swim, startSwim, wetAt, groundAt, room, setTraffic, nearestPlace, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, jump, toRD, rdToWgs, ORX, ORY, info, grid, you, stats: null };
 // ---------- social layer: other people, voice and background sounds (web/mp/, ?mp=0 turns it off) ----------
 // It only reads the player's position and the trees and parked cars around it; nothing here depends on it.
 let social = null;
@@ -1572,7 +1583,7 @@ if (params.get('mp') !== '0') import('./mp/index.js').then(m => m.start({
   scene, camera, player, toRD, fromRD, slug, params, surroundings, useAvatar, solids, goToRD: arriveNear, find: who => nav.find(who),
   vehicle: { get shared() { return ride ? 'ride:0' : driving.shared; }, make: (name, color) => makeCar(CAR_MODELS, name, color),
     get mine() { return driving.driving ? { model: driving.model, x: player.position.x, z: player.position.z, h: player.rotation.y } : null; } }, view: { get eyes() { return firstPerson; }, set eyes(v) { setFirstPerson(v); } },
-  hud: document.getElementById('mp'), knockDown, homes, ground: groundAt,
+  hud: document.getElementById('mp'), knockDown, homes, ground: groundAt, room,
   // what others see of you besides where you are: your card, lying flat or flying, and how high you are
   // caps: what I can do, told to everyone ('v' = can hear and talk). On by default in a browser,
   // off with the 📞 Calls button; an agent (?agent=1) has a voice only if it joined with one (&voice=1)

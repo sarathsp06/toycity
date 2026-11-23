@@ -7,7 +7,7 @@
 //     src: { driving, ride, fly, swim, fling, jump, homes, health }, read through getters (some are set late)
 //     stopWalk(): forget the click-to-go goal (city.js owns it)
 //   player.mode       what moves the player this frame, in the order city.js's frame loop asks:
-//                     'fly' | 'passenger' | 'bike' | 'car' | 'down' | 'flung' | 'door' | 'home' | 'swim' | 'foot'
+//                     'fly' | 'passenger' | 'bike' | 'car' | 'down' | 'flung' | 'door' | 'indoors' | 'swim' | 'foot'
 //   player.can(what)  'jump' | 'swim' | 'car' (E: in or out) | 'walk' (to a point) | 'hit' (be knocked over) | 'door'
 //   player.seated     in a car or on a bike, driving or riding along;  player.onFoot  neither, nor flying
 //   player.atHome     going through a front door, or inside
@@ -34,7 +34,7 @@ export function createPlayerMode(s, { stopWalk = () => {} } = {}) {
       if (s.health.out) return 'down';
       if (s.fling.on) return 'flung';
       if (s.homes.busy) return 'door';
-      if (s.homes.inside) return 'home';
+      if (s.homes.inside) return 'indoors';   // walking about inside a house (interior.js)
       return s.swim.on ? 'swim' : 'foot';
     },
     get seated() { return seated(); },
@@ -43,11 +43,11 @@ export function createPlayerMode(s, { stopWalk = () => {} } = {}) {
     can(what) {
       switch (what) {
         // only from your own feet: not in a car, flying, swimming, at a door, knocked over or already jumping
-        case 'jump': return !s.jump.phase && onFoot() && !s.swim.on && !atHome() && !s.fling.on;
+        case 'jump': return !s.jump.phase && onFoot() && !s.swim.on && !s.homes.busy && !s.fling.on;
         case 'swim': return !s.swim.on && onFoot() && !atHome() && !s.fling.on;
         // E: get in or out (not from the water or a doorstep; knocked out, nothing)
         case 'car': return !s.health.out && !atHome() && !s.swim.on;
-        case 'walk': return onFoot() && !s.homes.inside;
+        case 'walk': return onFoot() && !s.homes.busy;
         case 'hit': return onFoot();
         case 'door': return onFoot() && !s.fling.on;
       }

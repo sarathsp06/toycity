@@ -35,6 +35,7 @@ each owner has tests that run in node without a browser.
 |  | Standing on things is decided in `walker.js` only: everything you can stand on reports its `top` (hedges from the bitmap, cars, benches, bins and bus stops from their footprints in `solids.js`), the feet rest on the highest top under them (`floorAt`), and a thing blocks the body only while its top is more than a step (0.55 m) above the feet. |  |
 | `parked.js` | Parked cars: the record layout per square, keys, which are taken or dented. | `nearest`, `at`, `spot`, `toSpot`, `emptySpotNear`, `isGone`, `stamp`, `carKey` |
 | `ambient.js` | The town's own life as a pure function of the clock and seeds, so every browser sees the same cars, people and birds without a server. Also the one PRNG (mulberry32) and string hash. | `createFleet`, `buildLoop`, `sample`, `rng`, `seed`, `nodesBySquare` |
+| `interior.js` | The inside of a house: one ground floor for every house (models/interior.glb, `tools/interior_model.py`), placed 40 m under the house you go into and turned like its front door, so you keep your place on the map. Its walls are the walker's map and its furniture the solids while you are in. Others in the same house see you there; `home.js` lets visitors in. | `load`, `enter(door)`, `leave`, `active`, `floorY`, `blockedAt`, `solids`, `contains`, `camera(v)`, `seats` |
 | `agent.js` | Everything an AI player's tools need inside the page: a snapshot of who is near and what they are doing, walking, following, doors, cars, events. Loaded only with `?agent=1`. | `window.__agentApi` (see tools/mcp/README.md) |
 
 `city.js` is the glue: it streams the map squares, builds the scene and runs the frame loop, and asks
@@ -80,7 +81,7 @@ human-paced.
 
 ## Meeting rooms (future)
 
-Renting a room for a meeting would be built from these parts: `room.js` for who is in the room and
+Every house now has an inside (`interior.js`) with a table for six, and whoever is home can let a visitor in, so a house is already a place to meet. Renting a room for a meeting would be built from these parts: `room.js` for who is in the room and
 their roles (host, guest), `call.js` for the call inside it, `transport.js` with a meeting-server
 adapter once more than about five people talk at once (peer-to-peer sends every voice to every
 person), and an AI host running on `turn.mjs`. What is still missing: voice between members who are

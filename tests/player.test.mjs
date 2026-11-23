@@ -20,24 +20,24 @@ test('on foot by default: every action is open', () => {
   assert.throws(() => you.can('teleport'));
 });
 
-test('the jump guard is the same everywhere: no jumping seated, flying, swimming, at a door or in the air', () => {
+test('the jump guard is the same everywhere: no jumping seated, flying, swimming, at a door or in the air (indoors you may)', () => {
   const cases = [
     ['driving', s => { s.driving.driving = true; }],
     ['riding along', s => { s.ride = { name: 'Ann' }; }],
     ['flying', s => { s.fly = true; }],
     ['swimming', s => { s.swim.on = true; }],
-    ['inside a home', s => { s.homes.inside = true; }],
     ['going through a door', s => { s.homes.busy = true; }],
     ['flung', s => { s.fling.on = true; }],
     ['already jumping', s => { s.jump.phase = 'air'; }],
   ];
   for (const [name, set] of cases) { const { s, you } = world(); set(s); assert.equal(you.can('jump'), false, name); }
+  const { s, you } = world(); s.homes.inside = true; assert.equal(you.can('jump'), true);   // on the sofa
 });
 
 test('modes follow the frame loop order', () => {
   const { s, you } = world();
   s.swim.on = true; assert.equal(you.mode, 'swim');
-  s.homes.inside = true; assert.equal(you.mode, 'home');
+  s.homes.inside = true; assert.equal(you.mode, 'indoors');
   s.homes.busy = true; assert.equal(you.mode, 'door');
   s.fling.on = true; assert.equal(you.mode, 'flung');
   s.health.out = 12; assert.equal(you.mode, 'down');
@@ -64,7 +64,8 @@ test('other guards: swim, car, walk, being hit, doors', () => {
   assert.equal(w.you.can('swim'), false); assert.equal(w.you.can('door'), false); assert.equal(w.you.can('car'), true);
   w = world(); w.s.health.out = 5; assert.equal(w.you.can('car'), false);
   w = world(); w.s.swim.on = true; assert.equal(w.you.can('car'), false); assert.equal(w.you.can('walk'), true);
-  w = world(); w.s.homes.inside = true; assert.equal(w.you.can('walk'), false); assert.equal(w.you.can('hit'), true);
+  w = world(); w.s.homes.inside = true; assert.equal(w.you.can('walk'), true); assert.equal(w.you.can('car'), false); assert.equal(w.you.can('hit'), true);   // walking about the house
+  w = world(); w.s.homes.busy = true; assert.equal(w.you.can('walk'), false); assert.equal(w.you.can('jump'), false);   // in the doorway
   w = world(); w.s.driving.driving = true; assert.equal(w.you.can('hit'), false); assert.ok(w.you.seated);
 });
 

@@ -6,10 +6,14 @@
 //              through a small multiplayer room named after the door (presence.channel). They get a toast,
 //              and a system notification when the game is in the background; they can come to the door.
 //   Home       "Live here" saves the door as your home (this browser only). At your own door you can go
-//              inside: the door opens, you step in and it shuts behind you; others no longer see you.
-//              While you are home (or anywhere else) you hear knocks; "Step outside" walks you out again.
+//              inside: the door opens, you step in and it shuts behind you, and you are in the house
+//              (interior.js), where people outside no longer see you. While you are home (or anywhere
+//              else) you hear knocks; "Step outside" walks you out again.
+//   Visitors   When someone knocks while you are home, "Let them in" brings them inside too: everyone in
+//              the same house sees each other there, so a house is a place to meet.
 //
-//   const homes = createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note, loader, look })
+//   const homes = createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note, loader, look, room })
+//   room                    the inside of a house: { enter(door) -> { x, z, yaw }, leave() }
 //   homes.update(dt, onFoot) every frame; returns true while it moves the player (stepping in or out)
 //   look(yaw)               turn the camera to face this door from the street
 //   homes.connect(presence) once multiplayer is up
@@ -22,7 +26,7 @@ const POOL = 14;             // real doors around you
 const KEY = 'toycity.home';
 const OPEN = 1.35;           // radians the door swings in
 
-export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note, loader, look = () => {}, onKnock = () => {} }) {
+export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note, loader, look = () => {}, onKnock = () => {}, room = null }) {
   let model = null;
   loader.loadAsync(new URL('./models/door.glb', import.meta.url).href).then(g => {
     // each part is a mesh, or a group of meshes when it has several materials
@@ -32,6 +36,7 @@ export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note,
 
   let home = null; try { home = JSON.parse(localStorage.getItem(KEY)); } catch { /* none */ }
   let presence = null, myRoom = null, inside = false, walk = null, near = null;
+  let at = null;   // the door of the house you are in (or going into): { x, z, yaw, label, guest }
   const pool = new Map();    // door id -> { group, leaf, angle, want, tile, n }
   const toasts = () => document.getElementById('mptoasts') || document.body.appendChild(Object.assign(document.createElement('div'), { id: 'mptoasts' }));
 
@@ -125,12 +130,13 @@ export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note,
     note(`🚪 You knock at ${label}…`);
     const id = idOf(d); let k = knocks.get(id);
     if (!k) {
-      k = { ch: presence.room('home:' + id, { role: 'guest' }), timer: 0, answered: false }; knocks.set(id, k);   // a room (mp/room.js)
+      k = { ch: presence.room('home:' + id, { role: 'guest' }), timer: 0, answered: false, d }; knocks.set(id, k);   // a room (mp/room.js)
       k.ch.onMessage(m => {
         if (!m || typeof m !== 'object') return;
         const who = String(m.name || 'Someone').slice(0, 40);
         if (m.t === 'coming') { k.answered = true; note(`🏠 ${who} heard you and is coming to the door.`); }
         if (m.t === 'away') { k.answered = true; note(`🏠 ${who} can't come to the door right now.`); }
+        if (m.t === 'welcome' && !inside && !walk) { k.answered = true; note(`🏠 ${who} lets you in.`); goInto({ x: k.d.x, z: k.d.z, yaw: k.d.yaw, label, guest: true }); }
       });
     }
     clearTimeout(k.timer); k.timer = setTimeout(() => { k.ch.leave(); knocks.delete(id); }, 30000);
@@ -140,7 +146,7 @@ export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note,
     for (let i = 0; i < 12 && !ch.peers().length; i++) await new Promise(r => setTimeout(r, 500));
     if (knocks.get(id) !== k) return;   // the room closed meanwhile
     const msg = { t: 'knock', name: presence.name, at: label };
-    ch.send(msg); setTimeout(() => { if (knocks.get(id) === k) ch.send(msg); }, 2500);
+    ch.send(msg); setTimeout(() => { if (knocks.get(id) === k && !k.answered) ch.send(msg); }, 2500);   // once more, unless someone answered
     setTimeout(() => { if (!k.answered) note(`🚪 Nobody answers at ${label}.`); }, 15000);
   }
 
@@ -155,6 +161,7 @@ export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note,
       knockSound(); note(`🚪 ${who} is knocking at your door.`);
       if (document.hidden && 'Notification' in window && Notification.permission === 'granted') new Notification('Toy City', { body: `${who} is knocking at your door (${home.label}).` });
       toast(`🚪 ${who} is knocking at ${home.label}`, [
+        ...(inside && at && !at.guest ? [['Let them in', () => { myRoom.send({ t: 'welcome', name: presence.name }, from); openNear(at.x, at.z); }]] : []),
         ['Come to the door', () => { myRoom.send({ t: 'coming', name: presence.name }, from); comeOut(); }],
         ['Not now', () => myRoom.send({ t: 'away', name: presence.name }, from)],
       ]);
@@ -177,16 +184,18 @@ export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note,
   const out = (d, k) => [d.x + Math.sin(d.yaw) * k, d.z + Math.cos(d.yaw) * k];   // k metres out of the door
 
   // go in: the door opens, you walk in, it shuts. Out: the reverse, ending on the doorstep facing the street.
-  function goIn() {
-    const d = homeDoor(); if (!d || inside || walk) return;
-    walk = { d, from: out(d, 1.2), to: out(d, -1.0), t: 0, dir: 'in' }; look(d.yaw);
+  function goIn() { const d = homeDoor(); if (d) goInto({ ...d, label: home.label, guest: false }); }
+  function goInto(d) {
+    if (inside || walk) return;
+    at = d; walk = { d, from: out(d, 1.2), to: out(d, -1.0), t: 0, dir: 'in' }; look(d.yaw);
     swing(keyAt(d.x, d.z), true);
   }
   function comeOut() {
     if (walk) return;
-    const d = homeDoor();
+    const d = inside && at ? at : homeDoor();
     if (!d) { if (home) location.href = `city.html?region=${encodeURIComponent(home.slug)}&meet=${home.rd[0].toFixed(1)},${home.rd[1].toFixed(1)}&home=out`; return; }
-    if (!inside) { player.position.x = out(d, -1.0)[0]; player.position.z = out(d, -1.0)[1]; inside = true; }
+    room?.leave();
+    player.position.x = out(d, -1.0)[0]; player.position.z = out(d, -1.0)[1]; inside = true;
     walk = { d, from: out(d, -1.0), to: out(d, 1.6), t: 0, dir: 'out' }; look(d.yaw);
     swing(keyAt(d.x, d.z), true);
   }
@@ -203,8 +212,8 @@ export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note,
     bar.replaceChildren(); panel.replaceChildren();
     bar.hidden = !near || inside; panel.hidden = !inside;
     if (inside) {
-      panel.append(Object.assign(document.createElement('div'), { textContent: `🏠 Home, ${home.label}` }),
-        Object.assign(document.createElement('small'), { textContent: '🔔 You will hear it when someone knocks.' }),
+      panel.append(Object.assign(document.createElement('div'), { textContent: at?.guest ? `🏠 Visiting ${at.label}` : `🏠 Home, ${at?.label || home?.label || ''}` }),
+        Object.assign(document.createElement('small'), { textContent: at?.guest ? '👋 Step outside when you want to go.' : '🔔 Someone knocks? You can let them in.' }),
         button('🚪 Step outside', comeOut));
       return;
     }
@@ -242,8 +251,12 @@ export function createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note,
     if (w.dir === 'out' && w.t > 0.3) inside = false;
     if (w.t > 1.7) {
       walk = null; swing(keyAt(w.d.x, w.d.z), false);
-      if (w.dir === 'in') { inside = true; note(`🏠 You're home. Knocks at ${home.label} will reach you.`); }
-      else note('👋 You step outside.');
+      if (w.dir === 'in') {
+        inside = true;
+        // into the house itself: the room under it (interior.js), a step in from the door
+        if (room) room.enter(w.d).then(p => { if (!inside) return; player.position.x = p.x; player.position.z = p.z; player.rotation.y = p.yaw; look(p.yaw + Math.PI); });
+        note(w.d.guest ? `🏠 You're inside ${w.d.label}.` : `🏠 You're home. When someone knocks at ${w.d.label}, you can let them in.`);
+      } else { at = null; note('👋 You step outside.'); }
       shown = ''; ui();
     }
     return true;
