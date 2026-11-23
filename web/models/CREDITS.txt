@@ -8,23 +8,9 @@ Pose animations (anims.glb: jumping, sitting, driving, falling, knocking, talkin
 Birds on the water (goose.glb, mallard.glb): low-poly models by Poly by Google, CC-BY 3.0,
   'Goose' https://poly.pizza/m/9wn3If7Qgb4 and 'Mallard duck' https://poly.pizza/m/frSLi6b6Vid.
   The swans, coots and the other water birds are built in web/birds.js.
-House interior (interior.glb, built by tools/interior_model.py): the room is made from scratch; the furniture is
-  low-poly CC0 models from Poly Pizza:
-  - Lounge Sofa by Kenney, CC0, https://poly.pizza/m/jMu2iCmGxU
-  - Coffee Table by Kenney, CC0, https://poly.pizza/m/y4ZU5S7RuD
-  - Cabinet Television by Kenney, CC0, https://poly.pizza/m/AL6wwiUgP3
-  - TV by Quaternius, CC0, https://poly.pizza/m/mBGTVozH1u
-  - Rug Rectangle by Kenney, CC0, https://poly.pizza/m/k5oJLb49gw
-  - Lamp Round Floor by Kenney, CC0, https://poly.pizza/m/8LiDIfXVLi
-  - Bookcase Open by Kenney, CC0, https://poly.pizza/m/MTH8ZwnA27
-  - Houseplant by Quaternius, CC0, https://poly.pizza/m/IBLX2Jz90O
-  - Table by Kenney, CC0, https://poly.pizza/m/41R2HTYj1O
-  - Chair by Kenney, CC0, https://poly.pizza/m/vHyrBYPBum
-  - Ceiling Light by Quaternius, CC0, https://poly.pizza/m/sRNcgQFbLB
-  - Kitchen Cabinet Drawer by Kenney, CC0, https://poly.pizza/m/rGZG7vK3fd
-  - Kitchen Sink by Kenney, CC0, https://poly.pizza/m/nNGtcp9qK2
-  - Kitchen Stove by Kenney, CC0, https://poly.pizza/m/kTJU2y4R15
-  - Kitchen Fridge Large by Kenney, CC0, https://poly.pizza/m/McgsrFB5x6
-  - Kitchen Microwave by Kenney, CC0, https://poly.pizza/m/vUsvf2HGDv
-  - Coat Rack by Kenney, CC0, https://poly.pizza/m/E49wno0xUd
-  - Rug Doormat by Kenney, CC0, https://poly.pizza/m/nwwFXS6B9T
+House interior (interior.glb, built by tools/interior_model.py): the room, the kitchen and the TV are built there;
+  the furniture, decorations and the floor, wall and wood textures are from Poly Haven, CC0 (https://polyhaven.com/license):
+  Sofa 01, Arm Chair 01, Modern Coffee Table 01, Dining Table, Painted Wooden Chair 01, Wooden Display Shelves 01,
+  Potted Plant 04, Modern Ceiling Lamp 01, Hanging Picture Frame 01, Wall Clock, Side Table 01, Throw Pillows 01
+  (https://polyhaven.com/a/<name>, e.g. https://polyhaven.com/a/Sofa_01); textures laminate_floor_02, beige_wall_001,
+  floor_tiles_06 and wood_cabinet_worn_long.

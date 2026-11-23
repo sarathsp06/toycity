@@ -14,7 +14,11 @@ export const UP_MIN = -3, UP_MAX = 20;   // metres: below 0 swimming at the wate
 export const FALL_DOWN = 0.93;           // where in the fall clip someone lying is held (flat on the ground)
 const CAR = /^[a-z0-9_]{1,12}:[0-9a-f]{1,6}$/;   // "model:colour" while driving, "ride:N" as a passenger
 
-export const isInside = pose => pose === POSE.home;                       // at home: not drawn at all
+export const isInside = pose => pose === POSE.home;                       // in a house: drawn only for others in the same house
+// sitting on a chair or the sofa in a house: pose home with this height (a value nothing else sends
+// there, so older games keep working: they don't draw people in a house at all)
+export const SEATED = -1;
+export const isSeated = (pose, up) => pose === POSE.home && up === SEATED;
 export const isLying = pose => pose === POSE.lying || pose === POSE.out;   // flat after a hit, or knocked out
 export const isSwimming = pose => pose === POSE.swim;
 export const isPassenger = car => typeof car === 'string' && car.startsWith('ride:');

@@ -9,7 +9,7 @@
 // The state tuple on the wire is encoded and checked in state.js; channels become rooms in room.js.
 import { MP } from './config.js';
 import { roomsFor, Track, visible, cleanName } from './logic.js';
-import { encodeState, decodeState, isInside, carModel } from './state.js';
+import { encodeState, decodeState, isInside, isSeated, carModel } from './state.js';
 import { openRoom } from './room.js';
 import { ready as avatarsReady, makePlayer, setName, setLook, setVehicle, setCard, seatIn, animate, disposePlayer } from './players.js';
 import { PASSENGER, seatLocal } from '../vehicle.js';
@@ -137,8 +137,9 @@ export async function createPresence({ scene, player, toRD, fromRD, slug, vehicl
         const here = isInside(p.pose) && !!room?.contains(x, z);
         p.player.group.visible = show && (!isInside(p.pose) || here);
         // feet on the pavement: games that send the ground in their height already stand there, older ones send 0
-        p.player.group.position.set(x, here ? room.floorY + (p.up || 0) : 0.15 + Math.max(p.up || 0, p.car ? 0 : ground(x, z)), z); p.player.group.rotation.y = s.h;
-        setCard(p.player, p.card || 0, p.pose || 0, p.up || 0);
+        const seated = here && isSeated(p.pose, p.up); p.player.sitting = seated; p.inMyHouse = here;
+        p.player.group.position.set(x, here ? room.floorY + (seated ? 0 : p.up || 0) : 0.15 + Math.max(p.up || 0, p.car ? 0 : ground(x, z)), z); p.player.group.rotation.y = s.h;
+        setCard(p.player, p.card || 0, p.pose || 0, p.player.sitting ? 0 : p.up || 0);
         // a passenger ("ride"): sit them in the car they are in, beside its driver, so the driver sees them
         if (p.player.inside) {
           const host = carNear(x, z, p.id);

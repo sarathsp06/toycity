@@ -43,3 +43,10 @@ test('car strings: model:colour and ride:N', () => {
   assert.deepEqual(parseCar('ride:2'), { model: 'ride', colour: null, ride: true, seat: 2, bike: false });
   assert.equal(parseCar('nonsense'), null); assert.equal(parseCar(''), null);
 });
+
+test('sitting in a house: pose home with the SEATED height, which older games simply do not draw', async () => {
+  const { isSeated, isInside, SEATED, POSE, decodeState, encodeState } = await import('../web/mp/state.js');
+  const d = decodeState(encodeState({ seq: 1, x: 1, y: 2, h: 0, v: 0, name: 'Ann', look: '', pose: POSE.home, up: SEATED }));
+  assert.equal(d.up, SEATED); assert.ok(isInside(d.pose)); assert.ok(isSeated(d.pose, d.up));
+  assert.ok(!isSeated(POSE.home, 0)); assert.ok(!isSeated(POSE.swim, SEATED));   // swimming below the surface is not sitting
+});

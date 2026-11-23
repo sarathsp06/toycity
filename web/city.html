@@ -20,7 +20,9 @@
   #hint { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); color: #fff; background: rgba(20,30,40,.6); padding: 6px 12px; border-radius: 999px; font-size: 13px; pointer-events: none; transition: opacity 1s; z-index: 3; white-space: nowrap; }
   #hint.gone { opacity: 0; }
   #carbtn { position: fixed; left: 50%; bottom: 66px; transform: translateX(-50%); z-index: 6; font: 600 15px system-ui, sans-serif; padding: 9px 18px; border: 0; border-radius: 999px; background: #ffb547; color: #1b1206; box-shadow: 0 4px 16px rgba(0,0,0,.3); cursor: pointer; }
-  #carbtn[hidden] { display: none; }
+  #carbtn[hidden], #sitbtn[hidden] { display: none; }
+  #sitbtn { position: fixed; left: 50%; bottom: 128px; transform: translateX(-50%); z-index: 46; font: 600 15px system-ui, sans-serif; padding: 9px 18px; border: 0; border-radius: 999px; background: #fff; color: #1b2a36; box-shadow: 0 4px 16px rgba(0,0,0,.3); cursor: pointer; }
+  body.touch #sitbtn { bottom: 260px; }
   #swimbtn { position: fixed; left: 50%; bottom: 112px; transform: translateX(-50%); z-index: 6; font: 600 15px system-ui, sans-serif; padding: 9px 18px; border: 0; border-radius: 999px; background: #6cc6ff; color: #06202e; box-shadow: 0 4px 16px rgba(0,0,0,.3); cursor: pointer; }
   #swimbtn[hidden] { display: none; }
   /* hit by a car: the screen flashes red for a moment */

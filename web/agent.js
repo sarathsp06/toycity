@@ -10,6 +10,7 @@
 //   waitFor(event, ms) -> bool          arrival, speech, knock, call, person_near
 //   toDoor(address, reach), knock(), liveHere(), answerDoor(come), getIn(), rideWith(name), getOut(),
 //   driveTo(place), where(person), names(), clearMissed(), busy()
+//   sit(), stand()                      in a house: walk to the nearest free chair (or the sofa) and sit down
 //
 // Loaded by the MCP server after the game is up (page.addScriptTag); it can also be imported in node
 // for its pure helpers (tests/agent.test.mjs).
@@ -26,6 +27,7 @@ export const facing = rotY => Math.round(((Math.atan2(-Math.sin(rotY), -Math.cos
 // what a peer is doing, from what presence tells about them
 export function doing(q) {
   if (q.player?.inside) return 'riding in a car';
+  if (q.player?.sitting) return 'sitting';
   if (q.car) return q.car.startsWith('bike') ? 'on a motorbike' : 'driving';
   switch (q.pose) {
     case POSE.lying: return 'lying on the ground';
@@ -148,7 +150,7 @@ export function install(w = window) {
       return {
         nearest_address: city.nearestPlace().replace(/\s+·\s+/g, ', '),   // the closest address point: not necessarily the door you are at
         door_address: at && dr ? door.address : null,   // the house whose door you are standing at (you can knock)
-        doing: h.inside ? 'at home, inside' : d.driving ? `${d.model === 'bike' ? 'riding a motorbike' : 'driving'} at ${Math.round(Math.abs(d.speed) * 3.6)} km/h${city.autopilot.active ? `, autopilot to ${city.autopilot.label}, ${(city.autopilot.remaining / 1000).toFixed(1)} km left` : ''}`
+        doing: h.inside ? (city.sitting ? 'sitting, inside the house' : 'inside the house') : d.driving ? `${d.model === 'bike' ? 'riding a motorbike' : 'driving'} at ${Math.round(Math.abs(d.speed) * 3.6)} km/h${city.autopilot.active ? `, autopilot to ${city.autopilot.label}, ${(city.autopilot.remaining / 1000).toFixed(1)} km left` : ''}`
           : A().riding ? `riding along with ${A().riding}` : city.fling.on ? 'knocked over' : A().walking ? 'walking' : 'standing',
         facing: facing(city.player.rotation.y),
         home: h.home ? h.home.label : null,
@@ -232,7 +234,8 @@ export function install(w = window) {
     },
     knock() { const h = c().homes, d = h.doorsNear(h.NEAR)[0]; h.knock(); return d ? h.addressOf(d) : 'the door'; },
     liveHere() { if (!atDoor()) return false; c().homes.liveHere(); return true; },
-    answerDoor(come) { const t = knocks()[0]; if (!t) return false; t.querySelectorAll('button')[come ? 0 : 1].click(); return true; },
+    // come: let them in when you are inside (or come to the door); else not now. -> the button pressed
+    answerDoor(come) { const t = knocks()[0]; if (!t) return false; const bs = [...t.querySelectorAll('button')], b = come ? bs[0] : bs[bs.length - 1]; b.click(); return b.textContent; },
     async homeMove(inside) { const h = c().homes; inside ? h.goIn() : h.comeOut(); await sleep(300); await until(() => !h.busy, 4000); },
 
     getIn() {
@@ -270,6 +273,22 @@ export function install(w = window) {
       u.searchParams.set('meet', X.toFixed(1) + ',' + Y.toFixed(1));
       return { who: name, lat: +lat.toFixed(6), lon: +lon.toFixed(6), rd: [+X.toFixed(1), +Y.toFixed(1)], meeting_link: u.href };
     },
+    // a seat in the house: walk (at a person's pace) to beside the nearest free one, then sit down
+    async sit(kind) {
+      stopFollow(); endWalk();
+      const city = c(), room = city.room, p = city.player.position;
+      if (!city.homes.inside || !room.active) return 'You can only sit down inside a house.';
+      if (city.sitting) return 'You are already sitting.';
+      const taken = peers().filter(q => q.player?.sitting).map(q => [q.player.group.position.x, q.player.group.position.z]);
+      const free = room.seats.filter(s => !taken.some(([x, z]) => Math.hypot(x - s.x, z - s.z) < 0.35) && (!kind || s.kind === kind))
+        .sort((a, b) => Math.hypot(a.x - p.x, a.z - p.z) - Math.hypot(b.x - p.x, b.z - p.z));
+      const s = free[0]; if (!s) return 'Every seat is taken.';
+      const [x, z] = room.standSpot(s, (x, z) => !city.blocked(x, z));
+      A().walkTo(x, z, false);
+      await until(() => !A().walking, 10000, 250);
+      return city.sitDown(s) ? `You sat down on the ${s.kind === 'chair' ? 'chair at the table' : s.kind}.` : 'Could not reach that seat.';
+    },
+    stand() { const city = c(); if (!city.sitting) return 'You are not sitting.'; city.standUp(); return 'You stood up.'; },
     leave() { stopFollow(); endWalk(); },
   };
   w.__agentApi = api;

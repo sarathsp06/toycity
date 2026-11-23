@@ -159,20 +159,28 @@ server.tool('follow', 'Follow a player: keep walking behind them (about gap metr
 server.tool('live_here', 'Make the house whose front door you are standing at your home. People who knock there will reach you.', {},
   async () => { need(); await pace(); return text(await api('liveHere') ? (await state()).last_message : 'You are not at a front door.'); });
 
-server.tool('go_inside', 'At your own front door: go inside. Others stop seeing you.', {},
+server.tool('go_inside', 'At your own front door: go inside. People outside stop seeing you; anyone else in the house sees you, and you are in one call with everyone in there who can talk. When someone knocks, answer_door lets them in.', {},
   async () => { need(); await pace(); await api('homeMove', true); return text(describe(await state())); });
 
 server.tool('step_outside', 'Leave your house through the front door.', {},
   async () => { need(); await pace(); await api('homeMove', false); return text(describe(await state())); });
 
-server.tool('answer_door', 'Someone is knocking at your home (look lists knocks): come to the door, or tell them not now.',
+server.tool('answer_door', 'Someone is knocking at your home (look lists knocks): let them in (when you are inside: they come in and you meet in the house), or come to the door, or tell them not now.',
   { come: z.boolean().default(true) },
   async ({ come }) => {
     need(); await pace();
-    if (!await api('answerDoor', come)) return text('Nobody is knocking right now.');
+    const b = await api('answerDoor', come);
+    if (!b) return text('Nobody is knocking right now.');
     await page().waitForTimeout(come ? 2500 : 500);
-    return text(come ? 'You came to the door.\n' + describe(await state()) : 'You told them not now.');
+    return text(!come ? 'You told them not now.' : (b === 'Let them in' ? 'You let them in.\n' : 'You came to the door.\n') + describe(await state()));
   });
+
+server.tool('sit', 'Inside a house: walk to the nearest free chair at the table (or the sofa) and sit down, as for a meeting.',
+  { seat: z.enum(['chair', 'sofa']).optional() },
+  async ({ seat }) => { need(); await pace(); return text(await api('sit', seat)); });
+
+server.tool('stand_up', 'Get up from your seat.', {},
+  async () => { need(); await pace(); return text(await api('stand')); });
 
 server.tool('jump', 'Jump, as a person does with the space bar (on foot only).', {},
   async () => { need(); await pace(); return text(await page().evaluate(() => window.__agent.jump()) ? 'You jumped.' : 'You can only jump on foot, outside and standing on the ground.'); });

@@ -18,9 +18,15 @@
 //   room.camera(v)               keep a camera position inside the walls
 //   room.floor                   the floor meshes, for click-to-walk
 //   room.seats                   [{ x, z, yaw, h, kind }] in the scene, where people can sit
+//   room.seatNear(x, z, r, taken) the nearest seat within r metres not in taken (a list of [x, z])
+//   room.standSpot(seat, clear)  where to stand up to (or walk to before sitting): beside the seat,
+//                                clear(x, z) says whether a body fits there
 import * as THREE from 'three';
 
 export const DEPTH = -40;          // metres below the street
+// while you are in a house the camera draws only this layer: the room, the people in it and the
+// lights, so none of the town is drawn (city.js indoorView)
+export const INDOORS = 1;
 const R = 0.3;                      // a body's radius: how close to a wall the centre may come
 
 export function createInterior({ scene, loader, createSolids }) {
@@ -44,6 +50,7 @@ export function createInterior({ scene, loader, createSolids }) {
         // the window glows like daylight; everything else is lit by the scene's sky light
         const m = o.material; if (m.emissiveIntensity !== undefined && m.emissive?.getHex()) m.emissiveIntensity = 1.4;
         if (m.name === 'floor') floor.push(o);
+        o.layers.enable(INDOORS);
       });
       group.add(model);
     }).catch(e => { loading = null; throw e; });
@@ -69,9 +76,28 @@ export function createInterior({ scene, loader, createSolids }) {
 
   function inRoom(x, z, margin) { const [lx, lz] = toLocal(x, z); return lx > -W / 2 + margin && lx < W / 2 - margin && lz < -margin && lz > -D + margin; }
 
+  function seatNear(x, z, r, taken = []) {
+    let best = null, bd = r;
+    for (const s of seats) {
+      const d = Math.hypot(s.x - x, s.z - z);
+      if (d < bd && !taken.some(([tx, tz]) => Math.hypot(tx - s.x, tz - s.z) < 0.35)) { bd = d; best = s; }
+    }
+    return best;
+  }
+  // in front of the seat, else behind it, else to either side (a dining chair has the table in front)
+  function standSpot(s, clear) {
+    const fx = Math.sin(s.yaw), fz = Math.cos(s.yaw);
+    for (const [a, b] of [[0.75, 0], [-0.75, 0], [0, 0.75], [0, -0.75], [1.1, 0], [-1.1, 0]]) {
+      const x = s.x + fx * a + fz * b, z = s.z + fz * a - fx * b;
+      if (clear(x, z)) return [x, z];
+    }
+    return [s.x + fx * 0.75, s.z + fz * 0.75];
+  }
+
   return {
-    load, enter, leave, solids,
+    load, enter, leave, solids, seatNear, standSpot,
     get active() { return !!door; },
+    get group() { return group; },
     get door() { return door; },
     get floorY() { return DEPTH; },
     get floor() { return floor; },

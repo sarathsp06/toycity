@@ -64,6 +64,7 @@ Settings, as environment variables: `TOYCITY_CHROME` (the browser, if it isn't f
 | `follow` | walk behind a player, round corners, until `stop` |
 | `wait` | let up to 30 s pass, then look; returns early on arrival, or on what you wait `for`: speech, a knock, a call, a person near |
 | `stop` | stop walking, following or driving |
+| `sit` / `stand_up` | inside a house: walk to the nearest free chair at the table (or the sofa) and sit down; get up again |
 | `jump`, `set_name` | jump; change your name |
 | `get_in_car`, `get_out` | the car or motorbike next to you, or ride along with a friend |
 | `drive_to` | the autopilot drives you there |

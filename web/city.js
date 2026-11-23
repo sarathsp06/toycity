@@ -15,14 +15,15 @@ import { createDriving, makeCar, footprintOf, FRONT, PASSENGER, seatLocal } from
 import { createParked } from './parked.js';
 import { createGrid, squareKey, getBit, setBit, newBitmap, SIDE, eachCell } from './grid.js';
 import { createPlayerMode, FALL_DOWN } from './player.js';
-import { POSE, isPassenger, carModel } from './mp/state.js';
+import { POSE, SEATED, isPassenger, carModel } from './mp/state.js';
+import { SIT_DROP } from './mp/players.js';
 import { createWalker } from './walker.js';
 import { rng } from './ambient.js';
 import { createAutopilot } from './autopilot.js';
 import { createTraffic, COUNT as TRAFFIC_N } from './traffic.js';
 import { createPeds, COUNT as PEDS_N } from './peds.js';
 import { createHomes } from './home.js';
-import { createInterior } from './interior.js';
+import { createInterior, INDOORS } from './interior.js';
 import { createRadio, mountRadio } from './radio.js';
 import { createNav, mountNav } from './nav.js';
 import { createBirds } from './birds.js';
@@ -678,6 +679,7 @@ function pickPose() {
   if (driving.rider) return P.set('drive');
   if (you.seated) return P.set(null);   // inside a car: not seen
   if (fling.on || homes.busy) return;
+  if (sat) return P.set('sit_idle', { fade: 0.25 });
   if (swim.on) return P.set(avatar.speed > 0.25 ? 'swim' : 'swim_idle', { fade: 0.3 });
   if (jump.phase === 'crouch') return P.set('jump_start', { once: true });
   if (jump.phase === 'air') { if (P.name !== 'jump_start' || P.done) P.set('jump_loop'); return; }
@@ -692,7 +694,7 @@ function ridePlace() {
   const m = avatar.model; if (!m) return;
   const riding = driving?.rider, f = FRONT.bike ?? 1;
   m.rotation.y = riding ? f * Math.PI / 2 : 0;
-  m.position.set(riding ? -0.12 * f : 0, riding ? 0.31 : 0, 0);
+  m.position.set(riding ? -0.12 * f : 0, riding ? 0.31 : sat ? SIT_DROP : 0, 0);
 }
 player.position.set(info.start ? info.start.x - ORX : 0, 0.15, info.start ? -(info.start.y - ORY) : 0);
 scene.add(player);
@@ -999,6 +1001,7 @@ addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
   keys[e.key.toLowerCase()] = true;
   if (e.key.toLowerCase() === 'e' && !e.repeat && you.can('car')) toggleCar();
+  else if (e.key.toLowerCase() === 'e' && !e.repeat && homes.inside) { if (sat) standUp(); else sitDown(); }
   if (e.key.toLowerCase() === 'g' && !e.repeat && !swim.on) startSwim();
   if (e.key.toLowerCase() === 'f') { if (driving.driving) toggleCar(); toggleFly(); }
   if (e.key.toLowerCase() === 'v') setFirstPerson(!firstPerson);
@@ -1113,6 +1116,45 @@ function startSwim() {
 function stopSwim(say = true) { if (!swim.on) return; swim.on = false; if (say) note('💧 Out of the water.'); swimBtn(true); }
 const swimButton = document.getElementById('swimbtn');
 const swimAt = { x: NaN, z: NaN, on: null };
+// ---------- sitting down in a house: a chair at the table or the sofa (seats in interior.json) ----------
+// E or the Sit button near a seat; any move (a key, the joystick, a click) stands you up again.
+let sat = null;
+const SIT_REACH = 1.4;
+const takenSeats = () => [...(social?.presence?.peers?.values() || [])].filter(p => p.player?.sitting).map(p => [p.player.group.position.x, p.player.group.position.z]);
+// Indoors only the house is drawn: the camera switches to the INDOORS layer, which the room, the
+// lights, you and the people in the same house are on (re-marked twice a second: bodies change).
+let indoorOn = false, indoorT = 0;
+for (const l of [sun, hemi, amb]) l.layers.enable(INDOORS);
+const onIndoors = o => o.traverse(c => c.layers.enable(INDOORS));
+function indoorView() {
+  const on = room.active;
+  if (on !== indoorOn) { indoorOn = on; if (on) camera.layers.set(INDOORS); else camera.layers.set(0); indoorT = 0; }
+  if (!on || (indoorT -= 1 / 60) > 0) return;
+  indoorT = 0.5;
+  onIndoors(player); onIndoors(marker);
+  for (const p of social?.presence?.peers?.values() || []) if (p.inMyHouse && p.player) onIndoors(p.player.group);
+}
+function sitDown(s = room.seatNear(player.position.x, player.position.z, SIT_REACH, takenSeats())) {
+  if (!s || !homes.inside || homes.busy || Math.hypot(s.x - player.position.x, s.z - player.position.z) > SIT_REACH) return false;   // only a seat within reach
+  stopWalk(); jump.h = 0; jump.phase = null;
+  sat = s; player.position.x = s.x; player.position.z = s.z; player.rotation.y = s.yaw;
+  yaw = s.yaw + Math.PI; sitBtn(true); return true;
+}
+function standUp() {
+  if (!sat) return;
+  const [x, z] = room.standSpot(sat, (x, z) => !blocked(x, z));
+  player.position.x = x; player.position.z = z; sat = null; sitBtn(true);
+}
+const sitButton = Object.assign(document.createElement('button'), { id: 'sitbtn', hidden: true });
+document.body.append(sitButton);
+sitButton.addEventListener('click', e => { e.stopPropagation(); sat ? standUp() : sitDown(); });
+let sitAt = '';
+function sitBtn(force) {
+  const s = sat ? null : homes.inside && !homes.busy ? room.seatNear(player.position.x, player.position.z, SIT_REACH, takenSeats()) : null;
+  const key = sat ? 'up' : s ? 'sit' : '';
+  if (!force && key === sitAt) return; sitAt = key;
+  sitButton.hidden = !key; sitButton.textContent = sat ? '🧍 Stand up (E)' : '🪑 Sit down (E)';
+}
 function swimBtn(force) {
   if (!swimButton) return;
   const p = player.position;
@@ -1126,7 +1168,7 @@ swimButton?.addEventListener('click', e => { e.stopPropagation(); startSwim(); }
 // open, dry land you may step onto ends the swim, walls stay walls
 // what you bump into and stand on: the town's things outside, the furniture in a house
 const walkSolids = { topAt: (x, z, r) => (room.active ? room.solids : solids).topAt(x, z, r), hitAbove: (x, z, r, y) => (room.active ? room.solids : solids).hitAbove(x, z, r, y) };
-const walker = createWalker({ blockedAt, wetAt, ground: groundAt, solids: walkSolids, swimming: () => swim.on, flying: () => fly, standing: () => you.onFoot && !swim.on && !fling.on && !homes.busy });
+const walker = createWalker({ blockedAt, wetAt, ground: groundAt, solids: walkSolids, swimming: () => swim.on, flying: () => fly, standing: () => you.onFoot && !swim.on && !fling.on && !homes.busy && !sat });   // seated: the chair holds you
 const { blocked, lineClear, localPath, jump } = walker;
 // what the player is doing, asked in one place (player.js): may I jump, swim, get in, walk, be hit?
 const you = createPlayerMode({ get driving() { return driving; }, get ride() { return ride; }, get fly() { return fly; }, swim, fling, jump, homes, health }, { stopWalk });
@@ -1372,10 +1414,11 @@ function chaseCam() {
   }
   for (const c of player.children) c.visible = c.userData.card !== undefined ? !ride && !homes.inside : ride ? false : !driving.driving || !!c.userData.car || driving.rider;   // in a car you see the car, not the person (and your card, if you have one)
   cracks(false);
-  const pe = pitch + Math.max(0, 1.2 - pitch) * THREE.MathUtils.smoothstep(dist, 30, 300);
+  // in a house: from a little above head height, looking down on you (never from the floor)
+  const pe = room.active ? Math.max(pitch, 0.55) : pitch + Math.max(0, 1.2 - pitch) * THREE.MathUtils.smoothstep(dist, 30, 300);
   camera.position.lerp(tmpC.set(Math.sin(yaw) * Math.cos(pe), Math.sin(pe), Math.cos(yaw) * Math.cos(pe)).multiplyScalar(dist).add(player.position), room.active ? 0.5 : 0.18);
   room.camera(camera.position);   // in a house the camera stays inside its walls
-  camera.lookAt(player.position.x, player.position.y + 1.6, player.position.z);
+  camera.lookAt(player.position.x, player.position.y + (room.active ? (sat ? 0.9 : 1.2) : 1.6), player.position.z);
 }
 // scratch vectors for the frame loop (nothing is made per frame)
 const tmpC = new THREE.Vector3(), tmpF = new THREE.Vector3(), tmpR = new THREE.Vector3(), tmpM = new THREE.Vector3();
@@ -1451,6 +1494,8 @@ function frame(now) {
     if (keys['a'] || keys['arrowleft']) v.sub(right); if (keys['d'] || keys['arrowright']) v.add(right);
     const jm = Math.hypot(joy.x, joy.y);
     if (jm > 0.15) v.addScaledVector(fwd, -joy.y).addScaledVector(right, joy.x);
+    if (sat && !homes.inside) { sat = null; sitBtn(true); }   // went outside (Step outside): nothing to stand up from
+    if (sat && (v.lengthSq() > 0 || goal)) { standUp(); stopWalk(); v.set(0, 0, 0); }
     if (v.lengthSq() > 0) stopWalk();
     // walk, or run with Shift or the joystick pushed to its edge; click-to-go speeds up for long trips
     let speed = swim.on ? (keys['shift'] || jm > 0.9 ? SWIM_FAST : SWIM_MS) : keys['shift'] || jm > 0.9 ? 6 : jm > 0.15 ? 1.2 + 0.8 * jm : 1.8;
@@ -1485,7 +1530,7 @@ function frame(now) {
     placeT = 0;
     const s = (driving.driving ? Math.round(Math.abs(driving.speed) * 3.6) + ' km/h  ·  ' + (autopilot.active ? apLine() : '') : '') + nearestPlace();
     if (s !== placeText) place.textContent = placeText = s;
-    carBtn(); swimBtn();
+    carBtn(); swimBtn(); sitBtn();
   }
 
   // only the 12 nearest signs, rescaled with distance
@@ -1531,7 +1576,8 @@ function frame(now) {
   if (!camera.position.equals(camAt) || !camera.quaternion.equals(camQ) || you.seated || fling.on || jump.phase
     || homes.busy || avatar.speed > 0.02 || peerNear() || traffic.near(R) || peds.near(R)) shadowDirty = true;
   camAt.copy(camera.position); camQ.copy(camera.quaternion);
-  if (shadowDirty) { renderer.shadowMap.needsUpdate = true; shadowDirty = false; }
+  if (shadowDirty && !room.active) { renderer.shadowMap.needsUpdate = true; shadowDirty = false; }   // indoors no shadows are drawn
+  indoorView();
 
   // an agent's headless browser draws only when the agent asks to see (rendering there is slow, and
   // a slow frame rate would make it slower than a person on foot)
@@ -1565,7 +1611,7 @@ if (AGENT) window.__agent = {
   get drawing() { return AGENT.draw > 0; },
 };
 if (AGENT) import('./agent.js').catch(e => console.warn('agent api', e));   // window.__agentApi for tools/mcp (it also loads it itself)
-window.__city = { ovTiles, solids, walker, driving, radio, nav, knockDown, card, fling, homes, health, traffic, peds, birds, swim, startSwim, wetAt, groundAt, room, setTraffic, nearestPlace, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, jump, toRD, rdToWgs, ORX, ORY, info, grid, you, stats: null };
+window.__city = { ovTiles, solids, walker, driving, radio, nav, knockDown, card, fling, homes, health, traffic, peds, birds, swim, startSwim, wetAt, groundAt, room, sitDown, standUp, get sitting() { return sat; }, setTraffic, nearestPlace, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, jump, toRD, rdToWgs, ORX, ORY, info, grid, you, stats: null };
 // ---------- social layer: other people, voice and background sounds (web/mp/, ?mp=0 turns it off) ----------
 // It only reads the player's position and the trees and parked cars around it; nothing here depends on it.
 let social = null;
@@ -1589,7 +1635,7 @@ if (params.get('mp') !== '0') import('./mp/index.js').then(m => m.start({
   // off with the 📞 Calls button; an agent (?agent=1) has a voice only if it joined with one (&voice=1)
   body: { get caps() { return voiceCap ? 'v' : ''; }, setVoice(on) { voiceCap = on; if (!AGENT) localStorage.setItem('toycity.calls', on ? 'on' : 'off'); },
     get autoAnswer() { return !!AGENT && voiceCap; },
-    get card() { return card.level; }, get pose() { return you.pose; }, get y() { return +(swim.on ? swim.y - 0.15 : fling.on ? fling.h : jump.h).toFixed(2); } },
+    get card() { return card.level; }, get pose() { return you.pose; }, get y() { return sat ? SEATED : +(swim.on ? swim.y - 0.15 : fling.on ? fling.h : jump.h).toFixed(2); } },
 })).then(s => { social = s; window.__city.social = s; }).catch(e => { console.warn('multiplayer unavailable', e); document.getElementById('mp').textContent = 'Multiplayer unavailable right now'; });
 
 setFirstPerson(localStorage.getItem('toycity.view') === 'eyes');

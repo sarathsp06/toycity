@@ -5,6 +5,8 @@ import * as THREE from 'three';
 import { loadAvatar, myLook, poseLayer } from '../avatar.js';
 import { FRONT } from '../vehicle.js';
 import { POSE, FALL_DOWN, isLying, isSwimming, isPassenger, isBike, carModel } from './state.js';
+// the sit clip has the hips 0.61 m over the feet; a chair's seat is 0.45 m up: lower the body to it
+export const SIT_DROP = -0.16;
 
 const SHIRTS = [0x2f6fde, 0x2a9d5c, 0xe0a020, 0x8e44ad, 0x16a3b8, 0xd35400, 0xc0392b, 0x34495e];
 const base = new URL('../', import.meta.url);
@@ -84,7 +86,7 @@ export function seatIn(p, model) {
 function pickPose(p, speed) {
   const P = p.pose; if (!P) return;
   if (p.riding || p.seat === 'bike') return P.set('drive');
-  if (p.seat) return P.set('sit_idle');
+  if (p.seat || p.sitting) return P.set('sit_idle');   // in a car seat, or on a chair in a house
   if (p.carMesh || p.inside) return P.set(null);
   if (isSwimming(p.poseN)) return P.set(speed > 0.25 ? 'swim' : 'swim_idle', { fade: 0.3 });
   if (p.poseN === POSE.flung) return P.set('hit', { once: true });
@@ -96,7 +98,8 @@ function pickPose(p, speed) {
 }
 
 export function animate(p, speed, dt) {
-  if (p.seat) speed = 0;
+  if (p.seat || p.sitting) speed = 0;
+  if (p.model && !p.seat && !p.riding) p.model.position.y = p.sitting ? SIT_DROP : 0;
   if (p.riding) speed = 0;   // sitting still on the bike, whatever its speed
   const w = THREE.MathUtils.clamp(speed / 1.4, 0, 1), r = THREE.MathUtils.clamp((speed - 2.2) / 1.8, 0, 1);
   if (p.mixer) {

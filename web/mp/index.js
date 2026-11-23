@@ -78,6 +78,8 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
   call.on((e, a, b) => {
     if (e === 'change') settle();
     else if (e === 'invite') {
+      // someone in the same house: you are in the room together, so the call just connects
+      if (presence.peers.get(a)?.inMyHouse && homes?.inside) { houseCall = true; call.accept(b); return; }
       const t = toast(`📞 ${nameOf(a)} wants to talk`, [['Answer', () => call.accept(b)], ['Not now', () => call.decline(b)]], RING_MS);
       t.classList.add('ring'); t.dataset.call = b;
     } else if (e === 'cancel') toasts.querySelectorAll(`.ring[data-call="${a}"]`).forEach(t => t.remove());   // they hung up before I answered
@@ -89,7 +91,18 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
   presence.onLeave(p => call.peerLeft(p.id));
   // once a second, visible or not: rings time out and are retried, and in a hidden tab (no frames)
   // my voice still follows the call
-  presence.onBeat(() => { call.tick(); if (document.hidden) voice.route(); });
+  presence.onBeat(() => { call.tick(); houseBeat(); if (document.hidden) voice.route(); });
+  // One call per house: everyone who can talk in the same house is in it, without ringing (the one
+  // with the lower id starts it, so two people don't ring each other at once). Stepping outside leaves it.
+  let houseCall = false;
+  function houseBeat() {
+    if (!homes?.inside || homes.busy) { if (houseCall && !homes?.busy) { houseCall = false; if (call.active) leave(); } return; }
+    if (!myCaps().includes('v')) return;
+    for (const p of presence.peers.values()) {
+      if (!p.inMyHouse || !canTalk(p) || call.members.has(p.id) || call.ringing.has(p.id)) continue;
+      if (call.active || presence.selfId < p.id) { houseCall = true; ring(p.id); }
+    }
+  }
   // for an AI agent with a voice (tools/mcp): call someone by name, hang up, and who is in the call
   window.__agentCall = {
     ring: name => { const p = [...presence.peers.values()].filter(p => canTalk(p) && p.dist < 60).find(p => (p.name || '').toLowerCase().includes(String(name).toLowerCase())); if (!p) return null; ring(p.id); return p.name; },
