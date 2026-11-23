@@ -2,7 +2,8 @@
 // Buildings, walls, water and hedges come from each square's baked collision bitmap (city.js);
 // everything else lives here: parked cars, trees, lamp posts and street furniture from the squares,
 // and moving things such as other players. Each footprint is a circle { x, z, r } or a box turned
-// by `yaw` { x, z, hx, hz, yaw }, in world metres on the ground.
+// by `yaw` { x, z, hx, hz, yaw }, in world metres on the ground. `top` is how high its top is above the
+// ground you stand on, for things you can stand on (a car roof, a bench); without it, nobody can.
 //
 //   const solids = createSolids();
 //   solids.add(owner, [footprints])    static things, e.g. the cars of one square
@@ -12,17 +13,20 @@
 //   solids.hit(x, z, r)                does a circle of radius r at (x, z) touch anything solid?
 //   solids.hitStatic(x, z, r)          the same for the static things only (no allocation)
 //   solids.at(x, z, r)                 the static footprints that circle touches
+//   solids.topAt(x, z, r)              the highest top a circle there stands on (0: none)
+//   solids.hitAbove(x, z, r, y)        like hit, counting only things whose top is above y (or that have none)
 
-// footprint of each kind of placed object, by its instance name, for a scale of 1
+// footprint of each kind of placed object, by its instance name, for a scale of 1; top: metres above
+// the pavement (measured on the models), only for things a person can stand on
 export const FOOTPRINTS = {
-  car: { hx: 2.15, hz: 0.88 },        // length along the car, width across
+  car: { hx: 2.15, hz: 0.88, top: 1.45 },   // length along the car, width across; the roof
   tree: { r: 0.3 },                   // the trunk (you walk under the crown)
   lamp: { r: 0.15 },
-  'furn:bollard': { r: 0.12 },
-  'furn:bench': { hx: 0.9, hz: 0.25 },
-  'furn:bin': { r: 0.3 },
-  'furn:postbox': { r: 0.3 },
-  'furn:busstop': { hx: 1.6, hz: 0.7 },
+  'furn:bollard': { r: 0.12, top: 0.75 },
+  'furn:bench': { hx: 0.9, hz: 0.25, top: 0.3 },
+  'furn:bin': { r: 0.3, top: 0.85 },
+  'furn:postbox': { r: 0.3, top: 1.1 },
+  'furn:busstop': { hx: 1.6, hz: 0.7, top: 2.5 },
 };
 export const PERSON = { r: 0.3 };
 
@@ -43,7 +47,9 @@ export function footprintsOf(name, data, origin) {
   const out = [];
   for (let k = 0; k < data.length; k += 6) {
     const x = data[k] + origin.x, z = data[k + 2] + origin.z, sc = name === 'car' ? 1 : data[k + 4] || 1;
-    out.push(fp.r !== undefined ? { x, z, r: fp.r * sc } : { x, z, hx: fp.hx * sc, hz: fp.hz * sc, yaw: data[k + 3] });
+    const f = fp.r !== undefined ? { x, z, r: fp.r * sc } : { x, z, hx: fp.hx * sc, hz: fp.hz * sc, yaw: data[k + 3] };
+    if (fp.top !== undefined) f.top = fp.top * sc;
+    out.push(f);
   }
   return out;
 }
@@ -88,6 +94,18 @@ export function createSolids() {
     for (const f of grid.get(cellOf(x, z)) || []) if (hits(f, x, z, r)) return true;
     return false;
   }
+  // the highest top under a circle (feet): only things with a top count; 0 when there is none
+  function topAt(x, z, r) {
+    let top = 0;
+    for (const f of grid.get(cellOf(x, z)) || []) if (f.top > top && hits(f, x, z, r)) top = f.top;
+    for (const f of moving()) if (f.top > top && !(f.id && ignore.has(f.id)) && hits(f, x, z, r)) top = f.top;
+    return top;
+  }
+  function hitAbove(x, z, r, y) {
+    for (const f of grid.get(cellOf(x, z)) || []) if (!(f.top <= y) && hits(f, x, z, r)) return true;
+    for (const f of moving()) if (!(f.top <= y) && !(f.id && ignore.has(f.id)) && hits(f, x, z, r)) return true;
+    return false;
+  }
   function at(x, z, r) { return (grid.get(cellOf(x, z)) || []).filter(f => hits(f, x, z, r)); }
   // people (live footprints with an id) that are not solid for now: someone knocked over a moment ago
   const ignore = new Set();
@@ -97,5 +115,5 @@ export function createSolids() {
     for (const f of moving()) if (Math.hypot(f.x - x, f.z - z) < r) out.push(f);
     return out;
   }
-  return { add, drop, hit, hitStatic, at, liveNear, ignore, beginFrame, live: fn => live.push(fn) };
+  return { add, drop, hit, hitStatic, at, topAt, hitAbove, liveNear, ignore, beginFrame, live: fn => live.push(fn) };
 }

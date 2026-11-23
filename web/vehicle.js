@@ -17,9 +17,10 @@ import { STRIDE } from './parked.js';
 // which end of each model (along its local x axis) is the bonnet; from the head- and taillights in cars.glb
 export const FRONT = { golf: -1, camry: 1, fiat500: 1, jeep: 1, van: 1, suv: -1, suv_wreck: -1, bike: 1 };
 // half length, half width and wheelbase; the car default matches the parked-car footprint in solids.js
-const SIZES = { bike: { hl: 1.06, hw: 0.4, wb: 1.45 } };
-const sizeOf = m => SIZES[m] || { hl: 2.15, hw: 0.88, wb: 2.6 };
-export const footprintOf = (m, x, z, yaw) => { const s = sizeOf(m); return { x, z, hx: s.hl, hz: s.hw, yaw }; };
+// top: what you stand on, metres above the pavement (the SUV's roof, the bike's saddle; see solids.js)
+const SIZES = { bike: { hl: 1.06, hw: 0.4, wb: 1.45, top: 0.8 } };
+const sizeOf = m => SIZES[m] || { hl: 2.15, hw: 0.88, wb: 2.6, top: 1.45 };
+export const footprintOf = (m, x, z, yaw) => { const s = sizeOf(m); return { x, z, hx: s.hl, hz: s.hw, yaw, top: s.top }; };
 // where the driver's eyes are, in the model's own frame (x along the car, +z = its left when FRONT is -1)
 // Right-hand drive (the player's choice): the driver sits on the car's right, the passenger on the left.
 // The SUV model is left-hand drive, so the car you drive gets its dashboard and steering wheel mirrored.

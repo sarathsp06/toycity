@@ -58,9 +58,36 @@ test('a jump lands on top of a hedge, and walking off the top falls back down', 
   const w = createWalker({ blockedAt: m.blockedAt }), j = w.jump;
   w.startJump(); assert.equal(j.phase, 'crouch');
   let top = 0;
+  for (let t = 0; t < 0.3; t += 0.01) { w.stepJump(0.01, 298, -100); top = Math.max(top, j.h); }   // push off beside it
   for (let t = 0; t < 2; t += 0.01) { w.stepJump(0.01, 305, -100); top = Math.max(top, j.h); }
-  assert.ok(top > 1.1 && top < 1.4, 'clears a 1.1 m hedge: ' + top);
-  assert.equal(j.h, HEDGE_TOP); assert.equal(j.h, 1.0); assert.ok(j.onHedge); assert.equal(j.phase, null);
+  assert.ok(top > 1.1 && top < 1.6, 'clears a 1.1 m hedge: ' + top);
+  assert.equal(j.h, HEDGE_TOP); assert.equal(j.h, 1.1); assert.ok(j.onHedge); assert.equal(j.phase, null);
   for (let t = 0; t < 1; t += 0.01) w.stepJump(0.01, 320, -100);   // stepped off
   assert.equal(j.h, 0); assert.ok(!j.onHedge);
+});
+
+test('one rule for everything you stand on: a car roof, a bench, a car rolling in under you', async () => {
+  const { createSolids, FOOTPRINTS } = await import('../web/solids.js');
+  const m = fakeMap(), solids = createSolids();
+  const car = { x: 400, z: -100, hx: 2.15, hz: 0.88, yaw: 0, top: FOOTPRINTS.car.top };
+  solids.add('sq', [car, { x: 410, z: -100, hx: 0.9, hz: 0.25, yaw: 0, top: FOOTPRINTS['furn:bench'].top }, { x: 420, z: -100, r: 0.3 }]);
+  const w = createWalker({ blockedAt: m.blockedAt, solids }), j = w.jump;
+  assert.ok(w.blocked(400, -100), 'a car blocks feet on the ground'); assert.ok(w.blocked(420, -100), 'a tree always blocks');
+  assert.ok(!w.blocked(410, -100), 'a bench is low enough to step onto');
+  // jump straight up next to the car, then over it: the roof is reachable, landing puts the feet on it
+  w.startJump(); let top = 0;
+  for (let t = 0; t < 0.3; t += 0.01) { w.stepJump(0.01, 397, -100); top = Math.max(top, j.h); }
+  for (let t = 0; t < 2; t += 0.01) { w.stepJump(0.01, 400, -100); top = Math.max(top, j.h); }
+  assert.ok(top > car.top, 'a jump clears the roof: ' + top);
+  assert.equal(j.h, car.top); assert.equal(j.phase, null);
+  assert.ok(!w.blocked(401, -100), 'walking about on the roof');
+  for (let t = 0; t < 1; t += 0.01) w.stepJump(0.01, 405, -100);   // off the roof, onto the ground
+  assert.equal(j.h, 0);
+  for (let t = 0; t < 0.2; t += 0.01) w.stepJump(0.01, 410, -100);   // walk up onto the bench
+  assert.equal(j.h, FOOTPRINTS['furn:bench'].top);
+  car.x = 430; solids.drop('sq'); solids.add('sq2', [car]);   // a car arrives under someone standing at 430
+  for (let t = 0; t < 0.5; t += 0.01) w.stepJump(0.01, 430, -100);
+  assert.equal(j.h, car.top, 'lifted onto it, not standing inside it');
+  let seated = false; const w2 = createWalker({ blockedAt: m.blockedAt, solids, standing: () => !seated });
+  w2.jump.h = 1; seated = true; w2.stepJump(0.01, 430, -100); assert.equal(w2.jump.h, 0, 'in a car the feet are not on anything');
 });

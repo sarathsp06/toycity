@@ -1099,7 +1099,7 @@ function swimBtn(force) {
 swimButton?.addEventListener('click', e => { e.stopPropagation(); startSwim(); });
 // walking, bumping, jumping and finding a way round, over blockedAt (walker.js); while swimming, water is
 // open, dry land you may step onto ends the swim, walls stay walls
-const walker = createWalker({ blockedAt, wetAt, solids, swimming: () => swim.on, flying: () => fly });
+const walker = createWalker({ blockedAt, wetAt, solids, swimming: () => swim.on, flying: () => fly, standing: () => you.onFoot && !swim.on && !fling.on && !homes.inside });
 const { blocked, lineClear, localPath, jump } = walker;
 // what the player is doing, asked in one place (player.js): may I jump, swim, get in, walk, be hit?
 const you = createPlayerMode({ get driving() { return driving; }, get ride() { return ride; }, get fly() { return fly; }, swim, fling, jump, homes, health }, { stopWalk });
@@ -1537,7 +1537,7 @@ if (AGENT) window.__agent = {
   get drawing() { return AGENT.draw > 0; },
 };
 if (AGENT) import('./agent.js').catch(e => console.warn('agent api', e));   // window.__agentApi for tools/mcp (it also loads it itself)
-window.__city = { ovTiles, solids, driving, radio, nav, knockDown, card, fling, homes, health, traffic, peds, birds, swim, startSwim, wetAt, setTraffic, nearestPlace, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, jump, toRD, rdToWgs, ORX, ORY, info, grid, you, stats: null };
+window.__city = { ovTiles, solids, walker, driving, radio, nav, knockDown, card, fling, homes, health, traffic, peds, birds, swim, startSwim, wetAt, setTraffic, nearestPlace, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, jump, toRD, rdToWgs, ORX, ORY, info, grid, you, stats: null };
 // ---------- social layer: other people, voice and background sounds (web/mp/, ?mp=0 turns it off) ----------
 // It only reads the player's position and the trees and parked cars around it; nothing here depends on it.
 let social = null;
