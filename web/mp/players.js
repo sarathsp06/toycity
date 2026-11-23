@@ -5,8 +5,10 @@ import * as THREE from 'three';
 import { loadAvatar, myLook, poseLayer } from '../avatar.js';
 import { FRONT } from '../vehicle.js';
 import { POSE, FALL_DOWN, isLying, isSwimming, isPassenger, isBike, carModel } from './state.js';
-// the sit clip has the hips 0.61 m over the feet; a chair's seat is 0.45 m up: lower the body to it
-export const SIT_DROP = -0.16;
+// where the body goes to sit on a seat whose top is h metres up: the sit clip has the hips 0.59 m over
+// the feet and 0.28 m behind them, so lift (or lower) it to rest the thighs on the seat (hip joint 8 cm
+// above it) and move it forward until the hips are over the seat's point
+export const sitOffset = (h = 0.45) => ({ y: h + 0.08 - 0.59, z: 0.23 });
 
 const SHIRTS = [0x2f6fde, 0x2a9d5c, 0xe0a020, 0x8e44ad, 0x16a3b8, 0xd35400, 0xc0392b, 0x34495e];
 const base = new URL('../', import.meta.url);
@@ -99,7 +101,7 @@ function pickPose(p, speed) {
 
 export function animate(p, speed, dt) {
   if (p.seat || p.sitting) speed = 0;
-  if (p.model && !p.seat && !p.riding) p.model.position.y = p.sitting ? SIT_DROP : 0;
+  if (p.model && !p.seat && !p.riding) { const o = p.sitting ? sitOffset(p.sitting.h) : null; p.model.position.y = o ? o.y : 0; p.model.position.z = o ? o.z : 0; }
   if (p.riding) speed = 0;   // sitting still on the bike, whatever its speed
   const w = THREE.MathUtils.clamp(speed / 1.4, 0, 1), r = THREE.MathUtils.clamp((speed - 2.2) / 1.8, 0, 1);
   if (p.mixer) {

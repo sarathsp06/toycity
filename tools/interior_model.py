@@ -37,7 +37,7 @@ MODELS = {
     "sofa": "Sofa_01", "armchair": "ArmChair_01", "coffee": "modern_coffee_table_01", "table": "dining_table",
     "chair": "painted_wooden_chair_01", "shelves": "wooden_display_shelves_01", "plant": "potted_plant_04",
     "lamp": "modern_ceiling_lamp_01", "picture": "hanging_picture_frame_01", "clock": "wall_clock",
-    "side": "side_table_01", "pillows": "throw_pillows_01",
+    "side": "side_table_01",
 }
 TEXTURES = ["laminate_floor_02", "beige_wall_001", "floor_tiles_06", "wood_cabinet_worn_long"]
 UA = {"User-Agent": "toycity"}
@@ -173,7 +173,7 @@ for (x0, x1, y0, y1) in ((-W / 2, -DOOR_W / 2, 0, 0.02), (DOOR_W / 2, W / 2, 0, 
 FACING = {"+y": 0, "-x": -math.pi / 2, "-y": math.pi, "+x": math.pi / 2}   # where its front looks
 
 
-def place(name, x, y, facing="+y", z=0.0, solid=True, top=None, seat=None, scale=1.0):
+def place(name, x, y, facing="+y", z=0.0, solid=True, top=None, seat=None, seat_h=0.45, scale=1.0):
     """the model `name`, its footprint centred on x, y (Blender metres), its front towards `facing`"""
     before = set(bpy.data.objects)
     bpy.ops.import_scene.gltf(filepath=fetch(MODELS[name]))
@@ -193,7 +193,7 @@ def place(name, x, y, facing="+y", z=0.0, solid=True, top=None, seat=None, scale
         solids.append({"name": name, "x": round(x, 3), "z": round(-y, 3), "hx": round(hx, 3), "hz": round(hy, 3), "top": round(top if top is not None else z + h, 3)})
     if seat:    # where a person sits, facing like the furniture; h: seat height
         for sx, sy in seat:
-            seats.append({"kind": "sofa" if name == "armchair" else name, "x": round(x + sx, 3), "z": round(-(y + sy), 3), "yaw": round(FACING[facing], 4), "h": 0.45})
+            seats.append({"kind": "sofa" if name == "armchair" else name, "x": round(x + sx, 3), "z": round(-(y + sy), 3), "yaw": round(FACING[facing], 4), "h": seat_h})   # h: the top of the seat
     return root, hx, hy, h
 
 
@@ -246,9 +246,8 @@ box("tvstand", -W / 2 + 0.1, -W / 2 + 0.22, LY - 0.15, LY + 0.15, 0.45, 0.47, SC
 box("tvneck", -W / 2 + 0.14, -W / 2 + 0.16, LY - 0.04, LY + 0.04, 0.47, 0.76, SCREEN)
 solids.append({"name": "tvunit", "x": round(-W / 2 + 0.21, 3), "z": round(-LY, 3), "hx": 0.21, "hz": 0.85, "top": 0.45})
 place("coffee", -0.85, LY, "+x")
-place("sofa", 0.75, LY, "-x", seat=[(0, -0.38), (0, 0.38)])
-place("pillows", 0.85, LY, "-x", z=0.42, solid=False)
-place("armchair", -0.9, LY + 1.25, "-y", seat=[(0, 0)])
+place("sofa", 0.75, LY, "-x", seat=[(-0.1, -0.38), (-0.1, 0.38)], seat_h=0.38)   # on the cushions, in front of the back
+place("armchair", -0.9, LY + 1.25, "-y", seat=[(0, -0.08)], seat_h=0.42)
 place("side", 0.8, LY + 1.25, "-x")
 place("plant", 0.8, LY + 1.25, "+y", z=0.55, solid=False)
 place("shelves", W / 2 - 0.22, D - 1.0, "-x")

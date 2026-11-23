@@ -11,6 +11,6 @@ Birds on the water (goose.glb, mallard.glb): low-poly models by Poly by Google, 
 House interior (interior.glb, built by tools/interior_model.py): the room, the kitchen and the TV are built there;
   the furniture, decorations and the floor, wall and wood textures are from Poly Haven, CC0 (https://polyhaven.com/license):
   Sofa 01, Arm Chair 01, Modern Coffee Table 01, Dining Table, Painted Wooden Chair 01, Wooden Display Shelves 01,
-  Potted Plant 04, Modern Ceiling Lamp 01, Hanging Picture Frame 01, Wall Clock, Side Table 01, Throw Pillows 01
+  Potted Plant 04, Modern Ceiling Lamp 01, Hanging Picture Frame 01, Wall Clock, Side Table 01
   (https://polyhaven.com/a/<name>, e.g. https://polyhaven.com/a/Sofa_01); textures laminate_floor_02, beige_wall_001,
   floor_tiles_06 and wood_cabinet_worn_long.

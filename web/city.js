@@ -16,7 +16,7 @@ import { createParked } from './parked.js';
 import { createGrid, squareKey, getBit, setBit, newBitmap, SIDE, eachCell } from './grid.js';
 import { createPlayerMode, FALL_DOWN } from './player.js';
 import { POSE, SEATED, isPassenger, carModel } from './mp/state.js';
-import { SIT_DROP } from './mp/players.js';
+import { sitOffset } from './mp/players.js';
 import { createWalker } from './walker.js';
 import { rng } from './ambient.js';
 import { createAutopilot } from './autopilot.js';
@@ -694,7 +694,8 @@ function ridePlace() {
   const m = avatar.model; if (!m) return;
   const riding = driving?.rider, f = FRONT.bike ?? 1;
   m.rotation.y = riding ? f * Math.PI / 2 : 0;
-  m.position.set(riding ? -0.12 * f : 0, riding ? 0.31 : sat ? SIT_DROP : 0, 0);
+  const so = sat && !riding ? sitOffset(sat.h) : null;
+  m.position.set(riding ? -0.12 * f : 0, riding ? 0.31 : so ? so.y : 0, so ? so.z : 0);
 }
 player.position.set(info.start ? info.start.x - ORX : 0, 0.15, info.start ? -(info.start.y - ORY) : 0);
 scene.add(player);
