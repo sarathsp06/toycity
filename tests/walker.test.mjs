@@ -91,3 +91,16 @@ test('one rule for everything you stand on: a car roof, a bench, a car rolling i
   let seated = false; const w2 = createWalker({ blockedAt: m.blockedAt, solids, standing: () => !seated });
   w2.jump.h = 1; seated = true; w2.stepJump(0.01, 430, -100); assert.equal(w2.jump.h, 0, 'in a car the feet are not on anything');
 });
+
+test('the feet stand on the ground\'s own height: up the kerb onto the pavement, down onto the road', () => {
+  const m = fakeMap();
+  const ground = (x, z) => x >= 5 ? 0.12 : 0;   // the pavement east of x = 5, the road west of it
+  const w = createWalker({ blockedAt: m.blockedAt, ground });
+  w.stepJump(1 / 60, 3, -10); assert.equal(w.jump.h, 0);
+  assert.equal(w.blocked(5.2, -10), false);     // a 12 cm kerb is a step, not a wall
+  w.stepJump(1 / 60, 6, -10); assert.equal(w.jump.h, 0.12);
+  w.startJump(); let t = 0; for (; t < 2 && (w.jump.phase || t === 0); t += 1 / 60) w.stepJump(1 / 60, 6, -10);
+  assert.equal(w.jump.h, 0.12);                 // a jump lands back on the pavement, not below it
+  w.stepJump(1 / 60, 3, -10); for (let k = 0; k < 30; k++) w.stepJump(1 / 60, 3, -10);
+  assert.equal(w.jump.h, 0);                    // stepped off the kerb: down on the road
+});

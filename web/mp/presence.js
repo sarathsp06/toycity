@@ -17,7 +17,7 @@ import { PASSENGER, seatLocal } from '../vehicle.js';
 import { parseLook, myLook } from '../avatar.js';
 const TRYSTERO = './trystero-nostr.js';   // patched local copy, see the file header
 
-export async function createPresence({ scene, player, toRD, fromRD, slug, vehicle, body }) {
+export async function createPresence({ scene, player, toRD, fromRD, slug, vehicle, body, ground = () => 0 }) {
   const { joinRoom, selfId } = await import(TRYSTERO);
   // Relay fallback (TURN): when two players' networks block a direct connection (mobile data, many
   // offices), the WebRTC traffic goes through Cloudflare's relay instead. Short-lived credentials come
@@ -133,7 +133,9 @@ export async function createPresence({ scene, player, toRD, fromRD, slug, vehicl
       if (show && !p.player) { p.player = makePlayer(p.id, tag(p), p.look); scene.add(p.player.group); if (p.car) setVehicle(p.player, p.car, vehicle?.make); }
       if (p.player) {
         p.player.group.visible = show && !isInside(p.pose);   // at home, inside the house
-        const [x, z] = fromRD(s.x, s.y); p.player.group.position.set(x, 0.15 + (p.up || 0), z); p.player.group.rotation.y = s.h;
+        const [x, z] = fromRD(s.x, s.y);
+        // feet on the pavement: games that send the ground in their height already stand there, older ones send 0
+        p.player.group.position.set(x, 0.15 + Math.max(p.up || 0, p.car ? 0 : ground(x, z)), z); p.player.group.rotation.y = s.h;
         setCard(p.player, p.card || 0, p.pose || 0, p.up || 0);
         // a passenger ("ride"): sit them in the car they are in, beside its driver, so the driver sees them
         if (p.player.inside) {

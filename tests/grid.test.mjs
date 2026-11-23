@@ -1,7 +1,7 @@
 // node --test tests/*.test.mjs   (the map grid: RD <-> scene, square keys, the 0.5 m bitmaps)
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createGrid, squareKey, getBit, setBit, newBitmap, BYTES, SIDE, CELL } from '../web/grid.js';
+import { createGrid, squareKey, getBit, setBit, newBitmap, eachCell, BYTES, SIDE, CELL } from '../web/grid.js';
 
 const g = createGrid(92000, 433000, 500);
 
@@ -28,4 +28,12 @@ test('bitmaps: 1000 x 1000 cells of 0.5 m, row by row northwards', () => {
   assert.equal(getBit(b, bit + 1), 0); assert.equal(getBit(b, bit - 1), 0);
   assert.equal(g.cellBit(92499.99, 433499.99, 184, 866), 999999);
   setBit(b, 999999); assert.equal(b[124999], 0x80);
+});
+
+test('eachCell: the cells whose centres lie in a triangle, clipped to the square', () => {
+  const cells = []; eachCell(0, 0, 2, 0, 0, 2, c => cells.push(c));   // half of a 2 x 2 m corner
+  assert.deepEqual(cells.sort((a, b) => a - b), [0, 1, 2, 3, 1000, 1001, 1002, 2000, 2001, 3000]);
+  const n = []; eachCell(-1, -1, 2, -1, -1, 2, c => n.push(c)); assert.deepEqual(n.sort((a, b) => a - b), [0, 1, 1000]);   // only the part inside
+  const out = []; eachCell(-5, -5, -1, -5, -5, -1, c => out.push(c)); assert.deepEqual(out, []);   // wholly outside
+  let edge = 0; eachCell(0, 0, 1, 1, 2, 2, () => edge++); assert.equal(edge, 0);           // a kerb's side, seen edge-on
 });

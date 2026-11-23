@@ -18,7 +18,7 @@ import { PERSON } from '../solids.js';
 import { footprintOf } from '../vehicle.js';
 import * as THREE from 'three';
 
-export async function start({ scene, camera, player, toRD, fromRD, slug, params, hud, surroundings, view, goToRD, find, solids, vehicle, body, knockDown, homes }) {
+export async function start({ scene, camera, player, toRD, fromRD, slug, params, hud, surroundings, view, goToRD, find, solids, vehicle, body, knockDown, homes, ground }) {
   hud.innerHTML = `<button id="mpname" title="Change your name"></button>
     <button id="mpview" title="Switch between seeing through your eyes and from behind (V)"></button>
     <button id="mpsound" title="Birds, wind and traffic"></button>
@@ -29,7 +29,7 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
   const callBox = document.createElement('div'); callBox.id = 'mpcall'; callBox.hidden = true; document.body.append(callBox);
   const toasts = document.createElement('div'); toasts.id = 'mptoasts'; document.body.append(toasts);
   const $ = s => hud.querySelector(s);
-  const presence = await createPresence({ scene, player, toRD, fromRD, slug, vehicle, body });
+  const presence = await createPresence({ scene, player, toRD, fromRD, slug, vehicle, body, ground });
   // a driver ran into you: their game sends where the car was going; yours plays the fall
   homes?.connect(presence);   // houses: knocks and residents (home.js)
   presence.onCall((m, id) => { if (m.t === 'hit' && Number.isFinite(m.vx) && Number.isFinite(m.vz) && presence.peers.get(id)?.car) knockDown?.(m); });

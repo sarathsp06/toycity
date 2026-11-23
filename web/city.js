@@ -13,7 +13,7 @@ import { loadAvatar, myLook, poseLayer } from './avatar.js';
 import { createSolids, footprintsOf } from './solids.js';
 import { createDriving, makeCar, footprintOf, FRONT, PASSENGER, seatLocal } from './vehicle.js';
 import { createParked } from './parked.js';
-import { createGrid, squareKey, getBit, setBit, newBitmap, SIDE } from './grid.js';
+import { createGrid, squareKey, getBit, setBit, newBitmap, SIDE, eachCell } from './grid.js';
 import { createPlayerMode, FALL_DOWN } from './player.js';
 import { POSE, isPassenger, carModel } from './mp/state.js';
 import { createWalker } from './walker.js';
@@ -468,6 +468,7 @@ function applySquare({ key, level, r, req }) {
     mesh.castShadow = shadow && !NO_SHADOW_CAST.has(name); mesh.receiveShadow = shadow;
     if (name.startsWith('wall') || name === 'roof') mesh.userData.solid = true;
     if (name === 'water') tile.water = mesh.geometry;
+    if (name.startsWith('surf:')) (tile.surf ||= []).push(mesh.geometry);
     q.add(mesh);
   };
   if (near) {
@@ -488,6 +489,7 @@ function applySquare({ key, level, r, req }) {
         birds.add(tile, xz, tile.water.index.array, ys / n + 0.03, key);
       });
     }
+    if (tile.surf) birdsLater.push(() => { if (tiles.get(key) === tile) tile.ground = groundMap(tile); });
     for (const [n, k, x, y] of d.header.meta.pois.slice(0, 80)) {
       const sp = label(n, /church|place_of_worship|townhall|school/.test(k) ? '#e6ecff' : '#fff8e6');
       sp.position.set(x, 9.5, -y); tile.group.add(sp); tile.sprites.push(sp); signs.add(sp);
@@ -934,7 +936,7 @@ function others() {
 // ---------- birds on the water (birds.js): which ones come from Sovon's survey numbers, see facts.html ----------
 const birds = createBirds({ scene, THREE, loadModel: u => new GLTFLoader().loadAsync(u) });
 const birdsLater = [];   // finding the ponds takes a moment: one square's worth per frame, after it is drawn
-const ambientOpts = { scene, autopilot, solids, slug, T, toRD, others };
+const ambientOpts = { scene, autopilot, solids, slug, T, toRD, others, ground: (x, z) => groundAt(x, z) };
 const traffic = createTraffic({ ...ambientOpts, models: CAR_MODELS, sounds: () => social?.ambience?.on ?? true, count: trafficOn ? TRAFFIC_N[qName] || TRAFFIC_N.mid : 0 });
 const peds = createPeds({ ...ambientOpts, count: trafficOn ? PEDS_N[qName] || PEDS_N.mid : 0 });
 const me = { x: 0, z: 0, onFoot: true, inCar: false, fly: false };   // what the ambient life needs to know of me
@@ -1046,20 +1048,35 @@ function blockedAt(x, z, h = 0) {
 }
 // ---------- water you can swim in: a 0.5 m bitmap per near square, like coll, from its water triangles ----------
 function wetMask(tile, xz, idx) {
-  const bits = newBitmap(), ox = tile.i * T, oy = tile.j * T;
-  for (let t = 0; t < idx.length; t += 3) {
-    // the triangle in the square's own RD metres (X east, Y north from its corner)
-    const P = [0, 1, 2].map(k => [xz[2 * idx[t + k]] + ORX - ox, ORY - xz[2 * idx[t + k] + 1] - oy]);
-    const c0 = Math.max(0, Math.floor(Math.min(P[0][0], P[1][0], P[2][0]) / 0.5)), c1 = Math.min(999, Math.floor(Math.max(P[0][0], P[1][0], P[2][0]) / 0.5));
-    const r0 = Math.max(0, Math.floor(Math.min(P[0][1], P[1][1], P[2][1]) / 0.5)), r1 = Math.min(999, Math.floor(Math.max(P[0][1], P[1][1], P[2][1]) / 0.5));
-    const [[ax, ay], [bx, by], [cx, cy]] = P, d = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy); if (!d) continue;
-    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
-      const x = c * 0.5 + 0.25, y = r * 0.5 + 0.25;
-      const u = ((by - cy) * (x - cx) + (cx - bx) * (y - cy)) / d, v = ((cy - ay) * (x - cx) + (ax - cx) * (y - cy)) / d;
-      if (u >= -1e-6 && v >= -1e-6 && u + v <= 1 + 1e-6) setBit(bits, r * SIDE + c);
+  const bits = newBitmap(), ox = tile.i * T, oy = tile.j * T, set = c => setBit(bits, c);
+  // each triangle in the square's own RD metres (X east, Y north from its corner)
+  const X = k => xz[2 * k] + ORX - ox, Y = k => ORY - xz[2 * k + 1] - oy;
+  for (let t = 0; t < idx.length; t += 3) { const a = idx[t], b = idx[t + 1], c = idx[t + 2]; eachCell(X(a), Y(a), X(b), Y(b), X(c), Y(c), set); }
+  return bits;
+}
+// ---------- the height of the ground: the pavement stands 12 cm above the road, gardens and grass a few cm ----------
+// From the square's own surface shapes (road, pavement, paths, grass, raised beds), the top of the
+// highest one in each 0.5 m cell, in cm above the road. Feet stand on it (walker.js, peds.js); others'
+// feet follow from the height they send.
+const ROAD = 0.15;   // the road's top, the level everything else is measured from (buildtiles.mjs TOP.road)
+function groundMap(tile) {
+  const cm = new Uint8Array(SIDE * SIDE), gx = tile.group.position.x, gz = tile.group.position.z, ox = tile.i * T, oy = tile.j * T;
+  for (const g of tile.surf) {
+    const P = g.attributes.position.array, idx = g.index.array;
+    const X = k => P[3 * k] * QQ.q - QQ.ox + gx + ORX - ox, Y = k => ORY - (P[3 * k + 2] * QQ.q - QQ.oz + gz) - oy, H = k => P[3 * k + 1] * QQ.q - QQ.oy;
+    for (let t = 0; t < idx.length; t += 3) {
+      const a = idx[t], b = idx[t + 1], c = idx[t + 2], h = Math.round((Math.max(H(a), H(b), H(c)) - ROAD) * 100);
+      if (h <= 0) continue;   // road level, or a slab's underside
+      const v = Math.min(255, h);
+      eachCell(X(a), Y(a), X(b), Y(b), X(c), Y(c), cell => { if (cm[cell] < v) cm[cell] = v; });
     }
   }
-  return bits;
+  return cm;
+}
+// metres above the road at x, z (0 on the road, or where the map is not loaded yet)
+function groundAt(x, z) {
+  const X = x + ORX, Y = ORY - z, i = Math.floor(X / T), j = Math.floor(Y / T), t = tiles.get(squareKey(i, j));
+  return t && t.ground ? t.ground[grid.cellBit(X, Y, i, j)] / 100 : 0;
 }
 function wetAt(x, z) {   // the water level there, or null on dry land
   const X = x + ORX, Y = ORY - z, i = Math.floor(X / T), j = Math.floor(Y / T), t = tiles.get(squareKey(i, j));
@@ -1099,7 +1116,7 @@ function swimBtn(force) {
 swimButton?.addEventListener('click', e => { e.stopPropagation(); startSwim(); });
 // walking, bumping, jumping and finding a way round, over blockedAt (walker.js); while swimming, water is
 // open, dry land you may step onto ends the swim, walls stay walls
-const walker = createWalker({ blockedAt, wetAt, solids, swimming: () => swim.on, flying: () => fly, standing: () => you.onFoot && !swim.on && !fling.on && !homes.inside });
+const walker = createWalker({ blockedAt, wetAt, ground: groundAt, solids, swimming: () => swim.on, flying: () => fly, standing: () => you.onFoot && !swim.on && !fling.on && !homes.inside });
 const { blocked, lineClear, localPath, jump } = walker;
 // what the player is doing, asked in one place (player.js): may I jump, swim, get in, walk, be hit?
 const you = createPlayerMode({ get driving() { return driving; }, get ride() { return ride; }, get fly() { return fly; }, swim, fling, jump, homes, health }, { stopWalk });
@@ -1537,7 +1554,7 @@ if (AGENT) window.__agent = {
   get drawing() { return AGENT.draw > 0; },
 };
 if (AGENT) import('./agent.js').catch(e => console.warn('agent api', e));   // window.__agentApi for tools/mcp (it also loads it itself)
-window.__city = { ovTiles, solids, walker, driving, radio, nav, knockDown, card, fling, homes, health, traffic, peds, birds, swim, startSwim, wetAt, setTraffic, nearestPlace, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, jump, toRD, rdToWgs, ORX, ORY, info, grid, you, stats: null };
+window.__city = { ovTiles, solids, walker, driving, radio, nav, knockDown, card, fling, homes, health, traffic, peds, birds, swim, startSwim, wetAt, groundAt, setTraffic, nearestPlace, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, jump, toRD, rdToWgs, ORX, ORY, info, grid, you, stats: null };
 // ---------- social layer: other people, voice and background sounds (web/mp/, ?mp=0 turns it off) ----------
 // It only reads the player's position and the trees and parked cars around it; nothing here depends on it.
 let social = null;
@@ -1555,7 +1572,7 @@ if (params.get('mp') !== '0') import('./mp/index.js').then(m => m.start({
   scene, camera, player, toRD, fromRD, slug, params, surroundings, useAvatar, solids, goToRD: arriveNear, find: who => nav.find(who),
   vehicle: { get shared() { return ride ? 'ride:0' : driving.shared; }, make: (name, color) => makeCar(CAR_MODELS, name, color),
     get mine() { return driving.driving ? { model: driving.model, x: player.position.x, z: player.position.z, h: player.rotation.y } : null; } }, view: { get eyes() { return firstPerson; }, set eyes(v) { setFirstPerson(v); } },
-  hud: document.getElementById('mp'), knockDown, homes,
+  hud: document.getElementById('mp'), knockDown, homes, ground: groundAt,
   // what others see of you besides where you are: your card, lying flat or flying, and how high you are
   // caps: what I can do, told to everyone ('v' = can hear and talk). On by default in a browser,
   // off with the 📞 Calls button; an agent (?agent=1) has a voice only if it joined with one (&voice=1)

@@ -11,7 +11,8 @@
 // Each person is a persona from avatar.js with the shared idle / walk clips and the pose layer (hit,
 // fall, get up, talk). Beyond 60 m the animation runs five times a second, as other players do.
 //
-//   const peds = createPeds({ scene, solids, autopilot, slug, T, toRD, others, count })
+//   const peds = createPeds({ scene, solids, autopilot, slug, T, toRD, others, ground, count })
+//     ground(x, z): how high the ground is above the road there, so feet stand on the pavement
 //   peds.update(dt, me);  peds.hit(id, vx, vz) -> true if that id was one of ours (a knock-over plays)
 //   peds.setCount(n), peds.count, peds.near(r)
 import * as THREE from 'three';
@@ -22,12 +23,13 @@ import { FALL_DOWN } from './player.js';
 
 export const COUNT = { low: 6, mid: 12, high: 20 };
 const RADIUS = 170;          // metres: seen within, dropped beyond
+const ROAD = 0.15;           // metres: the road's top, as baked (buildtiles.mjs); people stood 15 cm into it before
 const NEAR = 60;             // metres: animated every frame within this, every 0.2 s beyond
 const PAVEMENT = 4.8;        // metres right of the street's centre line (past a parked car or a cycle lane)
 const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
 const base = new URL('./', import.meta.url);
 
-export function createPeds({ scene, solids, autopilot, slug, T, toRD, others = () => [], count = COUNT.mid }) {
+export function createPeds({ scene, solids, autopilot, slug, T, toRD, others = () => [], ground = () => 0, count = COUNT.mid }) {
   const slots = [];        // { group, model, mixer, act, pose, agent, yaw, side, animT, fling, fp }
   const fps = [];          // live footprints, one per slot (far away while unused), with the person's id
   let graph = null, nodes = null, loading = false;
@@ -111,7 +113,7 @@ export function createPeds({ scene, solids, autopilot, slug, T, toRD, others = (
       a.lag = catchUp(a.lag, dt, hit || n.wait);
       s.side += ((hit ? 0 : n.side * 0.9) - s.side) * Math.min(1, dt * 5);
       const x = p.x - p.dz * s.side + ox, z = p.z + p.dx * s.side + oz;
-      s.group.position.set(x, h, z);
+      s.group.position.set(x, ROAD + ground(x, z) + h, z);   // feet on the road's top, or up on the pavement
       s.fp.x = x; s.fp.z = z;
       if (!hit) { const want = Math.atan2(p.dx, p.dz); s.yaw += wrap(want - s.yaw) * Math.min(1, dt * 8); s.group.rotation.y = s.yaw; }
       // animation: the walk at the schedule's pace (faster while catching up), idle or a chat at a pause

@@ -2,20 +2,22 @@
 // not, and the jump. It knows nothing of squares, tiles or bitmaps: the map comes in as one predicate,
 // so the same code runs in the game and, with a fake map, in the unit tests (tests/walker.test.mjs).
 //
-//   const walker = createWalker({ blockedAt, wetAt, solids, swimming, flying })
+//   const walker = createWalker({ blockedAt, wetAt, ground, solids, swimming, flying })
 //     blockedAt(x, z, h)  is the ground at x, z closed to feet h metres up? (walls always, hedges below 0.5 m)
+//     ground(x, z)        how high the open ground is above the road there (pavement 0.12, a garden 0.04)
 //     wetAt(x, z)         the water level there, or null on dry land (only asked while swimming)
 //     solids              solids.js registry (parked cars, trees, people), or null
 //     swimming(), flying()
 //   walker.blocked(x, z)                     the body (a 0.3 m cross of probes) at x, z touches something
 //   walker.lineClear(x0, z0, x1, z1)         nothing in the way, every 0.4 m
 //   walker.localPath(x0, z0, x1, z1)         [[x, z], ...] round what is in the way, or null
-//   walker.floorAt(x, z)                     the top of what the feet stand on there (0: the ground)
+//   walker.floorAt(x, z)                     the top of what the feet stand on there (0: the road)
 //   walker.jump                              { h, v, phase: crouch -> air -> land -> null, t, onHedge }
 //   walker.startJump(), walker.stepJump(dt, x, z) once per frame
 //
-// Standing on things is decided here and only here: everything reports how high its top is (hedges
-// from the bitmap, cars, benches and bins from their footprints in solids.js), the feet always rest
+// Standing on things is decided here and only here: everything reports how high its top is (the
+// pavement and gardens from the ground's height, hedges from the bitmap, cars, benches and bins from
+// their footprints in solids.js), the feet always rest
 // on the highest top under them, and a thing blocks the body only while its top is more than STEP
 // above the feet. So landing on a car puts you on its roof, walking off a bench drops you down, and a
 // car that rolls under you lifts you onto it instead of swallowing your legs.
@@ -31,10 +33,10 @@ export const GRAVITY = 14, JUMP_V = 6.5, CROUCH_T = 0.12, LAND_T = 0.16;
 // and the body's feet radius for what it stands on
 export const HEDGE_TOP = 1.1, STEP = 0.55, FEET = 0.2;
 
-export function createWalker({ blockedAt, wetAt = () => null, solids = null, swimming = () => false, flying = () => false, standing = () => true }) {
+export function createWalker({ blockedAt, wetAt = () => null, ground = () => 0, solids = null, swimming = () => false, flying = () => false, standing = () => true }) {
   const jump = { h: 0, v: 0, phase: null, t: 0, onHedge: false };
-  // the top of the baked map at a point: open ground 0, a hedge HEDGE_TOP, a wall or water never
-  const groundTop = (x, z) => !blockedAt(x, z, 0) ? 0 : blockedAt(x, z, 99) ? Infinity : HEDGE_TOP;
+  // the top of the baked map at a point: open ground its own height, a hedge HEDGE_TOP, a wall or water never
+  const groundTop = (x, z) => !blockedAt(x, z, 0) ? ground(x, z) : blockedAt(x, z, 99) ? Infinity : HEDGE_TOP;
   // what the feet stand on: the highest top under them that a person can stand on
   function floorAt(x, z) {
     const g = groundTop(x, z), s = solids ? solids.topAt(x, z, FEET) : 0;
