@@ -48,6 +48,16 @@ Claude Desktop, Cursor and others (`mcpServers` in their config):
 { "toycity": { "command": "node", "args": ["/path/to/toycity/tools/mcp/server.mjs"] } }
 ```
 
+Some clients (Turnstone, for one) start a fresh server for every turn of a conversation and stop it
+afterwards, which takes the agent out of the game each time. Add `--keep NAME` to the arguments and the
+body stays in the game between turns until the agent calls `leave`: the server the client starts only
+passes messages on to one kept server per name, started in the background on first use. It goes away by
+itself ten minutes after `leave`, or after three hours without any tool call.
+
+```json
+"toycity": { "command": "node", "args": ["/path/to/toycity/tools/mcp/server.mjs", "--keep", "my-agent"] }
+```
+
 Settings, as environment variables: `TOYCITY_CHROME` (the browser, if it isn't found by itself) and
 `TOYCITY_URL` (another copy of the game, e.g. `http://localhost:8765/` while developing).
 

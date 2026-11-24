@@ -16,10 +16,16 @@
 //
 // Tools: join, look, see, where, walk_to, walk, follow, stop, wait, jump, get_in_car, get_out, drive_to,
 // knock, live_here, go_inside, step_outside, answer_door, set_name, call, say, listen, mute, hang_up, leave. Run with: npx toycity-mcp  (see README.md next to this file)
+//
+// --keep NAME: the body stays in the game between client restarts (a client that starts a fresh server
+// for every conversation turn would otherwise leave each time); see keep.mjs.
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { Session } from './session.mjs';
+import { keepName, keepSocket } from './keep.mjs';
+import fs from 'node:fs';
+import net from 'node:net';
 
 const SITE = process.env.TOYCITY_URL || 'https://toycity.pages.dev/';
 const MIN_GAP = 1000;           // ms between moves: no faster than a person clicking
@@ -53,6 +59,8 @@ const state = () => api('snapshot');
 const describe = s => JSON.stringify(s, null, 1);
 
 // ---------- the server ----------
+// one per client connection; they all share the one body (S), so a kept body (keep.mjs) outlives them
+function makeServer() {
 const server = new McpServer({ name: 'toycity', version: '0.2.0' }, {
   instructions: 'You are a player in Toy City, a 3D copy of real Dutch towns shared with real people. Move like a person: walk or run to nearby places, take a car for longer trips, knock on doors, follow a friend. In a call, talk like a person: say two or three sentences, then let them reply (say with then_listen, or listen), and answer what they said. If they interrupt you, stop and answer that. Be kind: people can see you (your name has a 🤖), and hitting someone with a car gets you a yellow, then red, card.',
 });
@@ -258,9 +266,34 @@ server.tool('hang_up', 'Leave your call.', {},
 server.tool('leave', 'Leave Toy City.', {},
   async () => { await S.close(); S.stopSpeech(); return text('You left Toy City.'); });
 
+return server;
+}
+
 // knocks at your home (and other messages) arrive while you wait; nothing else is needed for that
-await server.connect(new StdioServerTransport());
 const quit = async () => { await S.close(); S.stopSpeech(); process.exit(0); };
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, quit);
-process.stdin.on('close', quit);   // the client went away
 process.on('exit', () => S.stopSpeech());
+const keep = keepName(process.argv);
+if (keep && process.env.TOYCITY_KEEP_DAEMON) {
+  // the kept body (keep.mjs started this, detached): each client connects over a local socket and gets
+  // its own MCP server, all driving the same body. It ends after `leave` once nobody is connected, or
+  // after KEEP_IDLE with no tool call at all (left in the game by a client that never comes back).
+  const KEEP_IDLE = 3 * 3600e3;
+  let clients = 0, lastCall = Date.now();
+  const sock = keepSocket(keep);
+  try { fs.unlinkSync(sock); } catch { /* none yet */ }
+  net.createServer(c => {
+    clients++; c.on('close', () => { clients--; }); c.on('error', () => {});
+    c.on('data', () => { lastCall = Date.now(); });
+    makeServer().connect(new StdioServerTransport(c, c)).catch(() => c.destroy());
+  }).listen(sock);
+  setInterval(() => {
+    if (!clients && !S.page && Date.now() - lastCall > 10 * 60e3) quit();
+    if (Date.now() - lastCall > KEEP_IDLE) quit();
+  }, 30e3);
+} else if (keep) {
+  await import('./keep.mjs').then(m => m.front(keep, keepSocket(keep)));
+} else {
+  await makeServer().connect(new StdioServerTransport());
+  process.stdin.on('close', quit);   // the client went away
+}
