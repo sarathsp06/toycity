@@ -54,7 +54,7 @@ Wander the street you grew up on, send a friend a link, and meet them there. No 
 ### Drive
 - 🚗 **Get into any parked car** or motorbike (`E`). Look through your own eyes (`V`) to sit behind the wheel.
 - 🧭 **Autopilot**: name a place and lean back. Routes come live from OpenStreetMap, keep right and say the next turn.
-- 📻 **Car radio** with real Dutch stations: NPO Radio 2, 3FM, Radio 1, Klassiek.
+- 📻 **Car radio** with real Dutch stations: NPO Radio 2, 3FM, Radio 1, Klassiek. Passengers can use it too; − and + (or `[` `]`) set the volume, `R` changes station.
 - 🅿️ Park in a bay and it is put away neatly; leave it on the pavement and you get a ticket.
 - 🟨 Drive carefully: hit someone and they go flying, and you get a yellow card everyone can see.
 

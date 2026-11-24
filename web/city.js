@@ -965,7 +965,7 @@ trafficBtn?.addEventListener('click', () => setTraffic(!trafficOn));
 setTraffic(trafficOn);
 // ---------- car radio (radio.js) ----------
 const radio = createRadio();
-mountRadio(document.body, radio);
+const radioBox = mountRadio(document.body, radio);
 // ---------- finding someone: a route line to another player (nav.js) ----------
 const nav = createNav({ scene, player, driving, autopilot, walksUrl: new URL('walks.json', base), fromRD, heading: () => yaw, note });
 mountNav(document.getElementById('nav'), nav);
@@ -1015,6 +1015,8 @@ addEventListener('keydown', e => {
   if (e.key.toLowerCase() === 'f') { if (driving.driving) toggleCar(); toggleFly(); }
   if (e.key.toLowerCase() === 'v') setFirstPerson(!firstPerson);
   if (e.key.toLowerCase() === 'm') toggleMap();
+  if (radio.inCar && !e.repeat && e.key.toLowerCase() === 'r') radio.next();
+  if (radio.inCar && (e.key === '[' || e.key === ']')) { e.key === '[' ? radio.quieter() : radio.louder(); radioBox.flashVolume(); }
   if (e.key === '-' || e.key === '_') zoomBy(1.6); if (e.key === '=' || e.key === '+') zoomBy(1 / 1.6);
   if (e.key.startsWith('Arrow')) e.preventDefault();
   if (e.key === ' ') { e.preventDefault(); if (you.can('jump')) walker.startJump(); }
@@ -1574,7 +1576,8 @@ function frame(now) {
   waterTime.value = (now / 1000) % 1e4;   // the ripples
   if (birdsLater.length) birdsLater.shift()();
   birds.update(dt, player.position.x, player.position.z);
-  radio.update(driving.driving && !driving.rider);   // a bike has no radio
+  // a bike has no radio; a passenger has the car's radio too (their own, at their own volume)
+  radio.update((driving.driving && !driving.rider) || (!!ride && !(ride.car ? carModel(ride.car) : ride.parked?.model || '').startsWith('bike')));
   nav.update(dt);
   // the town's own cars and people: where I am and whether I am on foot, in a car, or flying
   me.x = player.position.x; me.z = player.position.z; me.inCar = you.seated; me.onFoot = you.onFoot; me.fly = fly;

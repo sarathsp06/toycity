@@ -22,7 +22,7 @@ test('off by default, plays only in a car, remembers the station', async () => {
   r.update(true); await tick();
   assert.equal(FakeAudio.last.paused, false); assert.equal(FakeAudio.last.attrs.src, STATIONS[0].url);
   r.next(); assert.equal(r.station.name, 'NPO 3FM');
-  assert.deepEqual(JSON.parse(store['toycity.radio']), { station: 'NPO 3FM', on: true });
+  assert.deepEqual(JSON.parse(store['toycity.radio']), { station: 'NPO 3FM', on: true, volume: 0.35 });
   const r2 = createRadio({ Audio: FakeAudio }); assert.equal(r2.station.name, 'NPO 3FM', 'a reload keeps the station');
   r.dispose(); r2.dispose();
 });
@@ -38,4 +38,20 @@ test('a dead stream shows no signal and skips to the next; all dead switches off
   r.prev(); for (let i = 0; i < 10; i++) await tick();
   assert.equal(r.on, false, 'everything dead: off, and it stopped trying');
   r.dispose(); FakeAudio.broken = new Set();
+});
+
+test('volume: steps of 10%, applies to the playing stream, survives a reload, 0 stays on', async () => {
+  delete store['toycity.radio'];
+  const r = createRadio({ Audio: FakeAudio, fade: 0.01 });
+  assert.equal(r.volume, 0.35);
+  r.update(true); r.toggle(); await tick(); await tick();
+  r.louder(); assert.equal(r.volume, 0.45);
+  await new Promise(res => setTimeout(res, 200));
+  assert.ok(Math.abs(FakeAudio.last.volume - 0.45) < 0.01, 'the stream got louder');
+  for (let i = 0; i < 20; i++) r.quieter();
+  assert.equal(r.volume, 0); assert.equal(r.on, true, 'silent, not off');
+  r.volume = 0.6;
+  const r2 = createRadio({ Audio: FakeAudio }); assert.equal(r2.volume, 0.6, 'a reload keeps the volume');
+  r.volume = 7; assert.equal(r.volume, 1);
+  r.dispose(); r2.dispose();
 });

@@ -53,9 +53,14 @@
   /* autopilot: a button beside "Get out" while you drive, and a box to type where to go */
   #apbtn { position: fixed; left: calc(50% + 100px); bottom: 66px; z-index: 6; font: 600 15px system-ui, sans-serif; padding: 9px 16px; border: 0; border-radius: 999px; background: #fff; color: #1b2a36; box-shadow: 0 4px 16px rgba(0,0,0,.3); cursor: pointer; }
   #apbtn[hidden], #apform[hidden] { display: none; }
-  #radiobtn { position: fixed; right: calc(50% + 100px); bottom: 66px; z-index: 6; font: 600 15px system-ui, sans-serif; padding: 9px 16px; border: 0; border-radius: 999px; background: #fff; color: #1b2a36; box-shadow: 0 4px 16px rgba(0,0,0,.3); cursor: pointer; white-space: nowrap; }
-  #radiobtn[hidden] { display: none; }
-  body.touch #radiobtn { bottom: 204px; }
+  /* the car radio: − [station] + in one pill, left of "Get out" */
+  #radio { position: fixed; right: calc(50% + 100px); bottom: 66px; z-index: 6; display: flex; align-items: center; border-radius: 999px; background: #fff; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
+  #radio[hidden] { display: none; }
+  #radio button { font: 600 15px system-ui, sans-serif; border: 0; background: none; color: #1b2a36; cursor: pointer; white-space: nowrap; padding: 9px 8px; }
+  #radio #radiobtn { padding: 9px 6px; min-width: 9.5em; }
+  #radio button[aria-label^="Radio "] { font-size: 19px; line-height: 1; padding: 7px 12px; }
+  #radio button:disabled { opacity: .35; cursor: default; }
+  body.touch #radio { bottom: 204px; } body.touch #radio button { padding: 10px 11px; }
   #apform { position: fixed; left: 50%; bottom: 116px; transform: translateX(-50%); z-index: 6; display: flex; gap: 6px; background: #fff; padding: 6px; border-radius: 999px; box-shadow: 0 4px 16px rgba(0,0,0,.3); }
   #apform input { font: 15px system-ui, sans-serif; border: 0; outline: 0; padding: 6px 10px; width: min(62vw, 280px); }
   #apform button { font: 600 15px system-ui, sans-serif; border: 0; border-radius: 999px; padding: 6px 14px; background: #ffb547; color: #1b1206; cursor: pointer; }
@@ -170,6 +175,7 @@
     <span><kbd>E</kbd></span><span>get into a parked car or bike</span>
     <span><kbd>G</kbd></span><span>swim, next to water</span>
     <span><kbd>M</kbd></span><span>map</span>
+    <span><kbd>R</kbd> · <kbd>[</kbd> <kbd>]</kbd></span><span>in a car: next radio station · quieter, louder</span>
     <span><kbd>V</kbd> · <kbd>F</kbd> · <kbd>Space</kbd></span><span>your own eyes · fly · jump</span>
   </div>
   <h4>Go somewhere</h4>

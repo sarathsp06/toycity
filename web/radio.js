@@ -3,13 +3,14 @@
 //   const radio = createRadio();
 //   radio.update(driving.driving);   // each frame (cheap): plays only while in a car
 //   radio.next(); radio.prev(); radio.toggle();
+//   radio.volume = 0..1;  radio.louder(); radio.quieter()   (steps of 10%, 0 is silent but stays on)
 //   radio.station -> { name, url } | null (off);  radio.on -> boolean
-//   mountRadio(container) -> a "📻 NPO Radio 2" button that cycles stations
+//   mountRadio(container) -> − [📻 NPO Radio 2] +: the middle cycles stations, the sides set the volume
 //
 // A plain <audio> element, not Web Audio: the streams are cross-origin without CORS headers and a
 // MediaElementSource would only produce silence. Autoplay: the stream starts from a user action
 // (the radio button, a key) or, when you get into a car, only if the radio was already on earlier.
-// The chosen station survives a reload (localStorage 'toycity.radio').
+// The chosen station and volume survive a reload (localStorage 'toycity.radio').
 
 export const STATIONS = [
   { name: 'NPO Radio 2', url: 'https://icecast.omroep.nl/radio2-bb-mp3' },
@@ -35,9 +36,10 @@ export function createRadio({ stations = STATIONS, volume = 0.35, fade = 0.5, st
       const i = stations.findIndex(x => x.name === s.station);
       if (i >= 0) last = i;
       if (s.on && stations[last].url) idx = last;
+      if (Number.isFinite(s.volume)) volume = Math.min(1, Math.max(0, s.volume));
     }
   } catch { /* no storage: fresh start */ }
-  const save = () => { try { localStorage.setItem(storage, JSON.stringify({ station: stations[last].name, on: idx !== OFF })); } catch { /* private mode */ } };
+  const save = () => { try { localStorage.setItem(storage, JSON.stringify({ station: stations[last].name, on: idx !== OFF, volume })); } catch { /* private mode */ } };
 
   function element() {
     if (audio) return audio;
@@ -93,10 +95,20 @@ export function createRadio({ stations = STATIONS, volume = 0.35, fade = 0.5, st
   function next() { set(idx + 1); }
   function prev() { set(idx - 1); }
   function toggle() { set(idx === OFF ? last : OFF); }
+  // a new volume applies at once (a short ramp, no jump); it is remembered even while the radio is silent
+  function setVolume(v) {
+    v = Math.round(Math.min(1, Math.max(0, +v || 0)) * 100) / 100;
+    if (v === volume) return;
+    volume = v; save();
+    if (audio && !audio.paused && !fading) { const f = fade; fade = 0.12; rampTo(volume); fade = f; }
+    changed();
+  }
 
   const api = {
     update(car) { car = !!car; if (car === inCar) return; inCar = car; apply(); changed(); },
     next, prev, toggle, set,
+    get volume() { return volume; }, set volume(v) { setVolume(v); },
+    louder() { setVolume(volume + 0.1); }, quieter() { setVolume(volume - 0.1); },
     get station() { return idx === OFF ? null : stations[idx]; },
     get on() { return idx !== OFF; },
     get inCar() { return inCar; },
@@ -109,16 +121,32 @@ export function createRadio({ stations = STATIONS, volume = 0.35, fade = 0.5, st
   return api;
 }
 
-// A button in `container` (any element): shows the station, click = next station. Hidden while you
-// are not in a car. Returns the button; the caller styles it (see city.html's #apbtn look).
+// Controls in `container` (any element): − [station] +. The middle button shows the station and
+// cycles to the next (right-click: back); the sides make it quieter or louder, and the middle shows the
+// new volume for a moment. Hidden while you are not in a car. Returns the wrapper (#radio, the
+// middle button keeps #radiobtn); the caller styles it (see city.html).
 export function mountRadio(container, radio, { id = 'radiobtn' } = {}) {
-  const btn = document.createElement('button');
-  btn.id = id; btn.type = 'button'; btn.title = 'Radio: next station'; btn.setAttribute('aria-label', 'Car radio');
-  const draw = () => { btn.textContent = radio.label; btn.hidden = !radio.inCar; btn.setAttribute('aria-pressed', radio.on); };
-  btn.addEventListener('click', e => { e.stopPropagation(); radio.next(); });
+  const box = document.createElement('div'); box.id = 'radio';
+  const make = (text, label, f) => {
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.title = label; b.setAttribute('aria-label', label);
+    b.addEventListener('click', e => { e.stopPropagation(); f(); });
+    return b;
+  };
+  let showVol = 0, timer = null;
+  const quieter = make('−', 'Radio quieter', () => { radio.quieter(); flash(); });
+  const btn = make('', 'Radio: next station', () => radio.next()); btn.id = id;
+  const louder = make('+', 'Radio louder', () => { radio.louder(); flash(); });
   btn.addEventListener('contextmenu', e => { e.preventDefault(); radio.prev(); });
+  function flash() { showVol = 1; clearTimeout(timer); timer = setTimeout(() => { showVol = 0; draw(); }, 1200); draw(); }
+  function draw() {
+    const v = Math.round(radio.volume * 100);
+    btn.textContent = showVol ? (v ? '🔊 volume ' + v + '%' : '🔇 silent') : radio.on && !v ? '🔇 ' + radio.station.name : radio.label;
+    box.hidden = !radio.inCar; btn.setAttribute('aria-pressed', radio.on);
+    quieter.disabled = v <= 0; louder.disabled = v >= 100;
+  }
   const off = radio.onChange(draw);
-  draw(); container.appendChild(btn);
-  btn.unmount = () => { off(); btn.remove(); };
-  return btn;
+  box.flashVolume = flash;
+  box.append(quieter, btn, louder); draw(); container.appendChild(box);
+  box.unmount = () => { off(); clearTimeout(timer); box.remove(); };
+  return box;
 }
