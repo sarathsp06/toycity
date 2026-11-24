@@ -4,7 +4,7 @@ Run: /Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup -P to
 
 Every house has the same ground floor, 6 x 8 m and 2.7 m high: a hall, a kitchen along the right-hand
 wall, and a lounge to sit and talk in: three sofas round a tea table facing the TV, and two armchairs
-at a small tea table by the back window (nine seats), with a rug, shelves and plants. The room itself (laminate floor, plastered walls, skirting,
+at a small tea table by the right-hand wall (nine seats), with a walkway all round, a rug, shelves and plants. The room itself (laminate floor, plastered walls, skirting,
 ceiling, windows, the inside of the front door), the kitchen and the TV are built here; the furniture
 and decorations are photo-scanned CC0 models from Poly Haven, and the floor, wall and wood textures
 are Poly Haven's too, downloaded on first run into data/interior/ (credits in web/models/CREDITS.txt).
@@ -242,35 +242,39 @@ box("fridge_gap", kx - 0.002, kx, K1 - 0.64, K1, 1.2, 1.21, SHADOWLINE)
 box("fridge_handle", kx - 0.04, kx, K1 - 0.12, K1 - 0.09, 0.9, 1.5, STEEL)
 solids.append({"name": "kitchen", "x": round(kx + KD / 2, 3), "z": round(-(K0 + K1) / 2, 3), "hx": round(KD / 2, 3), "hz": round((K1 - K0) / 2, 3), "top": 0.92})
 
-# the lounge: three sofas round a big round tea table, the TV on the left-hand wall facing them all
-# (sofa tops are their seats: you can climb onto one, not onto its back)
-CX, CY = -1.0, 5.0
-box("rug", CX - 1.5, CX + 1.4, CY - 1.7, CY + 1.7, 0, 0.012, RUG)   # with a walkway of at least 0.75 m round the table
-place("coffee", CX - 0.1, CY, "+x")
+# the lounge: three sofas round a round tea table, the TV on the left-hand wall facing them all
+# (sofa tops are their seats: you can climb onto one, not onto its back). The furniture leaves a
+# walkway of at least 0.75 m everywhere, so you can walk a loop round the room: from the hall past the
+# kitchen, behind the big sofa, along the back window and back along the TV wall.
+CX, CY = -0.9, 5.6
+box("rug", CX - 1.5, CX + 1.4, CY - 1.6, CY + 1.6, 0, 0.012, RUG)
+place("coffee", CX - 0.1, CY, "+x", scale=0.85)   # a little smaller: room to pass between it and the sofas
 box("tvunit", -W / 2, -W / 2 + 0.42, CY - 0.85, CY + 0.85, 0, 0.45, TVWOOD)
 box("tv", -W / 2 + 0.12, -W / 2 + 0.17, CY - 0.62, CY + 0.62, 0.75, 1.47, SCREEN)
 box("tvstand", -W / 2 + 0.1, -W / 2 + 0.22, CY - 0.15, CY + 0.15, 0.45, 0.47, SCREEN)
 box("tvneck", -W / 2 + 0.14, -W / 2 + 0.16, CY - 0.04, CY + 0.04, 0.47, 0.76, SCREEN)
 solids.append({"name": "tvunit", "x": round(-W / 2 + 0.21, 3), "z": round(-CY, 3), "hx": 0.21, "hz": 0.85, "top": 0.45})
 place("sofa3", CX + 1.75, CY, "-x", seat=[(-0.12, -0.85), (-0.12, 0), (-0.12, 0.85)], seat_h=S3_H, top=S3_H)    # three seats, facing the TV
-place("sofa", CX - 0.2, CY - 1.95, "+y", seat=[(-0.38, 0.1), (0.38, 0.1)], seat_h=S1_H, top=S1_H)
-place("sofa2", CX - 0.15, CY + 1.95, "-y", seat=[(-0.45, -0.12), (0.45, -0.12)], seat_h=S2_H, top=S2_H)
+place("sofa", CX, CY - 1.9, "+y", seat=[(-0.38, 0.1), (0.38, 0.1)], seat_h=S1_H, top=S1_H)
+place("sofa2", CX - 0.15, CY + 1.9, "-y", seat=[(-0.45, -0.12), (0.45, -0.12)], seat_h=S2_H, top=S2_H)   # its back to the back wall
 place("lamp", CX, CY, "+y", z=H - 0.95, solid=False)
 lights.append([CX, H - 0.65, -CY])
 
-# by the back window: two armchairs at a small tea table
-TX, TY = 2.1, 6.45
-place("tea", TX, TY, "+y")
-place("armchair", TX, TY - 1.05, "+y", seat=[(0, 0.08)], seat_h=A_H, top=A_H)
-place("armchair", TX, TY + 1.05, "-y", seat=[(0, -0.08)], seat_h=A_H, top=A_H)
-place("plant", TX, TY, "+y", z=0.5, solid=False)
+# along the right-hand wall, past the kitchen: two armchairs facing the lounge with a small tea table
+# between them, and a walkway between them and the big sofa
+TX = 2.55
+place("tea", TX + 0.05, 6.0, "+y", scale=0.7)
+place("armchair", TX, 5.1, "-x", seat=[(-0.08, 0)], seat_h=A_H, top=A_H)
+place("armchair", TX, 6.9, "-x", seat=[(-0.08, 0)], seat_h=A_H, top=A_H)
+place("plant", TX + 0.05, 6.0, "+y", z=0.5 * 0.7, solid=False)
 
-# shelves, a side table and plants in the corners, a picture over the sofas
-place("shelves", -W / 2 + 0.2, D - 0.6, "+x")
-place("side", -W / 2 + 0.35, 2.2, "+x")
-place("plant", -W / 2 + 0.35, 2.2, "+x", z=0.55, solid=False)
+# shelves on the left wall between the hall and the lounge, a side table and a plant in the hall's
+# corner, a picture over the sofas
+place("shelves", -W / 2 + 0.2, 2.6, "+x")
+place("side", W / 2 - 0.3, 0.45, "-x")
+place("plant", W / 2 - 0.3, 0.45, "-x", z=0.55, solid=False)
 place("picture", W / 2 - 0.03, CY - 0.3, "+x", z=1.4, solid=False)
-lights.append([TX, H - 0.3, -TY])
+lights.append([TX, H - 0.3, -6.0])
 
 # ---------- export: one object per material keeps the draw calls few ----------
 for o in list(bpy.data.objects):

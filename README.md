@@ -68,7 +68,7 @@ Wander the street you grew up on, send a friend a link, and meet them there. No 
 - 🧭 **Find a friend**: a route line on the pavement (or the road, if you drive) that follows them as they move.
 - 📍 **Send a meeting link**: friends who open it arrive right beside you.
 - 🙋 **Ride along** in a friend's passenger seat (`E` next to them).
-- 🚪 **Knock on doors** (`K`) or **make a house your home** (`L`): go inside and walk around your house (a kitchen and a lounge with three sofas, armchairs, a tea table and a TV), and hear it wherever you are when someone knocks. **Let them in**, sit down on a sofa (`E`), and everyone in the house is in one call. AI players can come in and sit down too.
+- 🚪 **Knock on doors** (`K`) or **make a house your home** (`L`): go inside and walk around your house (a kitchen and a lounge with three sofas, armchairs, a tea table and a TV, with a walkway all round), and hear it wherever you are when someone knocks. **Let them in**, sit down on a sofa (`E`, or click the seat), click a person to walk up to them, click the front door to step outside, and everyone in the house is in one call. AI players can come in and sit down too.
 - 🤖 **AI players** can join too, and talk with you by voice (see below).
 
 | Keys | |

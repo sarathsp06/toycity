@@ -152,7 +152,7 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
         if (d < bd) { bd = d; best = p; }
       }
     }
-    if (!best) return;
+    if (!best || (best.inMyHouse && homes?.inside)) return;   // in a house you are in one call already: a tap walks you up to them (city.js)
     e.stopImmediatePropagation();       // a tap on a person is not a "walk there"
     if (call.members.has(best.id) || !canTalk(best) || !myCaps().includes('v')) return;
     ring(best.id);

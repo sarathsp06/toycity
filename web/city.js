@@ -1032,47 +1032,82 @@ function toggleFly() { fly = !fly; orbit.enabled = fly; if (fly) orbit.target.co
 // click (not drag) to walk somewhere; in fly mode, drop in at the spot
 const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
 let goal = null;
-function stopWalk() { goal = detour = null; marker.visible = false; }   // the click-to-go goal (and any way round it) is dropped
+function stopWalk() { goal = detour = null; sitGoal = faceGoal = null; marker.visible = false; }   // the click-to-go goal (and any way round it) is dropped
 // ?agent=1: an AI agent plays (tools/mcp). It moves only through what a person can do, at a person's speed:
 // walking or running to a point, the car and its autopilot, doors. It cannot jump to a place once in.
 const AGENT = params.get('agent') === '1' ? { run: false, draw: 0 } : null;
 let voiceCap = AGENT ? params.get('voice') === '1' : localStorage.getItem('toycity.calls') !== 'off';
 const marker = new THREE.Mesh(new THREE.RingGeometry(0.8, 1.2, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffd23f, transparent: true, opacity: 0.9, depthTest: false }));
 marker.visible = false; marker.renderOrder = 10; scene.add(marker);
+// Click (or tap) where to go. In a house there is more to click than the floor: a seat walks you to it
+// and sits you down, a person walks you up to them, the front door takes you outside, and a click on a
+// wall or a table goes to the nearest spot beside it. The way round the furniture is found from the
+// start (localPath), so you never walk into a sofa and stop.
+let sitGoal = null, faceGoal = null;   // sit down there on arrival; turn to this person on arrival
 renderer.domElement.addEventListener('pointerup', e => {
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5) return;
   downAt = null;
   mouse.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
   ray.setFromCamera(mouse, camera);
-  const targets = [];
-  if (room.active) targets.push(room.group);   // in a house: anything in it (a click on a wall or a sofa goes beside it)
-  else for (const t of tiles.values()) t.group.traverse(o => { if (o.userData.ground || o.userData.solid) targets.push(o); });
+  const targets = [], folk = [];
+  if (room.active) {   // in a house: anything in it, and the people in it
+    targets.push(room.group);
+    for (const q of social?.presence?.peers?.values() || []) if (q.inMyHouse && q.player?.group.visible) { targets.push(q.player.group); folk.push(q); }
+  } else for (const t of tiles.values()) t.group.traverse(o => { if (o.userData.ground || o.userData.solid) targets.push(o); });
   const hit = ray.intersectObjects(targets, room.active)[0];
-  let pt;
+  let pt, who = null, seat = null;
   if (hit) {
     pt = hit.point.clone();
     if (hit.object.userData.solid && hit.face) { const n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld); n.y = 0; pt.add(n.lengthSq() > 0.01 ? n.normalize().multiplyScalar(2.5) : new THREE.Vector3(camera.position.x - pt.x, 0, camera.position.z - pt.z).normalize().multiplyScalar(3)); }
+    if (room.active) {
+      if (/^(doorpaint|handle)$/.test(hit.object.material?.name) && !homes.busy) { stopWalk(); homes.comeOut(); return; }   // the front door: out you go
+      who = folk.find(q => { let o = hit.object; while (o) { if (o === q.player.group) return true; o = o.parent; } return false; });
+    }
   } else { const y0 = room.active ? room.floorY : 0, t = (y0 - ray.ray.origin.y) / ray.ray.direction.y; if (!(t > 0)) return; pt = ray.ray.at(t, new THREE.Vector3()); }
   pt.y = 0.15;
   if (driving.driving) return;
-  // in a house a click on a table or a sofa lands on the floor under it: go to the nearest free spot beside it
-  if (room.active) room.clamp(pt);
-  if (room.active && blocked(pt.x, pt.z)) {
-    let best = null, bd = Infinity;
-    for (let r = 0.25; r <= 1.5 && !best; r += 0.25) for (let a = 0; a < 16; a++) {
-      const x = pt.x + Math.sin(a * Math.PI / 8) * r, z = pt.z + Math.cos(a * Math.PI / 8) * r;
-      const d = Math.hypot(x - player.position.x, z - player.position.z);
-      if (d < bd && !blocked(x, z)) { bd = d; best = [x, z]; }
+  if (room.active) {
+    room.clamp(pt);
+    const p = player.position;
+    if (who) {   // up to them: a metre away, on the side you come from
+      const g = who.player.group.position, d = Math.hypot(g.x - p.x, g.z - p.z);
+      if (d < 1.3) { stopWalk(); faceGoal = who; faceStep(); return; }   // already there: just turn to them
+      pt.set(g.x + (p.x - g.x) / d, 0.15, g.z + (p.z - g.z) / d);
+    } else if ((seat = room.seatNear(pt.x, pt.z, 0.7, takenSeats()))) {   // a seat: go and sit on it
+      if (sat === seat) return;
+      const [x, z] = room.standSpot(seat, (x, z) => !blocked(x, z)); pt.set(x, 0.15, z);
     }
-    if (!best) return;
-    pt.x = best[0]; pt.z = best[1];
+    // a click on a table or a sofa lands on the floor under it: the nearest free spot beside it
+    if (blocked(pt.x, pt.z)) {
+      let best = null, bd = Infinity;
+      for (let r = 0.25; r <= 1.5 && !best; r += 0.25) for (let a = 0; a < 16; a++) {
+        const x = pt.x + Math.sin(a * Math.PI / 8) * r, z = pt.z + Math.cos(a * Math.PI / 8) * r;
+        const d = Math.hypot(x - p.x, z - p.z);
+        if (d < bd && !blocked(x, z)) { bd = d; best = [x, z]; }
+      }
+      if (!best) return;
+      pt.x = best[0]; pt.z = best[1];
+    }
   }
   if (fly) { toggleFly(); yaw = Math.atan2(camera.position.x - pt.x, camera.position.z - pt.z); player.position.copy(pt); stopWalk(); return; }
-  goal = pt; marker.position.set(pt.x, (room.active ? room.floorY : 0) + 0.35, pt.z); marker.visible = true;
+  stopWalk();
+  goal = pt; sitGoal = seat; faceGoal = who;
+  marker.position.set(seat ? seat.x : pt.x, (room.active ? room.floorY : 0) + (seat ? seat.h + 0.1 : 0.35), seat ? seat.z : pt.z); marker.visible = true;
   // in a house, a way round the sofas and tables from the start (the grid is fine and the room small)
   detour = null; detourQ = []; detours = 0;
   if (room.active && !lineClear(player.position.x, player.position.z, pt.x, pt.z)) sidestep();
 });
+// arrived: sit down on the seat that was clicked, or turn to the person
+function arrive() {
+  const s = sitGoal, q = faceGoal; stopWalk();
+  if (s) sitDown(s); else if (q) { faceGoal = q; faceStep(); }
+}
+function faceStep() {
+  const q = faceGoal; if (!q || !q.player || !q.inMyHouse) { faceGoal = null; return; }
+  const g = q.player.group.position, p = player.position, target = Math.atan2(g.x - p.x, g.z - p.z);
+  let d = target - player.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d));
+  player.rotation.y += d * 0.15; if (Math.abs(d) < 0.03) faceGoal = null;
+}
 
 // collision against the pre-built 0.5 m bitmaps of loaded near squares (grid.js has the layout)
 // coll always blocks (walls, water, fences, tree trunks, lamp posts); low (hedges) only feet below h = 0.5 m
@@ -1619,17 +1654,18 @@ function frame(now) {
     if (jm > 0.15) v.addScaledVector(fwd, -joy.y).addScaledVector(right, joy.x);
     seatStep(dt);
     if (sat && !homes.inside) { sat = null; seatMove = null; seatK = 0; sitBtn(true); }   // went outside (Step outside): nothing to stand up from
-    if (sat && (v.lengthSq() > 0 || goal)) { standUp(); stopWalk(); v.set(0, 0, 0); }
+    if (sat && (v.lengthSq() > 0 || goal)) { standUp(); if (v.lengthSq() > 0) stopWalk(); v.set(0, 0, 0); }   // a click elsewhere: get up first, then go
     if (v.lengthSq() > 0) stopWalk();
+    if (faceGoal && !goal) faceStep();
     // walk, or run with Shift or the joystick pushed to its edge; click-to-go speeds up for long trips
     // indoors a calmer pace (1.3 m/s, 3.5 running): a living room is a few strides across
     const IN = room.active, RUN = IN ? 3.5 : 6, WALK = IN ? 1.3 : 1.8;
     let speed = swim.on ? (keys['shift'] || jm > 0.9 ? SWIM_FAST : SWIM_MS) : keys['shift'] || jm > 0.9 ? RUN : jm > 0.15 ? (IN ? 0.9 : 1.2) + (WALK - (IN ? 0.9 : 1.2)) * jm : WALK;
-    if (goal) {
+    if (goal && !sat) {
       const to = (detour || goal).clone().sub(player.position); to.y = 0; const d = to.length();
       // a person's click-to-go speeds up on long trips; an agent walks (1.8 m/s) or runs (6 m/s) like anyone on foot
       const boost = swim.on ? speed : AGENT ? (AGENT.run ? RUN : WALK) : IN ? Math.min(RUN, Math.max(speed, d / 2.5)) : Math.max(speed, d / 2.5);
-      if (d < 0.4) { if (detour) { const q = detourQ.shift(); detour = q ? new THREE.Vector3(q[0], 0.15, q[1]) : null; } else stopWalk(); } else { v.copy(to); speed = Math.min(boost * dt, d) / dt; }
+      if (d < 0.4) { if (detour) { const q = detourQ.shift(); detour = q ? new THREE.Vector3(q[0], 0.15, q[1]) : null; } else arrive(); } else { v.copy(to); speed = Math.min(boost * dt, d) / dt; }
       marker.material.opacity = 0.5 + 0.4 * Math.sin(now / 150);
     }
     if (v.lengthSq() > 0) {
@@ -1744,7 +1780,7 @@ if (AGENT) window.__agent = {
   get drawing() { return AGENT.draw > 0; },
 };
 if (AGENT) import('./agent.js').catch(e => console.warn('agent api', e));   // window.__agentApi for tools/mcp (it also loads it itself)
-window.__city = { ovTiles, solids, walker, driving, parked, radio, nav, knockDown, card, fling, homes, health, traffic, peds, birds, swim, startSwim, wetAt, groundAt, room, sitDown, standUp, get sitting() { return sat; }, setTraffic, nearestPlace, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, jump, toRD, rdToWgs, ORX, ORY, info, grid, you, stats: null };
+window.__city = { ovTiles, solids, walker, driving, parked, radio, nav, knockDown, card, fling, homes, health, traffic, peds, birds, swim, startSwim, wetAt, groundAt, room, sitDown, standUp, get sitting() { return sat; }, get goal() { return goal; }, get faceGoal() { return faceGoal; }, setTraffic, nearestPlace, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, jump, toRD, rdToWgs, ORX, ORY, info, grid, you, stats: null };
 // ---------- social layer: other people, voice and background sounds (web/mp/, ?mp=0 turns it off) ----------
 // It only reads the player's position and the trees and parked cars around it; nothing here depends on it.
 let social = null;
