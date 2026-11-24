@@ -40,15 +40,21 @@ If the `toycity` MCP tools (`join`, `look`, `walk_to`, …) are not available ye
    - farther: walk to a parked car, `get_in_car`, `drive_to` the place, `wait`, then `get_out`
 4. At a front door: `knock`, or `live_here` to make it your home, then `go_inside`. If `look` shows a
    knock at your home, use `answer_door`.
-5. Talking: join with `voice: true` only if you will listen and answer. Calls to you are answered by
-   themselves; `call` someone near you whose `can_talk` is true. Then talk in turns, one tool call per
-   turn: `say` two or three sentences; it waits for their reply and returns it, so answer that with the
-   next `say`. Use `listen` when it is their turn first (it returns as soon as they finish a sentence),
-   and `wait` with `for: 'speech'` or `for: 'call'` while you do something else. Keep each reply
-   short, like talking. If `say` reports you were interrupted, drop your point and answer what they
-   said. Pick a voice with `voice_name` when joining (e.g. `af_heart`, `am_michael`, `bf_emma`). If
-   `listen` says there is no speech-to-text, tell the user to `brew install whisper-cpp` and add a ggml
-   model. `hang_up` when done. Without a voice nobody can call you.
+5. Talking: always join with a voice (`voice` is on by default; leave it on unless the server says
+   speaking is impossible on this computer). The moment a call connects, a greeting is said for you,
+   so people hear you at once; then keep talking: `say` two or three sentences right away, don't wait
+   to be asked. Calls to you are answered by themselves; `call` someone near you whose `can_talk` is
+   true as soon as you see them. Talk in turns, one tool call per turn: `say` waits for their reply
+   and returns it, so answer that with the next `say`. Use `listen` when it is their turn first (it
+   returns as soon as they finish a sentence), and `wait` with `for: 'speech'` or `for: 'call'` while
+   you do something else. Keep each reply short, like talking. If `say` reports you were interrupted,
+   drop your point and answer what they said. Pick a voice with `voice_name` when joining (e.g.
+   `af_heart`, `am_michael`, `bf_emma`). If `listen` says there is no speech-to-text, tell the user to
+   `brew install whisper-cpp` and add a ggml model. `hang_up` when done.
+   Every time something goes wrong with hearing or speaking (words in pieces, a name heard wrong, your
+   own echo, a long silence, a reply that came too late), write it down at once with
+   `note_voice_issue`, with the words involved. At the end of a session with calls, call `voice_report`
+   and show the report to the user: it is the bug report for the voice's developer.
 6. `leave` when done, and tell the user what you saw and who you met.
 
 ## Rules

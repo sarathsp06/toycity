@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 const run = promisify(execFile);
 const tmp = tag => path.join(os.tmpdir(), `toycity-${tag}-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.wav`);
 const backoff = n => Math.min(60000, 1000 * 2 ** Math.max(0, n - 1));
+import { note } from './diary.mjs';
 const log = (...a) => { if (process.env.TOYCITY_DEBUG) console.error('[speech]', ...a); };   // stderr: stdout is the MCP channel
 
 // seconds of sound in a WAV (PCM): its data chunk over the byte rate
@@ -145,7 +146,7 @@ export function chainTTS(...adapters) {
     warm() { adapters.forEach(a => a.warm?.()); },
     async speak(text, voice) {
       let err;
-      for (const a of adapters) { try { return await a.speak(text, voice); } catch (e) { err = e; log(a.name, 'failed:', e.message); } }
+      for (const a of adapters) { try { return await a.speak(text, voice); } catch (e) { err = e; log(a.name, 'failed:', e.message); note('engine', `TTS ${a.name} failed: ${e.message}`); } }
       throw err || new Error('no text-to-speech');
     },
     close() { adapters.forEach(a => a.close?.()); },
@@ -270,11 +271,12 @@ export function whisperSTT() {
   };
   return {
     name: 'whisper',
+    available() { return !!pick(); },
     warm() { pick()?.srv?.warm(); },
     async transcribe(wavB64, hint) {
       const a = pick(); if (!a) return null;
-      if (a.srv) { try { return await a.srv.transcribe(wavB64, hint); } catch (e) { log('server failed:', e.message); } }
-      if (a.cli) { try { return await a.cli.transcribe(wavB64, hint); } catch (e) { log('cli failed:', e.message); } }
+      if (a.srv) { try { return await a.srv.transcribe(wavB64, hint); } catch (e) { log('server failed:', e.message); note('engine', `whisper-server failed: ${e.message}`); } }
+      if (a.cli) { try { return await a.cli.transcribe(wavB64, hint); } catch (e) { log('cli failed:', e.message); note('engine', `whisper-cli failed: ${e.message}`); } }
       return null;
     },
     close() { srv?.close(); srv = null; key = ''; },

@@ -24,6 +24,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { Session } from './session.mjs';
 import { keepName, keepSocket } from './keep.mjs';
+import { note, read, clear, report } from './diary.mjs';
 import fs from 'node:fs';
 import net from 'node:net';
 
@@ -68,10 +69,12 @@ const server = new McpServer({ name: 'toycity', version: '0.2.0' }, {
 server.tool('join', 'Enter Toy City as a player. Start in a town (rotterdam, barendrecht or amsterdam), optionally next to an address or place in it, or from a meeting link someone shared. You can only choose where to start; after that you move like everyone else.',
   { link: z.string().max(400).optional().describe('a Toy City meeting link (…/city.html?…&meet=…): you arrive next to whoever shared it; town and near are then ignored'),
     town: z.enum(['rotterdam', 'barendrecht', 'amsterdam']).default('barendrecht'), near: z.string().max(80).optional().describe('an address or place to start next to, e.g. "Dorpsstraat 141"'), name: z.string().min(1).max(20).describe('your name in the game'),
-    voice: z.boolean().default(false).describe('join with a voice: you can take and make calls, speak with say and hear with listen. Leave it off if you will not listen; people then get no call button for you'),
+    voice: z.boolean().default(true).describe('join with a voice (the default): you can take and make calls, speak with say and hear with listen. Turn it off only when you really will not talk; people then get no call button for you'),
+    greeting: z.string().max(200).optional().describe('said by itself the moment a call connects, so people hear you at once. Default: "Hi, it\'s <name>. Can you hear me?"; an empty string: no greeting'),
     voice_name: z.string().max(30).optional().describe('which voice to speak with, e.g. af_heart, af_bella, am_michael, bf_emma, bm_george (Kokoro voices; see the README). Default af_heart') },
-  async ({ link, town, near, name, voice, voice_name }) => {
+  async ({ link, town, near, name, voice, voice_name, greeting }) => {
     if (voice_name) S.voice = voice_name;
+    S.greeting = greeting === undefined ? `Hi, it's ${name}. Can you hear me?` : greeting;
     if (S.page) return text('Already in Toy City. Call leave first to start again.');
     const meet = link ? parseLink(link) : null;
     if (link && !meet) return text('That is not a Toy City meeting link (it should look like …/city.html?place=…&meet=…).');
@@ -86,7 +89,42 @@ server.tool('join', 'Enter Toy City as a player. Start in a town (rotterdam, bar
       await page().waitForTimeout(4000);
     }
     last = Date.now();
-    return text(`You are in Toy City as "${me}".\n` + describe(await state()));
+    let voiceNote = '';
+    if (voice) {
+      const stt = await S.sttReady().catch(() => false);
+      if (!stt) { note('setup', 'joined with a voice but no speech-to-text (whisper): can speak, cannot hear words'); voiceNote = '\nYou can speak, but there is no speech-to-text on this computer (install whisper.cpp and a ggml model): you will not hear words.'; }
+      watchCalls();
+    }
+    return text(`You are in Toy City as "${me}"${voice ? ' with a voice: people can call you, and you say your greeting the moment a call connects' : ''}.` + voiceNote + '\n' + describe(await state()));
+  });
+
+// the greeting: said by itself the moment a call connects (someone rang and was answered, or someone
+// answered the agent), so the other person hears the agent at once instead of waiting for its first turn
+let greetT = null, greetMembers = 0;
+function watchCalls() {
+  clearInterval(greetT); greetMembers = 0;
+  greetT = setInterval(async () => {
+    const p = S.page; if (!p || !S.hasVoice) { clearInterval(greetT); greetT = null; return; }
+    const n = await p.evaluate(() => window.__agentCall?.members.length || 0).catch(() => 0);
+    if (n > 0 && greetMembers === 0 && S.greeting && S.turns) {
+      note('call', 'a call connected');
+      S.turns.say(S.greeting, { thenListen: false }).then(r => { if (!/^Said it/.test(r)) note('call', `the greeting did not go out: ${r}`); }).catch(e => note('call', `greeting failed: ${e.message}`));
+    } else if (n === 0 && greetMembers > 0) note('call', 'the call ended');
+    greetMembers = n;
+  }, 500);
+}
+
+server.tool('note_voice_issue', 'Write down something that went wrong, or was odd, in a call: words heard in pieces, a reply that came too late, being interrupted by your own echo, a name heard wrong, silence when someone was talking, anything a developer of the voice should know. Do this every time it happens, in one sentence with the words involved; voice_report turns all of it into a report.',
+  { text: z.string().min(3).max(1000).describe('what happened, with the words involved and what you expected instead') },
+  async ({ text: t }) => { note('agent', t); return text('Noted in the voice diary.'); });
+
+server.tool('voice_report', 'The voice diary as a report to give to whoever works on the voice: every difficulty recorded by the engines, the turn policy and you (note_voice_issue), grouped and with the raw entries. Show it to the user at the end of a session with calls in it.',
+  { since_minutes: z.number().min(1).max(100000).optional().describe('only the last N minutes; left out: everything'), clear: z.boolean().default(false).describe('empty the diary after reporting') },
+  async ({ since_minutes, clear: wipe }) => {
+    const since = since_minutes ? Date.now() - since_minutes * 60000 : 0, entries = read(since);
+    const out = report(entries, { who: S.me || 'an AI player', since: since ? new Date(since).toISOString() : undefined });
+    if (wipe) clear();
+    return text(out);
   });
 
 const clearMissed = () => api('clearMissed').catch(() => {});
@@ -269,7 +307,7 @@ server.tool('hang_up', 'Leave your call.', {},
   async () => { needVoice(); await pace(); await page().evaluate(() => window.__agentCall?.leave()); return text('You left the call.'); });
 
 server.tool('leave', 'Leave Toy City.', {},
-  async () => { await S.close(); S.stopSpeech(); return text('You left Toy City.'); });
+  async () => { clearInterval(greetT); greetT = null; await S.close(); S.stopSpeech(); return text('You left Toy City.'); });
 
 return server;
 }

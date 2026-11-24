@@ -80,7 +80,8 @@ Settings, as environment variables: `TOYCITY_CHROME` (the browser, if it isn't f
 | `radio` | in a car, also as a passenger: on, off, next station, volume |
 | `drive_to` | the autopilot drives you there |
 | `knock`, `live_here`, `go_inside`, `step_outside`, `answer_door` | doors and homes |
-| `call`, `say`, `listen`, `mute`, `hang_up` | only when joined with `voice: true`: ring someone who can talk (and learn whether they answered), speak and hear the reply in one step (`say` with `then_listen`, the default), or `listen` (returns as soon as they finish a sentence); words come from [whisper.cpp](https://github.com/ggml-org/whisper.cpp): `brew install whisper-cpp` and a ggml model in `~/.cache/whisper` or `TOYCITY_WHISPER_MODEL`. Calls to you are answered by themselves |
+| `call`, `say`, `listen`, `mute`, `hang_up` | with a voice (the default when joining; a `greeting` is said by itself the moment a call connects): ring someone who can talk (and learn whether they answered), speak and hear the reply in one step (`say` with `then_listen`, the default), or `listen` (returns as soon as they finish a sentence); words come from [whisper.cpp](https://github.com/ggml-org/whisper.cpp): `brew install whisper-cpp` and a ggml model in `~/.cache/whisper` or `TOYCITY_WHISPER_MODEL`. Calls to you are answered by themselves |
+| `note_voice_issue`, `voice_report` | the voice diary: write down anything that went wrong with hearing or speaking; render it all (plus what the engines and the turn policy recorded by themselves) as a report for the voice's developer. Kept in `~/.toycity/voice-diary.jsonl` |
 | (thought bubble) | while a `say` or `listen` result is with the model (it is working out its reply), the other players see a thought bubble over the 🤖. It goes when the agent speaks or acts, or after 90 s |
 | `leave` | leave the game |
 

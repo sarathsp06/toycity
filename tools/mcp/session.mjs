@@ -100,6 +100,8 @@ export class Session {
     if (this.page) return;
     throw new Error(this.gone ? `The game page ${this.gone}; use join again.` : 'Not in Toy City yet: call join first.');
   }
+  // is speech-to-text actually here (a whisper binary and a model), so listen will return words?
+  async sttReady() { const stt = this.speech?.stt; if (!stt) return false; if (typeof stt.available === 'function') return !!await stt.available(); return true; }
   needVoice() { this.need(); if (!this.hasVoice) throw new Error('You joined without a voice: leave and join again with voice: true.'); }
   api(method, ...args) { return this.page.evaluate(([m, a]) => window.__agentApi[m](...a), [method, args]); }
 

@@ -14,6 +14,7 @@
 //   stt     transcribe(wavB64, hint) -> string[] | null      (speech.mjs)
 //   clock   now() -> ms
 import { wavSeconds } from './speech.mjs';
+import { note } from './diary.mjs';
 
 // how long a quiet must last before their turn is over (ms). A first short quiet starts the words being
 // made out; what they said then decides how long to wait: a question is over at once, a finished
@@ -105,7 +106,7 @@ export function createTurns({ bridge, tts, stt, clock = { now: () => Date.now() 
       if (!got || words === null) return { audio, words };
       const w = quietWindow(words);
       if (w === null) { if (noise === 'end') return { audio, words }; continue; }   // only a noise, or my own voice: keep listening
-      if (await bridge.holdQuiet(w, w + 3000) !== 'more') { debug(`heard "${words}" (window ${w} ms): ${lag(a, t0, clock.now())}`); return { audio, words }; }
+      if (await bridge.holdQuiet(w, w + 3000) !== 'more') { debug(`heard "${words}" (window ${w} ms): ${lag(a, t0, clock.now())}`); if (w === QUIET.unfinished || wordsOf(words).length <= 3) note('turn', `heard a possible fragment (window ${w} ms): "${words}"`, { seconds: audio?.seconds }); return { audio, words }; }
     }
   }
 
@@ -116,7 +117,7 @@ export function createTurns({ bridge, tts, stt, clock = { now: () => Date.now() 
     const make = i => { if (i < parts.length && !clips[i]) { clips[i] = tts.speak(parts[i], v); clips[i].catch(() => {}); } };
     for (let i = 0; i <= lookahead; i++) make(i);
     const b = await bridge.begin();
-    if (!b.members) return 'You are not in a call: nobody would hear you. Use call, or wait for someone to call you.';
+    if (!b.members) { note('call', 'say while not in a call'); return 'You are not in a call: nobody would hear you. Use call, or wait for someone to call you.'; }
     const hint = b.hint || '';
     // what they said while I was thinking: heard in the background, so I can start speaking at once
     const beforeP = heard(b.audio, hint); beforeP.catch(() => {});
@@ -137,7 +138,7 @@ export function createTurns({ bridge, tts, stt, clock = { now: () => Date.now() 
           // something loud while I spoke: let it end, then hear what it was
           // (their end of turn found as in listen: so a whole "Stop, wait, tell me about…" is heard)
           const { words } = await hear({ seconds: 10, hint, noise: 'end' });
-          debug(`barge-in: "${words}"`);
+          debug(`barge-in: "${words}"`); note('turn', words === null ? 'barge-in with no speech-to-text' : interrupts(words) ? `interrupted while speaking: "${words}"` : `stopped for a noise or echo: "${words || 'a noise'}"`, { sentence: parts[i] });
           if (words === null || interrupts(words)) { reply = words; break; }
           // a noise, a word or two, or my own echo: carry on from just before where I stopped
           noises.push(words || 'a noise');
@@ -156,6 +157,7 @@ export function createTurns({ bridge, tts, stt, clock = { now: () => Date.now() 
     const before = await beforeP; if (before) out += ` Before you spoke they had said: "${before}".`;
     if (thenListen) {
       const { words } = await hear({ seconds: listenSeconds, hint });
+      if (words === null) note('setup', 'no speech-to-text: listen returned no words'); else if (!words) note('turn', `nobody replied within ${listenSeconds} s after: "${parts[parts.length - 1]}"`);
       out += words === null ? ' (No speech-to-text here: install whisper.cpp to hear words.)' : words ? ` They replied: "${words}"` : ` They said nothing in ${listenSeconds} s.`;
     }
     return out;
