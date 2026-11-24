@@ -10,7 +10,8 @@
 //   waitFor(event, ms) -> bool          arrival, speech, knock, call, person_near
 //   toDoor(address, reach), knock(), liveHere(), answerDoor(come), getIn(), rideWith(name), getOut(),
 //   driveTo(place), where(person), names(), clearMissed(), busy()
-//   sit(), stand()                      in a house: walk to the nearest free chair (or the sofa) and sit down
+//   sit(), stand()                      in a house: walk to the nearest free seat (a sofa or an armchair) and sit down
+//   radio(action, volume)               in a car: on, off, next station, volume 0-100
 //
 // Loaded by the MCP server after the game is up (page.addScriptTag); it can also be imported in node
 // for its pure helpers (tests/agent.test.mjs).
@@ -151,8 +152,9 @@ export function install(w = window) {
         nearest_address: city.nearestPlace().replace(/\s+·\s+/g, ', '),   // the closest address point: not necessarily the door you are at
         door_address: at && dr ? door.address : null,   // the house whose door you are standing at (you can knock)
         doing: h.inside ? (city.sitting ? 'sitting, inside the house' : 'inside the house') : d.driving ? `${d.model === 'bike' ? 'riding a motorbike' : 'driving'} at ${Math.round(Math.abs(d.speed) * 3.6)} km/h${city.autopilot.active ? `, autopilot to ${city.autopilot.label}, ${(city.autopilot.remaining / 1000).toFixed(1)} km left` : ''}`
-          : A().riding ? `riding along with ${A().riding}` : city.fling.on ? 'knocked over' : A().walking ? 'walking' : 'standing',
+          : A().riding ? (A().rideParked ? `sitting in ${A().riding}'s parked car (they got out; get_out to get out too)` : `riding along with ${A().riding}`) : city.fling.on ? 'knocked over' : A().walking ? 'walking' : 'standing',
         facing: facing(city.player.rotation.y),
+        radio: city.radio?.inCar && ['car', 'passenger'].includes(city.you?.mode) ? (city.radio.on ? `${city.radio.station.name}, volume ${Math.round(city.radio.volume * 100)}%` : 'off') : undefined,   // only in a car
         home: h.home ? h.home.label : null,
         people,   // each with can_talk: whether they have a voice (you can call them)
         car_nearby: car ? `a parked ${car.model?.name === 'bike' ? 'motorbike' : 'car'} ${Math.round(Math.hypot(car.x - p.x, car.z - p.z))} m away` : null,
@@ -236,7 +238,7 @@ export function install(w = window) {
     liveHere() { if (!atDoor()) return false; c().homes.liveHere(); return true; },
     // come: let them in when you are inside (or come to the door); else not now. -> the button pressed
     answerDoor(come) { const t = knocks()[0]; if (!t) return false; const bs = [...t.querySelectorAll('button')], b = come ? bs[0] : bs[bs.length - 1]; b.click(); return b.textContent; },
-    async homeMove(inside) { const h = c().homes; inside ? h.goIn() : h.comeOut(); await sleep(300); await until(() => !h.busy, 4000); },
+    async homeMove(inside) { const h = c().homes, room = c().room; inside ? h.goIn() : h.comeOut(); await sleep(300); await until(() => !h.busy, 4000); if (inside && h.inside && room) await until(() => room.active, 8000); },   // in: also wait for the room (its model loads the first time)
 
     getIn() {
       stopFollow();
@@ -291,6 +293,17 @@ export function install(w = window) {
         if (city.sitDown(s)) return `You sat down on the ${s.kind === 'chair' ? 'armchair' : s.kind}.`;
       }
       return 'Could not reach a free seat.';
+    },
+    // the car radio: your own, also as a passenger (nobody else hears it)
+    async radio(action, volume) {
+      const r = c().radio, m = c().you?.mode;
+      if (r && (m === 'car' || m === 'passenger')) await until(() => r.inCar, 1500);   // it notices the car on the next frame
+      if (!r?.inCar) return 'The radio is in the car: get in one first (a motorbike has none).';
+      if (action === 'on' && !r.on) r.toggle();
+      else if (action === 'off' && r.on) r.toggle();
+      else if (action === 'next') r.next();
+      if (Number.isFinite(volume)) r.volume = volume / 100;
+      return r.on ? `The radio plays ${r.station.name}, volume ${Math.round(r.volume * 100)}%.` : `The radio is off (volume ${Math.round(r.volume * 100)}%).`;
     },
     stand() { const city = c(); if (!city.sitting) return 'You are not sitting.'; city.standUp(); return 'You stood up.'; },
     leave() { stopFollow(); endWalk(); },

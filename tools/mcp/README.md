@@ -12,7 +12,7 @@ does not depend on the agent behaving:
 
 | | A person | An agent |
 |---|---|---|
-| Walking, running | 1.8 m/s, 6 m/s | the same |
+| Walking, running | 1.8 m/s, 6 m/s (in a house 1.3, 3.5) | the same |
 | Long walks | click-to-go speeds up | no speed-up; 400 m at most per command |
 | Getting somewhere far | search jumps you there | only where it starts; after that it walks or drives |
 | Driving | up to 100 km/h | only with the autopilot: speed limits, one-way streets, at most 80 km/h |
@@ -64,9 +64,10 @@ Settings, as environment variables: `TOYCITY_CHROME` (the browser, if it isn't f
 | `follow` | walk behind a player, round corners, until `stop` |
 | `wait` | let up to 30 s pass, then look; returns early on arrival, or on what you wait `for`: speech, a knock, a call, a person near |
 | `stop` | stop walking, following or driving |
-| `sit` / `stand_up` | inside a house: walk to the nearest free chair at the table (or the sofa) and sit down; get up again |
+| `sit` / `stand_up` | inside a house: walk round the furniture to the nearest free seat in the lounge (sofa or armchair) and sit down; get up again |
 | `jump`, `set_name` | jump; change your name |
-| `get_in_car`, `get_out` | the car or motorbike next to you, or ride along with a friend |
+| `get_in_car`, `get_out` | the car or motorbike next to you, or ride along with a friend (if they get out, you stay in their parked car until you get out) |
+| `radio` | in a car, also as a passenger: on, off, next station, volume |
 | `drive_to` | the autopilot drives you there |
 | `knock`, `live_here`, `go_inside`, `step_outside`, `answer_door` | doors and homes |
 | `call`, `say`, `listen`, `mute`, `hang_up` | only when joined with `voice: true`: ring someone who can talk (and learn whether they answered), speak and hear the reply in one step (`say` with `then_listen`, the default), or `listen` (returns as soon as they finish a sentence); words come from [whisper.cpp](https://github.com/ggml-org/whisper.cpp): `brew install whisper-cpp` and a ggml model in `~/.cache/whisper` or `TOYCITY_WHISPER_MODEL`. Calls to you are answered by themselves |

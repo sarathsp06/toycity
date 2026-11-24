@@ -1645,6 +1645,7 @@ if (AGENT) window.__agent = {
   stop() { stopWalk(); detourQ = []; },
   get walking() { return !!goal; },
   get riding() { return ride ? ride.name || 'a friend' : null; },   // riding along in someone's car
+  get rideParked() { return !!ride && !ride.car && ride.parked?.sx !== undefined; },   // ...and they got out: you sit on in it
   get stuck() { return stuck; },
   face(y) { yaw = y; },
   jump() { if (!you.can('jump')) return false; walker.startJump(); return true; },

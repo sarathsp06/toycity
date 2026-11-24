@@ -1,6 +1,6 @@
 {
   "name": "toycity-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Let an AI agent walk, drive and knock on doors in Toy City, at human speed",
   "type": "module",
   "bin": { "toycity-mcp": "server.mjs" },

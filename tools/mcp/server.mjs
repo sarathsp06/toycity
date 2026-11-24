@@ -53,7 +53,7 @@ const state = () => api('snapshot');
 const describe = s => JSON.stringify(s, null, 1);
 
 // ---------- the server ----------
-const server = new McpServer({ name: 'toycity', version: '0.1.0' }, {
+const server = new McpServer({ name: 'toycity', version: '0.2.0' }, {
   instructions: 'You are a player in Toy City, a 3D copy of real Dutch towns shared with real people. Move like a person: walk or run to nearby places, take a car for longer trips, knock on doors, follow a friend. In a call, talk like a person: say two or three sentences, then let them reply (say with then_listen, or listen), and answer what they said. If they interrupt you, stop and answer that. Be kind: people can see you (your name has a 🤖), and hitting someone with a car gets you a yellow, then red, card.',
 });
 
@@ -124,8 +124,12 @@ server.tool('get_in_car', 'Get into the parked car or motorbike next to you (wit
   { with: z.string().max(40).optional().describe('ride along with this player (they must be in a car or on a motorbike)') },
   async ({ with: who }) => { need(); await pace(); return text(await (who ? api('rideWith', who) : api('getIn'))); });
 
-server.tool('get_out', 'Get out of the car (stop first: jumping out of a moving car lets it roll on).', {},
+server.tool('get_out', 'Get out of the car (stop first: jumping out of a moving car lets it roll on). Riding along and the driver got out: their car stays in the street and you sit on in it until you get out (beside your own door) or they drive on.', {},
   async () => { need(); await pace(); return text(await api('getOut')); });
+
+server.tool('radio', 'In a car (yours, or riding along): the radio, real Dutch stations (NPO Radio 2, 3FM, Radio 1, Klassiek). Turn it on or off, change station, set the volume. It is your own: others in the car choose theirs.',
+  { action: z.enum(['on', 'off', 'next']).optional(), volume: z.number().min(0).max(100).optional().describe('percent') },
+  async ({ action, volume }) => { need(); return text(await api('radio', action, volume)); });
 
 server.tool('drive_to', 'In a car or on the motorbike: let the autopilot drive you to an address or place in this town along the streets (it keeps to speed limits, one-way streets and the right side of the road).',
   { place: z.string().max(80) },
@@ -175,8 +179,8 @@ server.tool('answer_door', 'Someone is knocking at your home (look lists knocks)
     return text(!come ? 'You told them not now.' : (b === 'Let them in' ? 'You let them in.\n' : 'You came to the door.\n') + describe(await state()));
   });
 
-server.tool('sit', 'Inside a house: walk to the nearest free chair at the table (or the sofa) and sit down, as for a meeting.',
-  { seat: z.enum(['chair', 'sofa']).optional() },
+server.tool('sit', 'Inside a house: walk round the furniture to the nearest free seat in the lounge (a sofa or an armchair) and sit down, to talk with whoever is there.',
+  { seat: z.enum(['chair', 'sofa']).optional().describe('chair: an armchair') },
   async ({ seat }) => { need(); await pace(); return text(await api('sit', seat)); });
 
 server.tool('stand_up', 'Get up from your seat.', {},
