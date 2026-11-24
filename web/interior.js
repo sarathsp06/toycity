@@ -15,7 +15,8 @@
 //   room.blockedAt(x, z)         a wall there (the walker's map while inside)
 //   room.solids                  the furniture, a solids.js registry
 //   room.contains(x, z)          is this point inside the room you are in (someone else in the same house)
-//   room.camera(v)               keep a camera position inside the walls
+//   room.camera(v, target)       keep a camera position inside the walls (rising when pushed in)
+//   room.clamp(v, m)             move a point (x, z) to at least m metres inside the walls
 //   room.floor                   the floor meshes, for click-to-walk
 //   room.seats                   [{ x, z, yaw, h, kind }] in the scene, where people can sit
 //   room.seatNear(x, z, r, taken) the nearest seat within r metres not in taken (a list of [x, z])
@@ -30,7 +31,10 @@ export const INDOORS = 1;
 // a body is 1.8 m tall: in a 2.7 m room the feet go no higher than 0.85 m (a jump onto the sofa or the
 // tea table, not through the ceiling); indoors you step up only a threshold, a sofa needs a jump
 export const HEAD = 1.85, STEP_IN = 0.2;
-const R = 0.3;                      // a body's radius: how close to a wall the centre may come
+// a body's radius: the walker tests walls at points this far round the body (walker.js PROBES), so the
+// map itself is the bare room; furniture is bumped into at BODY (shoulders, a little slimmer than outside)
+const R = 0.3;
+export const BODY = 0.22;
 
 export function createInterior({ scene, loader, createSolids }) {
   let model = null, data = null, loading = null, door = null;
@@ -106,13 +110,23 @@ export function createInterior({ scene, loader, createSolids }) {
     get ceiling() { return H - HEAD; },
     get floor() { return floor; },
     get seats() { return seats; },
-    blockedAt: (x, z) => !door || !inRoom(x, z, R),
+    blockedAt: (x, z) => !door || !inRoom(x, z, 0.02),
     contains: (x, z) => !!door && inRoom(x, z, 0),
-    camera(v) {
+    // keep the camera inside the walls; when a wall pushes it in towards you (target), it rises by as
+    // much, looking down over your shoulder instead of filling the screen with the back of your head
+    clamp(v, m = 0.35) {
+      if (!door) return v;
+      const [lx, lz] = toLocal(v.x, v.z);
+      const [x, z] = toWorld(Math.min(W / 2 - m, Math.max(-W / 2 + m, lx)), Math.min(-m, Math.max(-D + m, lz)));
+      v.x = x; v.z = z; return v;
+    },
+    camera(v, target) {
       if (!door) return;
       const [lx, lz] = toLocal(v.x, v.z), m = 0.15;
       const cx = Math.min(W / 2 - m, Math.max(-W / 2 + m, lx)), cz = Math.min(-m, Math.max(-D + m, lz));
+      const lost = Math.hypot(cx - lx, cz - lz);
       const [x, z] = toWorld(cx, cz); v.x = x; v.z = z;
+      if (target && lost > 0.01) v.y = Math.max(v.y, target.y + 1.6 + lost * 0.9);
       v.y = Math.min(DEPTH + H - 0.2, Math.max(DEPTH + 0.3, v.y));
     },
   };

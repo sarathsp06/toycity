@@ -10,7 +10,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import * as BU from 'three/addons/utils/BufferGeometryUtils.js';
 import * as TX from './textures.js';
 import { loadAvatar, myLook, poseLayer } from './avatar.js';
-import { createSolids, footprintsOf } from './solids.js';
+import { createSolids, footprintsOf, PERSON } from './solids.js';
 import { createDriving, makeCar, footprintOf, FRONT, PASSENGER, seatLocal } from './vehicle.js';
 import { createParked } from './parked.js';
 import { createGrid, squareKey, getBit, setBit, newBitmap, SIDE, eachCell } from './grid.js';
@@ -23,7 +23,7 @@ import { createAutopilot } from './autopilot.js';
 import { createTraffic, COUNT as TRAFFIC_N } from './traffic.js';
 import { createPeds, COUNT as PEDS_N } from './peds.js';
 import { createHomes } from './home.js';
-import { createInterior, INDOORS, STEP_IN } from './interior.js';
+import { createInterior, INDOORS, STEP_IN, BODY } from './interior.js';
 import { createRadio, mountRadio } from './radio.js';
 import { createNav, mountNav } from './nav.js';
 import { createBirds } from './birds.js';
@@ -1040,9 +1040,9 @@ renderer.domElement.addEventListener('pointerup', e => {
   mouse.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
   ray.setFromCamera(mouse, camera);
   const targets = [];
-  if (room.active) targets.push(...room.floor);   // in a house: its floor
+  if (room.active) targets.push(room.group);   // in a house: anything in it (a click on a wall or a sofa goes beside it)
   else for (const t of tiles.values()) t.group.traverse(o => { if (o.userData.ground || o.userData.solid) targets.push(o); });
-  const hit = ray.intersectObjects(targets, false)[0];
+  const hit = ray.intersectObjects(targets, room.active)[0];
   let pt;
   if (hit) {
     pt = hit.point.clone();
@@ -1050,8 +1050,23 @@ renderer.domElement.addEventListener('pointerup', e => {
   } else { const y0 = room.active ? room.floorY : 0, t = (y0 - ray.ray.origin.y) / ray.ray.direction.y; if (!(t > 0)) return; pt = ray.ray.at(t, new THREE.Vector3()); }
   pt.y = 0.15;
   if (driving.driving) return;
+  // in a house a click on a table or a sofa lands on the floor under it: go to the nearest free spot beside it
+  if (room.active) room.clamp(pt);
+  if (room.active && blocked(pt.x, pt.z)) {
+    let best = null, bd = Infinity;
+    for (let r = 0.25; r <= 1.5 && !best; r += 0.25) for (let a = 0; a < 16; a++) {
+      const x = pt.x + Math.sin(a * Math.PI / 8) * r, z = pt.z + Math.cos(a * Math.PI / 8) * r;
+      const d = Math.hypot(x - player.position.x, z - player.position.z);
+      if (d < bd && !blocked(x, z)) { bd = d; best = [x, z]; }
+    }
+    if (!best) return;
+    pt.x = best[0]; pt.z = best[1];
+  }
   if (fly) { toggleFly(); yaw = Math.atan2(camera.position.x - pt.x, camera.position.z - pt.z); player.position.copy(pt); stopWalk(); return; }
   goal = pt; marker.position.set(pt.x, (room.active ? room.floorY : 0) + 0.35, pt.z); marker.visible = true;
+  // in a house, a way round the sofas and tables from the start (the grid is fine and the room small)
+  detour = null; detourQ = []; detours = 0;
+  if (room.active && !lineClear(player.position.x, player.position.z, pt.x, pt.z)) sidestep();
 });
 
 // collision against the pre-built 0.5 m bitmaps of loaded near squares (grid.js has the layout)
@@ -1180,11 +1195,12 @@ swimButton?.addEventListener('click', e => { e.stopPropagation(); startSwim(); }
 // what you bump into and stand on: the town's things outside, the furniture in a house
 const walkSolids = { topAt: (x, z, r) => (room.active ? room.solids : solids).topAt(x, z, r), hitAbove: (x, z, r, y) => (room.active ? room.solids : solids).hitAbove(x, z, r, y) };
 const walker = createWalker({ blockedAt, wetAt, ground: groundAt, solids: walkSolids,
-  step: () => room.active ? STEP_IN : STEP, ceiling: () => room.active ? room.ceiling : Infinity, swimming: () => swim.on, flying: () => fly, standing: () => you.onFoot && !swim.on && !fling.on && !homes.busy && !sat });   // seated: the chair holds you
+  step: () => room.active ? STEP_IN : STEP, radius: () => room.active ? BODY : PERSON.r, ceiling: () => room.active ? room.ceiling : Infinity, swimming: () => swim.on, flying: () => fly, standing: () => you.onFoot && !swim.on && !fling.on && !homes.busy && !sat });   // seated: the chair holds you
 const { blocked, lineClear, localPath, jump } = walker;
 // what the player is doing, asked in one place (player.js): may I jump, swim, get in, walk, be hit?
 const you = createPlayerMode({ get driving() { return driving; }, get ride() { return ride; }, get fly() { return fly; }, swim, fling, jump, homes, health }, { stopWalk });
 let movedThisFrame = 0;
+const SLIDE = [0.35, -0.35, 0.7, -0.7, 1.05, -1.05, 1.4, -1.4];   // radians off the way you push, nearest first
 let stuck = 0, needUnstick = true;
 // An agent walks round what is in its way, as a person does: when the straight line to its goal is
 // blocked, a way is found over the 0.5 m collision grid (A*, within about 50 m) and pulled straight
@@ -1429,7 +1445,7 @@ function chaseCam() {
   // in a house: from a little above head height, looking down on you (never from the floor)
   const pe = room.active ? Math.max(pitch, 0.55) : pitch + Math.max(0, 1.2 - pitch) * THREE.MathUtils.smoothstep(dist, 30, 300);
   camera.position.lerp(tmpC.set(Math.sin(yaw) * Math.cos(pe), Math.sin(pe), Math.cos(yaw) * Math.cos(pe)).multiplyScalar(dist).add(player.position), room.active ? 0.5 : 0.18);
-  room.camera(camera.position);   // in a house the camera stays inside its walls
+  room.camera(camera.position, player.position);   // in a house the camera stays inside its walls
   camera.lookAt(player.position.x, player.position.y + (room.active ? (sat ? 0.9 : 1.2) : 1.6), player.position.z);
 }
 // scratch vectors for the frame loop (nothing is made per frame)
@@ -1516,21 +1532,27 @@ function frame(now) {
     if (sat && (v.lengthSq() > 0 || goal)) { standUp(); stopWalk(); v.set(0, 0, 0); }
     if (v.lengthSq() > 0) stopWalk();
     // walk, or run with Shift or the joystick pushed to its edge; click-to-go speeds up for long trips
-    let speed = swim.on ? (keys['shift'] || jm > 0.9 ? SWIM_FAST : SWIM_MS) : keys['shift'] || jm > 0.9 ? 6 : jm > 0.15 ? 1.2 + 0.8 * jm : 1.8;
+    // indoors a calmer pace (1.3 m/s, 3.5 running): a living room is a few strides across
+    const IN = room.active, RUN = IN ? 3.5 : 6, WALK = IN ? 1.3 : 1.8;
+    let speed = swim.on ? (keys['shift'] || jm > 0.9 ? SWIM_FAST : SWIM_MS) : keys['shift'] || jm > 0.9 ? RUN : jm > 0.15 ? (IN ? 0.9 : 1.2) + (WALK - (IN ? 0.9 : 1.2)) * jm : WALK;
     if (goal) {
       const to = (detour || goal).clone().sub(player.position); to.y = 0; const d = to.length();
       // a person's click-to-go speeds up on long trips; an agent walks (1.8 m/s) or runs (6 m/s) like anyone on foot
-      const boost = swim.on ? speed : AGENT ? (AGENT.run ? 6 : 1.8) : Math.max(speed, d / 2.5);
+      const boost = swim.on ? speed : AGENT ? (AGENT.run ? RUN : WALK) : IN ? Math.min(RUN, Math.max(speed, d / 2.5)) : Math.max(speed, d / 2.5);
       if (d < 0.4) { if (detour) { const q = detourQ.shift(); detour = q ? new THREE.Vector3(q[0], 0.15, q[1]) : null; } else stopWalk(); } else { v.copy(to); speed = Math.min(boost * dt, d) / dt; }
       marker.material.opacity = 0.5 + 0.4 * Math.sin(now / 150);
     }
     if (v.lengthSq() > 0) {
       v.normalize().multiplyScalar(speed * dt);
       const p0 = player.position;
+      // bumping into something: slide along it, turning off the way you push as little as you can (any
+      // angle: a house and its sofas are turned to face the street, not the map's axes)
       if (!blocked(p0.x, p0.z) && blocked(p0.x + v.x, p0.z + v.z)) {
-        if (!blocked(p0.x + v.x, p0.z)) v.z = 0; else if (!blocked(p0.x, p0.z + v.z)) v.x = 0; else v.set(0, 0, 0);
+        const L = Math.hypot(v.x, v.z), a0 = Math.atan2(v.x, v.z); let ok = false;
+        for (const da of SLIDE) { const a = a0 + da, k = L * Math.cos(da); if (!blocked(p0.x + Math.sin(a) * k, p0.z + Math.cos(a) * k)) { v.set(Math.sin(a) * k, 0, Math.cos(a) * k); ok = true; break; } }
+        if (!ok) v.set(0, 0, 0);
       }
-      if (goal && v.lengthSq() < 1e-6) { if ((stuck += dt) > (AGENT ? 0.3 : 0.6)) { stuck = 0; if (!(AGENT && sidestep())) stopWalk(); } } else stuck = 0;
+      if (goal && v.lengthSq() < 1e-6) { if ((stuck += dt) > (AGENT || room.active ? 0.3 : 0.6)) { stuck = 0; if (!((AGENT || room.active) && sidestep())) stopWalk(); } } else stuck = 0;
       player.position.add(v);
       movedThisFrame = Math.hypot(v.x, v.z);
       if (v.lengthSq() > 1e-8) {

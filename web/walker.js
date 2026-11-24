@@ -10,6 +10,7 @@
 //     swimming(), flying()
 //     step()              the highest top you walk up onto without jumping (default STEP; lower indoors)
 //     ceiling()           the highest the feet may go (a room: its height less a body's); default none
+//     radius()            how wide the body is for bumping into things (default PERSON.r; slimmer indoors)
 //   walker.blocked(x, z)                     the body (a 0.3 m cross of probes) at x, z touches something
 //   walker.lineClear(x0, z0, x1, z1)         nothing in the way, every 0.4 m
 //   walker.localPath(x0, z0, x1, z1)         [[x, z], ...] round what is in the way, or null
@@ -35,7 +36,7 @@ export const GRAVITY = 14, JUMP_V = 6.5, CROUCH_T = 0.12, LAND_T = 0.16;
 // and the body's feet radius for what it stands on
 export const HEDGE_TOP = 1.1, STEP = 0.55, FEET = 0.2;
 
-export function createWalker({ blockedAt, wetAt = () => null, ground = () => 0, step = () => STEP, ceiling = () => Infinity, solids = null, swimming = () => false, flying = () => false, standing = () => true }) {
+export function createWalker({ blockedAt, wetAt = () => null, ground = () => 0, step = () => STEP, ceiling = () => Infinity, radius = () => PERSON.r, solids = null, swimming = () => false, flying = () => false, standing = () => true }) {
   const jump = { h: 0, v: 0, phase: null, t: 0, onHedge: false };
   // the top of the baked map at a point: open ground its own height, a hedge HEDGE_TOP, a wall or water never
   const groundTop = (x, z) => !blockedAt(x, z, 0) ? ground(x, z) : blockedAt(x, z, 99) ? Infinity : HEDGE_TOP;
@@ -52,7 +53,7 @@ export function createWalker({ blockedAt, wetAt = () => null, ground = () => 0, 
     }
     const up = h + step();
     for (let k = 0; k < PROBES.length; k += 2) if (groundTop(x + PROBES[k], z + PROBES[k + 1]) > up) return true;
-    return !flying() && !!solids && solids.hitAbove(x, z, PERSON.r, up);
+    return !flying() && !!solids && solids.hitAbove(x, z, radius(), up);
   }
   const blocked = (x, z) => blockedAs(x, z, jump.h);
   const lineClear = (x0, z0, x1, z1) => { const n = Math.ceil(Math.hypot(x1 - x0, z1 - z0) / 0.4) || 1; for (let s = 1; s <= n; s++) if (blocked(x0 + (x1 - x0) * s / n, z0 + (z1 - z0) * s / n)) return false; return true; };

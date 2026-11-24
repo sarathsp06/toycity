@@ -157,6 +157,11 @@ export async function createPresence({ scene, player, toRD, fromRD, slug, vehicl
         const seated = here && isSeated(p.pose, p.up); p.player.sitting = seated ? room.seatNear(x, z, 0.6) || { h: 0.45 } : null; p.inMyHouse = here;   // sitting: the seat they are on (its height)
         p.player.group.position.set(x, here ? room.floorY + (seated ? 0 : p.up || 0) : 0.15 + Math.max(p.up || 0, p.car ? 0 : ground(x, z)), z); p.player.group.rotation.y = s.h;
         setCard(p.player, p.card || 0, p.pose || 0, p.player.sitting ? 0 : p.up || 0);
+        // in the air only while their height is changing and well above the ground: up is also the pavement (0.12 m) or the sofa they
+        // stand on, and someone walking along a pavement must walk, not hang in a jump
+        const upNow = p.player.sitting ? 0 : p.up || 0;
+        if (Math.abs(upNow - (p.upLast ?? upNow)) > 0.03) p.airT = 0.35; else p.airT = Math.max(0, (p.airT || 0) - dt);
+        p.upLast = upNow; p.player.air = p.airT > 0 && upNow > (here ? 0 : ground(x, z)) + 0.2;   // a kerb step is not a jump
         // a passenger ("ride"): sit them in the car they are in, beside its driver, so the driver sees them
         if (p.player.inside) {
           const host = carNear(x, z, p.id);

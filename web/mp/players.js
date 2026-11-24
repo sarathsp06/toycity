@@ -95,7 +95,7 @@ function pickPose(p, speed) {
   if (isLying(p.poseN)) { if (P.name !== 'fall') P.set('fall', { once: true, from: FALL_DOWN }); return; }
   if (P.name === 'fall') return P.set('sit_exit', { once: true, fade: 0.3 });
   if (P.name === 'sit_exit' && !P.done && speed < 0.5) return;
-  if (p.up > 0 && p.poseN !== POSE.door) return P.set('jump_loop');
+  if (p.air && p.poseN !== POSE.door) return P.set('jump_loop');   // presence.js: rising or falling, not just standing higher
   P.set(p.speaking > 0.02 && speed < 0.3 ? 'talk' : null, { fade: P.name === 'sit_exit' ? 0.2 : 0.1 });
 }
 
