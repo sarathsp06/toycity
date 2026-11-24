@@ -155,6 +155,7 @@ export async function createPresence({ scene, player, toRD, fromRD, slug, vehicl
         p.player.group.visible = show && (!isInside(p.pose) || here);
         // feet on the pavement: games that send the ground in their height already stand there, older ones send 0
         const seated = here && isSeated(p.pose, p.up); p.player.sitting = seated ? room.seatNear(x, z, 0.6) || { h: 0.45 } : null; p.inMyHouse = here;   // sitting: the seat they are on (its height)
+        p.player.thinking = !!p.caps?.includes('t');   // an agent working out its reply: a thought bubble
         p.player.group.position.set(x, here ? room.floorY + (seated ? 0 : p.up || 0) : 0.15 + Math.max(p.up || 0, p.car ? 0 : ground(x, z)), z); p.player.group.rotation.y = s.h;
         setCard(p.player, p.card || 0, p.pose || 0, p.player.sitting ? 0 : p.up || 0);
         // in the air only while their height is changing and well above the ground: up is also the pavement (0.12 m) or the sofa they

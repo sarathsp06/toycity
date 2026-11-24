@@ -28,6 +28,24 @@ function label(text) {
   return sp;
 }
 
+// a thought bubble ("…" in a cloud with two small puffs below it) over an AI player working out its
+// reply (presence caps 't'); one texture for everyone. It fades in and bobs a little while it shows.
+let bubbleTex = null;
+function bubble() {
+  if (!bubbleTex) {
+    const c = document.createElement('canvas'); c.width = 128; c.height = 112; const g = c.getContext('2d');
+    g.fillStyle = 'rgba(255,255,255,.95)'; g.strokeStyle = 'rgba(20,30,40,.55)'; g.lineWidth = 4;
+    g.beginPath(); g.ellipse(64, 40, 56, 34, 0, 0, Math.PI * 2); g.fill(); g.stroke();
+    g.beginPath(); g.arc(30, 86, 10, 0, Math.PI * 2); g.fill(); g.stroke();
+    g.beginPath(); g.arc(14, 102, 6, 0, Math.PI * 2); g.fill(); g.stroke();
+    g.fillStyle = 'rgba(20,30,40,.85)'; for (const x of [40, 64, 88]) { g.beginPath(); g.arc(x, 42, 7, 0, Math.PI * 2); g.fill(); }
+    bubbleTex = new THREE.CanvasTexture(c); bubbleTex.colorSpace = THREE.SRGBColorSpace;
+  }
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: bubbleTex, depthTest: false, transparent: true, opacity: 0 }));
+  sp.scale.set(0.5, 0.44, 1); sp.position.set(0.3, 2.55, 0); sp.center.set(0.5, 0); sp.renderOrder = 21; sp.visible = false;
+  return sp;
+}
+
 export function shirtFor(id) { let h = 0; for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) >>> 0; return SHIRTS[h % SHIRTS.length]; }
 
 export function makePlayer(id, name, look) {
@@ -123,6 +141,14 @@ export function animate(p, speed, dt) {
     p.mixer.update(dt);
   }
   p.ring.material.opacity += ((p.speaking > 0.02 ? 0.9 : 0) - p.ring.material.opacity) * Math.min(1, dt * 10);
+  // the thought bubble: fades in over the head while they think, bobbing gently
+  if (p.thinking || p.bubble?.visible) {
+    if (!p.bubble) { p.bubble = bubble(); p.group.add(p.bubble); }
+    const b = p.bubble, m = b.material; b.visible = true;
+    m.opacity += ((p.thinking ? 1 : 0) - m.opacity) * Math.min(1, dt * 6);
+    p.bobT = (p.bobT || 0) + dt; b.position.y = (p.seat || p.sitting ? 2.05 : 2.5) + Math.sin(p.bobT * 2.5) * 0.04;
+    if (!p.thinking && m.opacity < 0.02) b.visible = false;
+  }
 }
 
 // someone driving: show their car instead of their person (make builds it from the game's car models)

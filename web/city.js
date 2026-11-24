@@ -1761,7 +1761,9 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 // the agent's handle (tools/mcp/toycity-mcp): only human-sized moves
+let thinkUntil = 0;
 if (AGENT) window.__agent = {
+  think(on) { thinkUntil = on ? performance.now() + 90000 : 0; },
   // (the same goal again, as a follower sends every few hundred ms, keeps a detour in progress)
   walkTo(x, z, run) {
     if (!you.can('walk')) return false;
@@ -1804,7 +1806,9 @@ if (params.get('mp') !== '0') import('./mp/index.js').then(m => m.start({
   // what others see of you besides where you are: your card, lying flat or flying, and how high you are
   // caps: what I can do, told to everyone ('v' = can hear and talk). On by default in a browser,
   // off with the 📞 Calls button; an agent (?agent=1) has a voice only if it joined with one (&voice=1)
-  body: { get caps() { return voiceCap ? 'v' : ''; }, setVoice(on) { voiceCap = on; if (!AGENT) localStorage.setItem('toycity.calls', on ? 'on' : 'off'); },
+  // 't' = an agent working out its reply (tools/mcp sets it when a say/listen result has gone to the
+  // model, clears it when it speaks or acts): others see a thought bubble. It clears by itself after 90 s.
+  body: { get caps() { return (voiceCap ? 'v' : '') + (thinkUntil > performance.now() ? 't' : ''); }, setVoice(on) { voiceCap = on; if (!AGENT) localStorage.setItem('toycity.calls', on ? 'on' : 'off'); },
     get autoAnswer() { return !!AGENT && voiceCap; },
     get card() { return card.level; }, get pose() { return you.pose; }, get y() { return sat ? SEATED : +(swim.on ? swim.y - 0.15 : fling.on ? fling.h : jump.h).toFixed(2); } },
 })).then(s => { social = s; window.__city.social = s; }).catch(e => { console.warn('multiplayer unavailable', e); document.getElementById('mp').textContent = 'Multiplayer unavailable right now'; });

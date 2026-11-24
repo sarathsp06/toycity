@@ -218,6 +218,8 @@ server.tool('where', 'Coordinates: where you are, or where a player in sight is:
 // walking, following and the game keep going while a sentence is made or heard. The turn policy (when
 // to stop, what was echo, when they have finished) is turn.mjs.
 const needVoice = () => S.needVoice();
+// others see a thought bubble over the agent while its reply is being worked out (city.js caps 't')
+const think = on => page()?.evaluate(on => window.__agent?.think(on), on).catch(() => {});
 
 server.tool('call', 'Ring someone near you who can talk (look shows can_talk) and wait for them to answer. Tells you whether they answered, declined, or are still being rung (a call rings for 25 s).',
   { name: z.string().max(40).describe('their name, or part of it'), wait: z.number().min(0).max(25).default(20).describe('seconds to wait for an answer') },
@@ -240,8 +242,10 @@ server.tool('say', `Speak in your call, in a natural voice. Keep it conversation
   async ({ text: t, wav_base64, then_listen, listen_seconds }) => {
     needVoice();   // no pace: a reply goes out as soon as it is ready
     if (!t && !wav_base64) return text('Give text or wav_base64.');
-    if (wav_base64) return text(await S.turns.sayWav(wav_base64));
-    return text(await S.turns.say(t, { thenListen: then_listen, listenSeconds: listen_seconds }));
+    await think(false);   // about to speak: the bubble goes
+    const out = wav_base64 ? await S.turns.sayWav(wav_base64) : await S.turns.say(t, { thenListen: then_listen, listenSeconds: listen_seconds });
+    if (then_listen || wav_base64) await think(true);   // their reply goes to the model now: it is thinking
+    return text(out);
   });
 
 server.tool('listen', 'Hear what they say in your call: by default it returns as soon as they have said something and finished their sentence (or after seconds, if nothing comes). Your own voice coming back and noises are left out. Everything heard is given once: a later listen has only what comes after.',
@@ -251,6 +255,7 @@ server.tool('listen', 'Hear what they say in your call: by default it returns as
     needVoice();
     const hint = await api('names').catch(() => '');
     const { audio: r, words: said } = await S.turns.hear({ seconds, untilQuiet: until_quiet, hint });
+    if (said) await think(true);   // words went to the model: it is working out its reply
     if (!r || r.seconds < 0.2) return text('Nothing heard.');
     if (r.silent) return text(`${r.seconds.toFixed(0)} s of silence.`);
     const content = [];
