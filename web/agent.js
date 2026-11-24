@@ -305,7 +305,7 @@ export function install(w = window) {
       if (Number.isFinite(volume)) r.volume = volume / 100;
       return r.on ? `The radio plays ${r.station.name}, volume ${Math.round(r.volume * 100)}%.` : `The radio is off (volume ${Math.round(r.volume * 100)}%).`;
     },
-    stand() { const city = c(); if (!city.sitting) return 'You are not sitting.'; city.standUp(); return 'You stood up.'; },
+    async stand() { const city = c(); if (!city.sitting) return 'You are not sitting.'; city.standUp(); await until(() => !city.sitting, 3000); return 'You stood up.'; },
     leave() { stopFollow(); endWalk(); },
   };
   w.__agentApi = api;

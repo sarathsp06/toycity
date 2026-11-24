@@ -12,7 +12,7 @@ import * as TX from './textures.js';
 import { loadAvatar, myLook, poseLayer } from './avatar.js';
 import { createSolids, footprintsOf, PERSON } from './solids.js';
 import { createDriving, makeCar, footprintOf, FRONT, PASSENGER, seatLocal } from './vehicle.js';
-import { createParked } from './parked.js';
+import { createParked, STRIDE } from './parked.js';
 import { createGrid, squareKey, getBit, setBit, newBitmap, SIDE, eachCell } from './grid.js';
 import { createPlayerMode, FALL_DOWN } from './player.js';
 import { POSE, SEATED, isPassenger, carModel } from './mp/state.js';
@@ -23,7 +23,7 @@ import { createAutopilot } from './autopilot.js';
 import { createTraffic, COUNT as TRAFFIC_N } from './traffic.js';
 import { createPeds, COUNT as PEDS_N } from './peds.js';
 import { createHomes } from './home.js';
-import { createInterior, INDOORS, STEP_IN, BODY } from './interior.js';
+import { createInterior, INDOORS, STEP_IN, BODY, blobMesh } from './interior.js';
 import { createRadio, mountRadio } from './radio.js';
 import { createNav, mountNav } from './nav.js';
 import { createBirds } from './birds.js';
@@ -679,7 +679,12 @@ function pickPose() {
   if (driving.rider) return P.set('drive');
   if (you.seated) return P.set(null);   // inside a car: not seen
   if (fling.on || homes.busy) return;
-  if (sat) return P.set('sit_idle', { fade: 0.25 });
+  if (sat) {   // sitting down (sit_enter, once), sitting (on a call: sit_talk), getting up (sit_exit)
+    if (seatMove && !seatMove.down) return P.set('sit_exit', { once: true, fade: 0.15 });
+    if ((P.name === 'sit_enter' && P.done) || P.name === 'sit_idle' || P.name === 'sit_talk') return P.set(social?.inCall ? 'sit_talk' : 'sit_idle', { fade: 0.3 });
+    if (P.name !== 'sit_enter') P.set('sit_enter', { once: true, fade: 0.2 });
+    return;
+  }
   if (swim.on) return P.set(avatar.speed > 0.25 ? 'swim' : 'swim_idle', { fade: 0.3 });
   if (jump.phase === 'crouch') return P.set('jump_start', { once: true });
   if (jump.phase === 'air') { if (P.name !== 'jump_start' || P.done) P.set('jump_loop'); return; }
@@ -695,7 +700,7 @@ function ridePlace() {
   const riding = driving?.rider, f = FRONT.bike ?? 1;
   m.rotation.y = riding ? f * Math.PI / 2 : 0;
   const so = sat && !riding ? sitOffset(sat.h) : null;
-  m.position.set(riding ? -0.12 * f : 0, riding ? 0.31 : so ? so.y : 0, so ? so.z : 0);
+  m.position.set(riding ? -0.12 * f : 0, riding ? 0.31 : so ? so.y * seatK : 0, so ? so.z * seatK : 0);
 }
 player.position.set(info.start ? info.start.x - ORX : 0, 0.15, info.start ? -(info.start.y - ORY) : 0);
 scene.add(player);
@@ -758,7 +763,7 @@ function note(text) {
 // the inside of every house (interior.js): you walk about in it while you are in a house
 const room = createInterior({ scene, loader: new GLTFLoader(), createSolids });
 const homes = createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note, loader: new GLTFLoader(),
-  room: { enter: d => room.load().then(() => { const p = room.enter(d); dist = 3.2; pitch = 0.3; return p; }), leave: () => { room.leave(); dist = 8; } },
+  room: { enter: d => room.load().then(() => { const p = room.enter(d); dist = 3.0; pitch = 0.2; return p; }), leave: () => { room.leave(); dist = 8; } },
   look: y => { yaw = y; pitch = Math.min(pitch, 0.35); dist = room.active ? 3.2 : Math.max(6, Math.min(dist, 12)); },
   onKnock: () => avatar.pose?.set('knock', { once: true }) });
 driving = createDriving({ scene, player, models: CAR_MODELS, parked, solids, ground: (x, z) => blockedAt(x, z), note, onHitPerson: hitPerson, onBumpCar: (x, z) => traffic?.bumped(x, z) });
@@ -1152,32 +1157,96 @@ const takenSeats = () => [...(social?.presence?.peers?.values() || [])].filter(p
 let indoorOn = false, indoorT = 0;
 for (const l of [sun, hemi, amb]) l.layers.enable(INDOORS);
 const onIndoors = o => o.traverse(c => c.layers.enable(INDOORS));
+// Another player's car standing where one of this square's parked cars is (they took it and stopped, or
+// parked it back, or left it there): only one car can be in that spot, so the parked one steps aside here,
+// as it did for them. Taken this way only on this screen, and given back when they drive off.
+const hiddenUnder = new Set(); let hideT = 0;
+function hideUnderOthers() {
+  if ((hideT -= 1 / 60) > 0) return; hideT = 0.5;
+  const peers = social?.presence?.peers, want = new Set();
+  if (peers) for (const p of peers.values()) {
+    const spots = [];
+    if (p.parked?.sx !== undefined) spots.push([p.parked.sx, p.parked.sz]);
+    if (p.car && !isPassenger(p.car) && p.player && Math.abs(p.speed || 0) < 0.5) spots.push([p.player.group.position.x, p.player.group.position.z]);
+    for (const [x, z] of spots) for (const t of parked.tiles) {   // taken ones too: one already hidden must stay hidden
+      const d = t.cars.data, ox = t.group.position.x, oz = t.group.position.z;
+      for (let k = 0; k < d.length; k += STRIDE) if (Math.hypot(d[k] + ox - x, d[k + 2] + oz - z) < 1.8) want.add(parked.key(t, k));
+    }
+  }
+  for (const k of hiddenUnder) if (!want.has(k)) { hiddenUnder.delete(k); parked.setTaken(k, false); }
+  for (const k of want) if (!hiddenUnder.has(k) && !parked.isTaken(k)) { hiddenUnder.add(k); parked.setTaken(k, true); }
+}
 function indoorView() {
   const on = room.active;
-  if (on !== indoorOn) { indoorOn = on; if (on) camera.layers.set(INDOORS); else camera.layers.set(0); indoorT = 0; }
+  if (on !== indoorOn) {
+    indoorOn = on; camera.layers.set(on ? INDOORS : 0); indoorT = 0; roomLight(on);
+    // a blink, not a cut; going in, it stays dark until the room's light is ready (the first time the
+    // materials are rebuilt for the lamp, about a second), so no half-drawn frame shows
+    fadeEl.style.opacity = 1;
+    const ready = on && renderer.compileAsync ? renderer.compileAsync(scene, camera).catch(() => {}) : Promise.resolve();
+    ready.then(() => { fadeEl.style.opacity = 0; fadeEl.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 450, easing: 'ease-out' }); });
+  }
   if (!on || (indoorT -= 1 / 60) > 0) return;
   indoorT = 0.5;
   onIndoors(player); onIndoors(marker);
   for (const p of social?.presence?.peers?.values() || []) if (p.inMyHouse && p.player) onIndoors(p.player.group);
 }
+// Indoors the street's sun and sky would light the room as if it had no roof. While you are in, they
+// become the room's light: daylight from the back window (the sun, turned to come through it), a warm
+// bounce off the walls (hemi), little sky reflection on glossy things, and the lamp over the tea table,
+// brighter at night. The town's values come back when you leave.
+const lamp = new THREE.PointLight(0xffc890, 0, 6, 2); lamp.layers.set(INDOORS); scene.add(lamp);
+let outdoor = null;
+function roomLight(on) {
+  if (on) {
+    outdoor ||= { sun: sun.color.getHex(), si: sun.intensity, sky: hemi.color.getHex(), gnd: hemi.groundColor.getHex(), hi: hemi.intensity, ai: amb.intensity, env: scene.environmentIntensity, exp: renderer.toneMappingExposure };
+    sun.color.setHex(0xfff3e4); sun.intensity = 1.3 * (1 - 0.85 * nightK);
+    hemi.color.setHex(0xfff2e0); hemi.groundColor.setHex(0x705c48); hemi.intensity = 1.25 - 0.6 * nightK;
+    amb.intensity = 0.08; scene.environmentIntensity = 0.15; renderer.toneMappingExposure = 1.0;
+    if (room.lights[0]) lamp.position.set(...room.lights[0]);
+    lamp.intensity = 4 + 6 * nightK; room.daylight(1 - nightK);
+  } else if (outdoor) {
+    sun.color.setHex(outdoor.sun); sun.intensity = outdoor.si; hemi.color.setHex(outdoor.sky); hemi.groundColor.setHex(outdoor.gnd);
+    hemi.intensity = outdoor.hi; amb.intensity = outdoor.ai; scene.environmentIntensity = outdoor.env; renderer.toneMappingExposure = outdoor.exp;
+    lamp.intensity = 0; outdoor = null;
+  }
+}
+const fadeEl = Object.assign(document.createElement('div'), { id: 'fade' });
+Object.assign(fadeEl.style, { position: 'fixed', inset: 0, background: '#000', opacity: 0, pointerEvents: 'none', zIndex: 40 });
+document.body.append(fadeEl);
+player.add(blobMesh(0.75));   // a soft shadow under you indoors (only the indoor camera draws it)
+// sitting down and getting up are moves, not cuts: the body turns and steps onto the seat while sit_enter
+// bends it down (hips drop between 0.4 and 1 s), or rises with sit_exit and steps off. seatK: how far it
+// is lowered onto the seat (0 standing .. 1 seated), for ridePlace
+let seatMove = null, seatK = 0;
 function sitDown(s = room.seatNear(player.position.x, player.position.z, SIT_REACH, takenSeats())) {
   if (!s || !homes.inside || homes.busy || Math.hypot(s.x - player.position.x, s.z - player.position.z) > SIT_REACH) return false;   // only a seat within reach
   stopWalk(); jump.h = 0; jump.phase = null;
-  sat = s; player.position.x = s.x; player.position.z = s.z; player.rotation.y = s.yaw;
-  yaw = s.yaw + Math.PI; sitBtn(true); return true;
+  sat = s; seatMove = { down: true, t: 0, glide: 0.4, l0: 0.35, l1: 1.0, from: [player.position.x, player.position.z, player.rotation.y], to: [s.x, s.z, s.yaw] };
+  yaw = s.yaw + Math.PI + 0.45; sitBtn(true); return true;   // over your shoulder, a three-quarter view
 }
 function standUp() {
-  if (!sat) return;
+  if (!sat || seatMove) return;
   const [x, z] = room.standSpot(sat, (x, z) => !blocked(x, z));
-  player.position.x = x; player.position.z = z; sat = null; sitBtn(true);
+  seatMove = { down: false, t: 0, glide: 0.8, l0: 0.1, l1: 0.7, from: [player.position.x, player.position.z, sat.yaw], to: [x, z, sat.yaw] };
+  sitBtn(true);   // sat stays until you are up: the seat holds you, walking waits
+}
+function seatStep(dt) {
+  const m = seatMove; if (!m) return;
+  m.t += dt;
+  const ease = x => x * x * (3 - 2 * x), g = ease(Math.min(1, m.t / m.glide)), l = ease(THREE.MathUtils.clamp((m.t - m.l0) / (m.l1 - m.l0), 0, 1));
+  player.position.x = m.from[0] + (m.to[0] - m.from[0]) * g; player.position.z = m.from[1] + (m.to[1] - m.from[1]) * g;
+  const da = Math.atan2(Math.sin(m.to[2] - m.from[2]), Math.cos(m.to[2] - m.from[2])); player.rotation.y = m.from[2] + da * g;
+  seatK = m.down ? l : 1 - l;
+  if (m.t >= m.l1 + 0.1) { seatMove = null; if (!m.down) { sat = null; seatK = 0; sitBtn(true); } }
 }
 const sitButton = Object.assign(document.createElement('button'), { id: 'sitbtn', hidden: true });
 document.body.append(sitButton);
 sitButton.addEventListener('click', e => { e.stopPropagation(); sat ? standUp() : sitDown(); });
 let sitAt = '';
 function sitBtn(force) {
-  const s = sat ? null : homes.inside && !homes.busy ? room.seatNear(player.position.x, player.position.z, SIT_REACH, takenSeats()) : null;
-  const key = sat ? 'up' : s ? 'sit' : '';
+  const s = sat ? null : homes.inside && !homes.busy && avatar.speed < 0.3 ? room.seatNear(player.position.x, player.position.z, SIT_REACH, takenSeats()) : null;   // not while walking past
+  const key = seatMove ? '' : sat ? 'up' : s ? 'sit' : '';
   if (!force && key === sitAt) return; sitAt = key;
   sitButton.hidden = !key; sitButton.textContent = sat ? '🧍 Stand up (E)' : '🪑 Sit down (E)';
 }
@@ -1342,6 +1411,7 @@ function applyTime(name) {
   for (const p of pools) p.visible = nightK > 0.02;
   traffic?.setNight(nightK);
   shadowDirty = true;
+  if (indoorOn) { outdoor = null; roomLight(true); }   // inside when the time changes: the room's light, from the new town values
 }
 document.getElementById('tod').onchange = e => applyTime(e.target.value);
 document.getElementById('quality').onchange = e => { const u = new URL(location.href); u.searchParams.set('quality', e.target.value); location.href = u.href; };
@@ -1412,15 +1482,16 @@ function setFirstPerson(on) {
   dispatchEvent(new Event('toycity:view'));
 }
 // in the driver's seat the dashboard is half a metre away: a closer near plane and a wider lens there
-function lens(seat) {
-  const near = seat ? 0.06 : 0.5, fov = seat ? 68 : 55;
+// in a house: a closer near plane (furniture a metre away is not cut off) and a wider lens for a small room
+function lens(seat, inside) {
+  const near = seat ? 0.06 : inside ? 0.1 : 0.5, fov = seat ? 68 : inside ? 62 : 55;
   if (camera.near !== near || camera.fov !== fov) { camera.near = near; camera.fov = fov; camera.updateProjectionMatrix(); }
 }
 // the cracked windscreen over the driver's-seat view of a wrecked car
 const crackEl = document.getElementById('cracks');
 function cracks(on) { if (crackEl && crackEl.hidden === !!on) crackEl.hidden = !on; }
 function chaseCam() {
-  lens(firstPerson && you.seated);
+  lens(firstPerson && you.seated, room.active);
   if (firstPerson) {
     const look = 0.42 - pitch;                     // drag up and down to look up and down
     if (ride) {
@@ -1442,11 +1513,29 @@ function chaseCam() {
   }
   for (const c of player.children) c.visible = c.userData.card !== undefined ? !ride && !homes.inside : ride ? false : !driving.driving || !!c.userData.car || driving.rider;   // in a car you see the car, not the person (and your card, if you have one)
   cracks(false);
-  // in a house: from a little above head height, looking down on you (never from the floor)
-  const pe = room.active ? Math.max(pitch, 0.55) : pitch + Math.max(0, 1.2 - pitch) * THREE.MathUtils.smoothstep(dist, 30, 300);
-  camera.position.lerp(tmpC.set(Math.sin(yaw) * Math.cos(pe), Math.sin(pe), Math.cos(yaw) * Math.cos(pe)).multiplyScalar(dist).add(player.position), room.active ? 0.5 : 0.18);
-  room.camera(camera.position, player.position);   // in a house the camera stays inside its walls
-  camera.lookAt(player.position.x, player.position.y + (room.active ? (sat ? 0.9 : 1.2) : 1.6), player.position.z);
+  if (room.active) return roomCam();
+  const out = camIn; camIn = false;   // just out of a house: start behind you, not 40 m down in the room
+  const pe = pitch + Math.max(0, 1.2 - pitch) * THREE.MathUtils.smoothstep(dist, 30, 300);
+  camera.position.lerp(tmpC.set(Math.sin(yaw) * Math.cos(pe), Math.sin(pe), Math.cos(yaw) * Math.cos(pe)).multiplyScalar(dist).add(player.position), out ? 1 : 0.18);
+  camera.lookAt(player.position.x, player.position.y + 1.6, player.position.z);
+}
+// in a house: the camera hangs on a boom from just above your head, over your right shoulder (you stand a
+// little left of the middle, so the room and the people in it stay in view); the boom shortens at walls
+// and tall furniture (interior.js camera) and the camera eases after you instead of jumping. Seated:
+// higher, so the sofa's back does not hide you. Coming in, it starts in place (no fly-down from the street).
+let camDt = 1 / 60, camIn = false;
+const camLook = new THREE.Vector3(), head = new THREE.Vector3();
+function roomCam() {
+  const snap = !camIn; camIn = true;
+  const pe = THREE.MathUtils.clamp(pitch, sat ? 0.5 : 0.1, 0.8), d = sat ? 2.4 : dist;
+  head.set(player.position.x + Math.cos(yaw) * 0.3, player.position.y + (sat ? 1.0 : 1.35), player.position.z - Math.sin(yaw) * 0.3);
+  room.clamp(head, 0.3);
+  tmpC.set(Math.sin(yaw) * Math.cos(pe), Math.sin(pe), Math.cos(yaw) * Math.cos(pe)).multiplyScalar(d).add(head);
+  room.camera(tmpC, head);
+  const k = snap ? 1 : 1 - Math.exp(-camDt * 9);
+  camera.position.lerp(tmpC, k); camLook.lerp(head, k); if (snap) camLook.copy(head); camera.lookAt(camLook);
+  // pushed up against your back: leave your body out rather than fill the screen with it
+  if (avatar.model) avatar.model.visible = camera.position.distanceTo(camLook) > 0.55;
 }
 // scratch vectors for the frame loop (nothing is made per frame)
 const tmpC = new THREE.Vector3(), tmpF = new THREE.Vector3(), tmpR = new THREE.Vector3(), tmpM = new THREE.Vector3();
@@ -1458,7 +1547,7 @@ function peerNear() {
   return false;
 }
 function frame(now) {
-  const dt = Math.min((now - last) / 1000, AGENT ? 0.1 : 0.05); last = now;
+  const dt = Math.min((now - last) / 1000, AGENT ? 0.1 : 0.05); last = now; camDt = dt;
   solids.beginFrame();
 
   // apply decoded squares within a small per-frame time budget: one near square (the big one) per frame,
@@ -1528,7 +1617,8 @@ function frame(now) {
     if (keys['a'] || keys['arrowleft']) v.sub(right); if (keys['d'] || keys['arrowright']) v.add(right);
     const jm = Math.hypot(joy.x, joy.y);
     if (jm > 0.15) v.addScaledVector(fwd, -joy.y).addScaledVector(right, joy.x);
-    if (sat && !homes.inside) { sat = null; sitBtn(true); }   // went outside (Step outside): nothing to stand up from
+    seatStep(dt);
+    if (sat && !homes.inside) { sat = null; seatMove = null; seatK = 0; sitBtn(true); }   // went outside (Step outside): nothing to stand up from
     if (sat && (v.lengthSq() > 0 || goal)) { standUp(); stopWalk(); v.set(0, 0, 0); }
     if (v.lengthSq() > 0) stopWalk();
     // walk, or run with Shift or the joystick pushed to its edge; click-to-go speeds up for long trips
@@ -1608,7 +1698,7 @@ function frame(now) {
   player.position.y = swim.on ? swim.y : (room.active ? room.floorY : 0.15) + jump.h + (fling.on ? fling.h : 0);
   // sharp shadows that follow the player
   const R = 40 + Math.min(dist, 150) * 0.9;
-  sun.target.position.copy(player.position); sun.position.copy(player.position).add(SUN_OFFSET);
+  sun.target.position.copy(player.position); sun.position.copy(player.position).add(room.active ? room.skyDir : SUN_OFFSET);
   if (sc.right !== R) { sc.left = -R; sc.right = R; sc.top = R; sc.bottom = -R; sc.updateProjectionMatrix(); shadowDirty = true; }
   scene.fog.near = 300 + dist; scene.fog.far = (OV ? Q.horizon : Q.far) + dist;
   // the shadow map is redrawn when something in it moved: the camera (the map follows it), me, a car,
@@ -1619,6 +1709,7 @@ function frame(now) {
   camAt.copy(camera.position); camQ.copy(camera.quaternion);
   if (shadowDirty && !room.active) { renderer.shadowMap.needsUpdate = true; shadowDirty = false; }   // indoors no shadows are drawn
   indoorView();
+  hideUnderOthers();
 
   // an agent's headless browser draws only when the agent asks to see (rendering there is slow, and
   // a slow frame rate would make it slower than a person on foot)
@@ -1653,7 +1744,7 @@ if (AGENT) window.__agent = {
   get drawing() { return AGENT.draw > 0; },
 };
 if (AGENT) import('./agent.js').catch(e => console.warn('agent api', e));   // window.__agentApi for tools/mcp (it also loads it itself)
-window.__city = { ovTiles, solids, walker, driving, radio, nav, knockDown, card, fling, homes, health, traffic, peds, birds, swim, startSwim, wetAt, groundAt, room, sitDown, standUp, get sitting() { return sat; }, setTraffic, nearestPlace, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, jump, toRD, rdToWgs, ORX, ORY, info, grid, you, stats: null };
+window.__city = { ovTiles, solids, walker, driving, parked, radio, nav, knockDown, card, fling, homes, health, traffic, peds, birds, swim, startSwim, wetAt, groundAt, room, sitDown, standUp, get sitting() { return sat; }, setTraffic, nearestPlace, toggleCar, autopilot, autoTo, findPlace, blocked, setYaw: v => { yaw = v; }, setView: (y, p, d) => { yaw = y; pitch = p; dist = d; }, player, tiles, camera, goTo, jump, toRD, rdToWgs, ORX, ORY, info, grid, you, stats: null };
 // ---------- social layer: other people, voice and background sounds (web/mp/, ?mp=0 turns it off) ----------
 // It only reads the player's position and the trees and parked cars around it; nothing here depends on it.
 let social = null;

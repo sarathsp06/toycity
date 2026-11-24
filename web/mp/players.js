@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { loadAvatar, myLook, poseLayer } from '../avatar.js';
 import { FRONT } from '../vehicle.js';
+import { blobMesh } from '../interior.js';
 import { POSE, FALL_DOWN, isLying, isSwimming, isPassenger, isBike, carModel } from './state.js';
 // where the body goes to sit on a seat whose top is h metres up: the sit clip has the hips 0.59 m over
 // the feet and 0.28 m behind them, so lift (or lower) it to rest the thighs on the seat (hip joint 8 cm
@@ -33,6 +34,7 @@ export function makePlayer(id, name, look) {
   const group = new THREE.Group();
   const ring = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.52, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x7CFC9A, transparent: true, opacity: 0, depthWrite: false }));
   ring.position.y = 0.05; group.add(ring);
+  group.add(blobMesh(0.75));   // their shadow indoors (only the indoor camera draws it)
   const p = { id, group, model: null, mixer: null, act: null, pose: null, poseN: 0, up: 0, ring, name: null, tag: null, speaking: 0, look: null };
   setName(p, name);
   setLook(p, look);
@@ -88,8 +90,14 @@ export function seatIn(p, model) {
 function pickPose(p, speed) {
   const P = p.pose; if (!P) return;
   if (p.riding || p.seat === 'bike') return P.set('drive');
-  if (p.seat || p.sitting) return P.set('sit_idle');   // in a car seat, or on a chair in a house
+  if (p.seat) return P.set('sit_idle');   // in a car seat
+  if (p.sitting) {   // on a seat in a house: sit down once, then sit (talking: sit_talk)
+    if ((P.name === 'sit_enter' && P.done) || P.name === 'sit_idle' || P.name === 'sit_talk') return P.set(p.speaking > 0.02 ? 'sit_talk' : 'sit_idle', { fade: 0.3 });
+    if (P.name !== 'sit_enter') P.set('sit_enter', { once: true, fade: 0.2 });
+    return;
+  }
   if (p.carMesh || p.inside) return P.set(null);
+  if (p.seatK > 0 && /^sit_(enter|idle|talk)$/.test(P.name)) return P.set('sit_exit', { once: true, fade: 0.15 });   // getting up
   if (isSwimming(p.poseN)) return P.set(speed > 0.25 ? 'swim' : 'swim_idle', { fade: 0.3 });
   if (p.poseN === POSE.flung) return P.set('hit', { once: true });
   if (isLying(p.poseN)) { if (P.name !== 'fall') P.set('fall', { once: true, from: FALL_DOWN }); return; }
@@ -101,7 +109,10 @@ function pickPose(p, speed) {
 
 export function animate(p, speed, dt) {
   if (p.seat || p.sitting) speed = 0;
-  if (p.model && !p.seat && !p.riding) { const o = p.sitting ? sitOffset(p.sitting.h) : null; p.model.position.y = o ? o.y : 0; p.model.position.z = o ? o.z : 0; }
+  // lowered onto the seat as sit_enter bends the body (about 1 s), raised again with sit_exit
+  if (p.sitting) p.sitH = p.sitting.h;
+  p.seatK = THREE.MathUtils.clamp((p.seatK || 0) + (p.sitting ? dt : -dt / 0.7), 0, 1);
+  if (p.model && !p.seat && !p.riding) { const o = p.seatK ? sitOffset(p.sitH) : null, k = p.seatK * p.seatK * (3 - 2 * p.seatK); p.model.position.y = o ? o.y * k : 0; p.model.position.z = o ? o.z * k : 0; }
   if (p.riding) speed = 0;   // sitting still on the bike, whatever its speed
   const w = THREE.MathUtils.clamp(speed / 1.4, 0, 1), r = THREE.MathUtils.clamp((speed - 2.2) / 1.8, 0, 1);
   if (p.mixer) {

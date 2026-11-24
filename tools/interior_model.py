@@ -92,7 +92,7 @@ def material(name, col, rough=0.8, emit=None, tex=None, metal=0.0):
 
 FLOOR = material("floor", (1, 1, 1), 0.5, tex="laminate_floor_02")
 TILES = material("tiles", (1, 1, 1), 0.4, tex="floor_tiles_06")
-WALLS = material("walls", (1, 1, 1), 0.9, tex="beige_wall_001")
+WALLS = material("walls", (0.72, 0.66, 0.58), 0.9)   # plain warm plaster: the photo texture read as muddy taupe indoors
 CEIL = material("ceiling", (0.95, 0.95, 0.93), 0.95)
 TRIM = material("trim", (0.97, 0.97, 0.95), 0.5)
 SKY = material("sky", (0.62, 0.8, 0.95), 0.2, emit=(0.62, 0.8, 0.95))   # the window: daylight, it glows
@@ -104,7 +104,7 @@ STEEL = material("steel", (0.75, 0.76, 0.78), 0.25, metal=1.0)
 HOB = material("hob", (0.02, 0.02, 0.02), 0.08)
 SCREEN = material("screen", (0.01, 0.01, 0.015), 0.05)
 SHADOWLINE = material("gap", (0.25, 0.24, 0.22), 0.8)
-RUG = material("rug", (0.32, 0.36, 0.42), 1.0)
+RUG = material("rug", (0.42, 0.25, 0.17), 1.0)       # a warm wool rug ties the sofas together
 TVWOOD = material("tvwood", (1, 1, 1), 0.5, tex="wood_cabinet_worn_long")
 
 
