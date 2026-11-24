@@ -40,7 +40,7 @@ All distances and rates are in `web/mp/config.js`.
   | 9 | `card` | 0 none, 1 yellow, 2 red |
   | 10 | `pose` | see below |
   | 11 | `up` | metres off the ground, −3..20 (below 0: swimming at the water level) |
-  | 12 | `caps` | what they can do: `v` voice. Missing: an older game (guessed from the name: 🤖 agents have none) |
+  | 12 | `caps` | what they can do: `v` voice, `t` an AI player working out its reply (a thought bubble). Missing: an older game (guessed from the name: 🤖 agents have none) |
 
   Poses (`POSE` in `state.js`, with `isInside`, `isLying`, `isSwimming`, `isPassenger`, `isBike`, `parseCar`):
 
