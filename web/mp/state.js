@@ -3,6 +3,9 @@
 //
 // Wire format (unchanged since the 13-slot release, so every deployed game still understands it):
 //   [seq, x, y, h, v, name, look, mic, car, card, pose, up, caps]
+// plus, only while there is one, a 14th slot: parked, the car this player got out of and left on the
+// street, "model:colour@X,Y,h" (RD metres, heading), so everyone sees it standing there and a passenger
+// can sit on in it. Older games ignore it.
 // Older games send fewer slots (at least the first six); missing ones decode to their defaults.
 import { cleanName } from './logic.js';
 
@@ -13,6 +16,7 @@ export const CARD = Object.freeze({ none: 0, yellow: 1, red: 2 });
 export const UP_MIN = -3, UP_MAX = 20;   // metres: below 0 swimming at the water level, above 0 in the air
 export const FALL_DOWN = 0.93;           // where in the fall clip someone lying is held (flat on the ground)
 const CAR = /^[a-z0-9_]{1,12}:[0-9a-f]{1,6}$/;   // "model:colour" while driving, "ride:N" as a passenger
+const PARKED = /^([a-z0-9_]{1,12}):([0-9a-f]{1,6})@(-?[0-9.]{1,12}),(-?[0-9.]{1,12}),(-?[0-9.]{1,8})$/;
 
 export const isInside = pose => pose === POSE.home;                       // in a house: drawn only for others in the same house
 // sitting on a chair or the sofa in a house: pose home with this height (a value nothing else sends
@@ -24,6 +28,12 @@ export const isSwimming = pose => pose === POSE.swim;
 export const isPassenger = car => typeof car === 'string' && car.startsWith('ride:');
 export const isBike = car => typeof car === 'string' && car.startsWith('bike');
 export const carModel = car => { const i = car ? car.indexOf(':') : -1; return i > 0 ? car.slice(0, i) : car || ''; };
+// "suv:ff8800@92000.1,437000.2,1.571" -> { model, colour, x, y, h } (RD metres), or null
+export function parseParked(v) {
+  const m = typeof v === 'string' && v.length < 64 && PARKED.exec(v); if (!m) return null;
+  const x = +m[3], y = +m[4], h = +m[5];
+  return Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(h) ? { model: m[1], colour: parseInt(m[2], 16), x, y, h } : null;
+}
 // "suv:ff8800" -> { model: 'suv', colour: 0xff8800, ride: false, seat: null }; "ride:0" -> { model: 'ride', ride: true, seat: 0 }
 export function parseCar(car) {
   if (!car || !CAR.test(car)) return null;
@@ -33,7 +43,10 @@ export function parseCar(car) {
 
 // named fields -> the wire tuple (a new array: the transport may send it after this returns)
 export function encodeState(s) {
-  return [s.seq, +s.x.toFixed(2), +s.y.toFixed(2), +s.h.toFixed(3), +s.v.toFixed(2), s.name, s.look, s.mic ? 1 : 0, s.car || '', s.card || 0, s.pose || 0, s.up || 0, s.caps ?? 'v'];
+  const t = [s.seq, +s.x.toFixed(2), +s.y.toFixed(2), +s.h.toFixed(3), +s.v.toFixed(2), s.name, s.look, s.mic ? 1 : 0, s.car || '', s.card || 0, s.pose || 0, s.up || 0, s.caps ?? 'v'];
+  const p = s.parked;
+  if (p) t.push(`${p.model}:${p.colour.toString(16)}@${p.x.toFixed(1)},${p.y.toFixed(1)},${p.h.toFixed(3)}`);
+  return t;
 }
 
 // the wire tuple -> named fields, written into `into` (reused per message: no allocation), or null
@@ -51,5 +64,6 @@ export function decodeState(d, into = {}) {
   into.pose = Number.isInteger(d[10]) && d[10] >= 0 && d[10] <= 6 ? d[10] : 0;
   into.up = Number.isFinite(d[11]) ? Math.max(UP_MIN, Math.min(UP_MAX, d[11])) : 0;
   into.caps = typeof d[12] === 'string' ? d[12].replace(/[^a-z]/g, '').slice(0, 8) : undefined;   // undefined: an older game, guess from the name
+  into.parked = parseParked(d[13]);
   return into;
 }

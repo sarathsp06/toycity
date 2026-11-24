@@ -40,7 +40,8 @@ export async function start({ scene, camera, player, toRD, fromRD, slug, params,
       // someone driving is as big as their car, and carries its speed (a fast one wrecks a car it hits)
       if (isPassenger(p.car)) return { x: 1e9, z: 1e9, r: 0 };   // a passenger is inside a car, not in the way
       return p.car ? { ...footprintOf(carModel(p.car), g.x, g.z, p.player.group.rotation.y), v: p.speed || 0 } : { x: g.x, z: g.z, r: PERSON.r, id: p.id };
-    }));
+    }).concat([...presence.peers.values()].filter(p => p.parked?.sx !== undefined && p.dist < 60)   // the cars they left on the street
+      .map(p => footprintOf(p.parked.model, p.parked.sx, p.parked.sz, p.parked.h))));
   // Calls. The people near you are listed as "📞 Talk to …" buttons at the bottom of the screen; tapping
   // one (or the person themselves, or Talk in the people list) rings them. Only people in the same call
   // hear each other, at full volume wherever they stand. Ringing someone else while in a call adds them.

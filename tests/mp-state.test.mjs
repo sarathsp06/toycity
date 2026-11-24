@@ -13,7 +13,7 @@ test('encode gives the 13-slot tuple deployed games send', () => {
 test('decode round-trips into named fields, reusing the object', () => {
   const into = {}, s = decodeState(encodeState(full), into);
   assert.equal(s, into);
-  assert.deepEqual({ ...s }, { seq: 7, x: 92000.12, y: 437000.46, h: 1.235, v: 1.23, name: 'Ada', look: 'zuri:3', mic: true, car: 'suv:ff8800', card: 1, pose: 6, up: -0.5, caps: 'v' });
+  assert.deepEqual({ ...s }, { seq: 7, x: 92000.12, y: 437000.46, h: 1.235, v: 1.23, name: 'Ada', look: 'zuri:3', mic: true, car: 'suv:ff8800', card: 1, pose: 6, up: -0.5, caps: 'v', parked: null });
   assert.equal(decodeState([8, 1, 2, 3, 4, 'Bo'], into), into);
   assert.equal(into.name, 'Bo'); assert.equal(into.car, ''); assert.equal(into.caps, undefined, 'an older game: no caps');
 });
@@ -49,4 +49,14 @@ test('sitting in a house: pose home with the SEATED height, which older games si
   const d = decodeState(encodeState({ seq: 1, x: 1, y: 2, h: 0, v: 0, name: 'Ann', look: '', pose: POSE.home, up: SEATED }));
   assert.equal(d.up, SEATED); assert.ok(isInside(d.pose)); assert.ok(isSeated(d.pose, d.up));
   assert.ok(!isSeated(POSE.home, 0)); assert.ok(!isSeated(POSE.swim, SEATED));   // swimming below the surface is not sitting
+});
+
+test('a car left on the street travels as a 14th slot, only while there is one', async () => {
+  const { parseParked } = await import('../web/mp/state.js');
+  const parked = { model: 'suv', colour: 0xff8800, x: 92000.14, y: 437000.26, h: 1.5708 };
+  const d = encodeState({ ...full, parked });
+  assert.equal(d.length, 14); assert.equal(d[13], 'suv:ff8800@92000.1,437000.3,1.571');
+  assert.deepEqual(decodeState(d, {}).parked, { model: 'suv', colour: 0xff8800, x: 92000.1, y: 437000.3, h: 1.571 });
+  assert.equal(encodeState(full).length, 13); assert.equal(decodeState(encodeState(full), {}).parked, null);
+  for (const bad of ['suv:ff8800', 'SUV:ff@1,2,3', 'suv:ff@1,2', 'suv:ff@a,b,c', 5, 'x'.repeat(80)]) assert.equal(parseParked(bad), null, String(bad));
 });

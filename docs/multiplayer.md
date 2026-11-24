@@ -26,7 +26,7 @@ All distances and rates are in `web/mp/config.js`.
 ## Presence
 
 - **Rooms are the RD square only** (`nl:<square>`), never the region name. Someone playing the Barendrecht map and someone on the Rotterdam map at the same spot are in the same room. Including the region slug once split players who had different maps open, and a friend never saw the other person.
-- **State:** a 13-slot tuple, encoded and checked in one place, `web/mp/state.js` (`encodeState` / `decodeState` into named fields). It's sent 10 times a second while moving, once a second while standing still, and immediately after a change or when someone joins. Older games send only the first 6–8 slots; the missing ones decode to their defaults, and anything out of range falls back to its default instead of dropping the message.
+- **State:** a 13-slot tuple (plus an optional 14th slot, `model:colour@x,y,heading`, while the car you got out of stands in the street: everyone draws it there and bumps into it, and anyone riding with you stays in it until they press E or you drive on), encoded and checked in one place, `web/mp/state.js` (`encodeState` / `decodeState` into named fields). It's sent 10 times a second while moving, once a second while standing still, and immediately after a change or when someone joins. Older games send only the first 6–8 slots; the missing ones decode to their defaults, and anything out of range falls back to its default instead of dropping the message.
 
   | Slot | Field | Meaning |
   |---|---|---|

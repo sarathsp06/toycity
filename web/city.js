@@ -862,17 +862,25 @@ function driverNear() {
   return best;
 }
 // the passenger seat: beside the driver (front right), or behind the rider on a motorbike
-function seat(p, out) {
-  const name = carModel(p.car), g = p.player.group, h = g.rotation.y;
+const tmpS = new THREE.Vector3();
+function seat(p, out) { const g = p.player.group; return seatAt(carModel(p.car), g.position.x, g.position.z, g.rotation.y, out); }
+function seatAt(name, x, z, h, out) {
   const [along, across] = PASSENGER[name] || PASSENGER.suv, [lx, lz] = seatLocal(name, along, -across);   // left of the driver
-  return out.set(g.position.x + lx * Math.cos(h) + lz * Math.sin(h), 0.15, g.position.z - lx * Math.sin(h) + lz * Math.cos(h));
+  return out.set(x + lx * Math.cos(h) + lz * Math.sin(h), 0.15, z - lx * Math.sin(h) + lz * Math.cos(h));
 }
 function toggleCar() {
   if (health.out) return;   // knocked out
   if (fly) toggleFly();
   if (ride) {
-    const g = ride.player?.group, h = g ? g.rotation.y : 0;
-    if (g) { player.position.x = g.position.x + Math.sin(h) * 2.2; player.position.z = g.position.z + Math.cos(h) * 2.2; }
+    const pk = ride.parked?.sx !== undefined && !ride.car ? ride.parked : null;
+    if (pk) {   // out of the parked car through your own door: beside the passenger seat, clear of the car
+      const s = seatAt(pk.model, pk.sx, pk.sz, pk.h, tmpS), dx = s.x - pk.sx, dz = s.z - pk.sz, d = Math.hypot(dx, dz) || 1, out = 1.4;
+      player.position.x = s.x + dx / d * out; player.position.z = s.z + dz / d * out;
+      if (blockedAt(player.position.x, player.position.z)) { player.position.x = pk.sx - dx / d * (d + out); player.position.z = pk.sz - dz / d * (d + out); }
+    } else {
+      const g = ride.player?.group, h = g ? g.rotation.y : 0;
+      if (g) { player.position.x = g.position.x + Math.sin(h) * 2.2; player.position.z = g.position.z + Math.cos(h) * 2.2; }
+    }
     note('👋 Thanks for the ride, ' + (ride.name || 'friend') + '!'); ride = null; dist = walkDist; needUnstick = true;
     carBtn(true); return;
   }
@@ -1458,9 +1466,15 @@ function frame(now) {
   const mode = you.mode;
   if (mode === 'fly') orbit.update();
   else if (mode === 'passenger') {
-    // the driver's car carries you; if they get out or leave, so do you
-    if (!ride.player || !ride.car || isPassenger(ride.car) || !social?.presence.peers.has(ride.id)) toggleCar();
+    // the driver's car carries you. When they get out it stays in the street and you sit on in it
+    // (E to get out, or they get back in and drive on); if they leave altogether, so do you.
+    const parkedCar = ride.parked?.sx !== undefined && !ride.car ? ride.parked : null;
+    if (parkedCar) {
+      seatAt(parkedCar.model, parkedCar.sx, parkedCar.sz, parkedCar.h, player.position); player.rotation.y = parkedCar.h;
+      if (!ride.waiting) { ride.waiting = true; note(`🚗 ${ride.name || 'Your friend'} got out. E to get out too, or wait for them.`); carBtn(true); }
+    } else if (!ride.player || !ride.car || isPassenger(ride.car) || !social?.presence.peers.has(ride.id)) toggleCar();
     else {
+      ride.waiting = false;
       seat(ride, player.position); player.rotation.y = ride.player.group.rotation.y;
       const h = ride.player.group.rotation.y, f = FRONT[carModel(ride.car)] ?? 1, behind = Math.atan2(-Math.cos(h) * f, Math.sin(h) * f);
       if (!dragging) { let d = behind - yaw; d = Math.atan2(Math.sin(d), Math.cos(d)); yaw += d * Math.min(1, dt * 2.5); }
@@ -1629,7 +1643,9 @@ function surroundings() {
 }
 if (params.get('mp') !== '0') import('./mp/index.js').then(m => m.start({
   scene, camera, player, toRD, fromRD, slug, params, surroundings, useAvatar, solids, goToRD: arriveNear, find: who => nav.find(who),
-  vehicle: { get shared() { return ride ? 'ride:0' : driving.shared; }, make: (name, color) => makeCar(CAR_MODELS, name, color),
+  vehicle: { get shared() { return ride ? 'ride:0' : driving.shared; },
+    // the car I got out of, standing in the street: everyone sees it there (and my passengers sit on in it)
+    get parked() { const l = driving.left; if (!l || driving.driving) return null; const [X, Y] = toRD(l.x, l.z); return { model: l.model, colour: l.color, x: X, y: Y, h: l.heading }; }, make: (name, color) => makeCar(CAR_MODELS, name, color),
     get mine() { return driving.driving ? { model: driving.model, x: player.position.x, z: player.position.z, h: player.rotation.y } : null; } }, view: { get eyes() { return firstPerson; }, set eyes(v) { setFirstPerson(v); } },
   hud: document.getElementById('mp'), knockDown, homes, ground: groundAt, room,
   // what others see of you besides where you are: your card, lying flat or flying, and how high you are

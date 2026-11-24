@@ -45,7 +45,7 @@ these modules instead of keeping their rules itself.
 
 | Module | Owns | Interface |
 |---|---|---|
-| `state.js` | The wire format of a player's state: the 13-slot tuple, the pose numbers, card levels, the car string. Kept compatible with clients already out there. | `encodeState`/`decodeState`, `parseCar`, `POSE`, `CARD`, `FALL_DOWN`, `isInside`, `isLying`, `isSwimming`, `isPassenger`, `isBike`, `carModel` |
+| `state.js` | The wire format of a player's state: the 13-slot tuple (plus an optional 14th: the car you left in the street), the pose numbers, card levels, the car string. Kept compatible with clients already out there. | `encodeState`/`decodeState`, `parseCar`, `POSE`, `CARD`, `FALL_DOWN`, `isInside`, `isLying`, `isSwimming`, `isPassenger`, `isBike`, `carModel` |
 | `call.js` | A call: ringing, answering, declining, joining, leaving, time-outs, who is in it, and agreeing on that between peers. No DOM. | `createCall({ self, send, now, peers, voice, autoAnswer })` |
 | `room.js` | A room that is not a place on the map: members with names and roles, join/leave/message events. Home knocking uses it; rented meeting rooms would too. | `openRoom(channel, { id, name, role })` |
 | `transport.js` | How audio and signals reach a peer. Two adapters: peer-to-peer (WebRTC via Trystero) and an in-memory loopback for tests. A meeting server (SFU) would be a third. | `p2pTransport(presence)`, `createLoopback()`, `createSender(transport, wants)` |

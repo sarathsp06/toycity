@@ -36,7 +36,7 @@ export async function createPresence({ scene, player, toRD, fromRD, slug, vehicl
   const look = myLook();
   let myName = cleanName(localStorage.getItem('toycity.name')) || 'Visitor ' + (100 + Math.floor(Math.random() * 900));
   let myMic = false;
-  let seq = 0, sendT = 0, lastSent = null, roomT = 0, lastCar = '', lastExtra = [0, 0, 0, 'v'];
+  let seq = 0, sendT = 0, lastSent = null, roomT = 0, lastCar = '', lastParked = '', lastExtra = [0, 0, 0, 'v'];
   const rooms = new Map();          // key -> { room, send }
   const sent = new Map(), gone = []; let lastState = null;   // scratch for update(), so nothing is allocated per frame
   const firstRoom = p => { let best = null; for (const k of p.rooms) if (rooms.has(k) && (best === null || k < best)) best = k; return best; };
@@ -67,6 +67,7 @@ export async function createPresence({ scene, player, toRD, fromRD, slug, vehicl
       if (s.car !== p.car) { p.car = s.car; if (p.player) setVehicle(p.player, s.car, vehicle?.make); }
       // their card, pose (state.js POSE), metres up or down, and what they can do ('v' voice)
       p.card = s.card; p.pose = s.pose; p.up = s.up; p.caps = s.caps;
+      showParked(p, s.parked);
     });
     // call invitations and answers go straight to one player (see index.js)
     const [sendCall, receiveCall] = room.makeAction('call');
@@ -81,7 +82,21 @@ export async function createPresence({ scene, player, toRD, fromRD, slug, vehicl
     r.room.leave(); rooms.delete(key);
     for (const p of [...peers.values()]) { p.rooms.delete(key); if (!p.rooms.size) drop(p); }
   }
+  // the car a player got out of, standing where they left it (for everyone, not only them)
+  function showParked(p, k) {
+    const same = k && p.parked && k.model === p.parked.model && k.colour === p.parked.colour && Math.abs(k.x - p.parked.x) < 0.05 && Math.abs(k.y - p.parked.y) < 0.05 && Math.abs(k.h - p.parked.h) < 0.01;
+    if (same) return;
+    if (p.parkedMesh) { scene.remove(p.parkedMesh); p.parkedMesh = null; }
+    p.parked = k || null;
+    if (!k || !vehicle?.make) return;
+    const [x, z] = fromRD(k.x, k.y), mesh = vehicle.make(k.model, k.colour);
+    if (!mesh) return;
+    mesh.position.set(x, 0, z); mesh.rotation.y = k.h;
+    if (k.model === 'bike') { mesh.rotation.order = 'YXZ'; mesh.rotation.x = 0.16; }   // on its side stand
+    scene.add(mesh); p.parkedMesh = mesh; p.parked = { ...k, sx: x, sz: z };
+  }
   function drop(p) {
+    showParked(p, null);
     for (const f of listeners.leave) f(p);
     if (p.player) disposePlayer(p.player);
     peers.delete(p.id);
@@ -110,10 +125,12 @@ export async function createPresence({ scene, player, toRD, fromRD, slug, vehicl
     // 10 updates a second while moving, one a second standing still, and at once after a change
     sendT -= dt;
     const card = body?.card || 0, pose = body?.pose || 0, up = body?.y || 0, caps = body?.caps ?? 'v', car = vehicle?.shared || '';
+    const parked = vehicle?.parked || null, pk = parked ? parked.model + parked.x.toFixed(1) + parked.y.toFixed(1) + parked.h.toFixed(3) : '';
+    if (pk !== lastParked) { lastParked = pk; lastSent = null; }
     if (car !== lastCar || card !== lastExtra[0] || pose !== lastExtra[1] || up !== lastExtra[2] || caps !== lastExtra[3]) { lastCar = car; lastExtra = [card, pose, up, caps]; lastSent = null; }
     const extra = lastExtra;
     if (!lastSent || (sendT <= 0 && (speed > 0.05 || extra[1] === 1 || now - lastSent >= 1 / MP.idleHz))) {
-      const state = encodeState({ seq: ++seq, x: X, y: Y, h: player.rotation.y, v: speed, name: myName, look, mic: myMic, car: vehicle?.shared || '', card: extra[0], pose: extra[1], up: extra[2], caps: extra[3] });
+      const state = encodeState({ seq: ++seq, x: X, y: Y, h: player.rotation.y, v: speed, name: myName, look, mic: myMic, car: vehicle?.shared || '', card: extra[0], pose: extra[1], up: extra[2], caps: extra[3], parked });
       // once to each player, over the one connection they are reached by (two who share several
       // squares would otherwise get, and relay, every message several times)
       sent.clear();
