@@ -24,3 +24,8 @@
  
          peer.setHandlers({
            connect: () => connectPeer(peer, peerId, relayId),
+
+# Lilavati, 2026-11-25 (applied by hand to web/together/trystero-nostr.js, the minified bundle):
+# resubscribe after a relay socket reconnects.
+#   socket onopen:  n.opened ? n.subs?.forEach(f => f()) : n.opened = 1
+#   subscribe():    let re = () => { e.send(REQ r), e.send(REQ o) }; (e.subs ||= new Set).add(re); ... re(); unsubscribe deletes re
