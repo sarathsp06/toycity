@@ -66,6 +66,15 @@ test('a jump lands on top of a hedge, and walking off the top falls back down', 
   assert.equal(j.h, 0); assert.ok(!j.onHedge);
 });
 
+test('a hedge is as high as its mesh: feet on a low front-garden hedge stand on it, not over it', () => {
+  const m = fakeMap(); m.fill(m.low, 300, -105, 310, -95);
+  const w = createWalker({ blockedAt: m.blockedAt, hedge: (x, z) => x < 305 ? 0.8 : 0 }), j = w.jump;   // measured on the left half only
+  assert.equal(w.floorAt(302, -100), 0.8);
+  assert.equal(w.floorAt(308, -100), HEDGE_TOP);   // nothing measured there: the baked height
+  w.startJump(); for (let t = 0; t < 2; t += 0.01) w.stepJump(0.01, 302, -100);
+  assert.equal(j.h, 0.8);
+});
+
 test('one rule for everything you stand on: a car roof, a bench, a car rolling in under you', async () => {
   const { createSolids, FOOTPRINTS } = await import('../web/solids.js');
   const m = fakeMap(), solids = createSolids();

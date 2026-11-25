@@ -13,6 +13,7 @@ import { encodeState, decodeState, isInside, isSeated, carModel } from './state.
 import { openRoom } from './room.js';
 import { ready as avatarsReady, makePlayer, setName, setLook, setVehicle, setCard, seatIn, animate, disposePlayer } from './players.js';
 import { PASSENGER, seatLocal } from '../vehicle.js';
+import { ROAD } from '../solids.js';
 
 import { parseLook, myLook } from '../avatar.js';
 const TRYSTERO = './trystero-nostr.js';   // patched local copy, see the file header
@@ -91,7 +92,7 @@ export async function createPresence({ scene, player, toRD, fromRD, slug, vehicl
     if (!k || !vehicle?.make) return;
     const [x, z] = fromRD(k.x, k.y), mesh = vehicle.make(k.model, k.colour);
     if (!mesh) return;
-    mesh.position.set(x, 0, z); mesh.rotation.y = k.h;
+    mesh.position.set(x, ROAD, z); mesh.rotation.y = k.h;
     if (k.model === 'bike') { mesh.rotation.order = 'YXZ'; mesh.rotation.x = 0.16; }   // on its side stand
     scene.add(mesh); p.parkedMesh = mesh; p.parked = { ...k, sx: x, sz: z };
   }

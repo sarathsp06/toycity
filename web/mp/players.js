@@ -3,7 +3,7 @@
 // pose clip (riding, sitting, flying after a hit, lying, jumping, talking) layered over them.
 import * as THREE from 'three';
 import { loadAvatar, myLook, poseLayer } from '../avatar.js';
-import { FRONT } from '../vehicle.js';
+import { FRONT, SEAT_H } from '../vehicle.js';
 import { blobMesh } from '../interior.js';
 import { POSE, FALL_DOWN, isLying, isSwimming, isPassenger, isBike, carModel } from './state.js';
 // where the body goes to sit on a seat whose top is h metres up: the sit clip has the hips 0.59 m over
@@ -100,7 +100,9 @@ export function seatIn(p, model) {
   p.model.visible = !!p.seat;
   const f = FRONT[p.seat] ?? 1;   // face the bonnet
   p.model.rotation.y = p.seat ? f * Math.PI / 2 : 0;
-  p.model.position.set(0, p.seat ? (p.seat === 'bike' ? 0.31 : 0) : 0, 0);   // the sitting clips put the hips 0.61 m up: on the seat
+  // on the saddle (the drive clip's hips 0.61 m over the feet, the saddle 0.92 m over the wheels), or on the
+  // car's seat cushion as on a sofa (sitOffset); the group stands at the road like the car
+  p.model.position.set(0, !p.seat ? 0 : p.seat === 'bike' ? 0.31 : sitOffset(SEAT_H[p.seat] ?? SEAT_H.suv).y, 0);
 }
 // the pose clip for this moment: on a bike or in a car seat, flying after a hit (pose 1: the flinch,
 // held), lying (2, or 4 knocked out: the fall, from the moment it hits the ground, held flat), getting
@@ -159,7 +161,7 @@ export function setVehicle(p, car, make) {
   if (p.inside) { if (p.model) p.model.visible = false; p.ring.visible = false; p.tag.visible = false; p.riding = false; return; }
   p.seat = null;
   p.tag.visible = true;
-  if (name && make) { p.carMesh = make(name, parseInt(col, 16)); if (p.carMesh) { p.carMesh.position.y = -0.15; p.group.add(p.carMesh); } }
+  if (name && make) { p.carMesh = make(name, parseInt(col, 16)); if (p.carMesh) { p.carMesh.position.y = 0; p.group.add(p.carMesh); } }
   p.riding = isBike(car);   // a motorbike shows its rider, sitting (see ride below)
   if (p.model) { p.model.visible = !p.carMesh || p.riding; ride(p); }
   p.ring.visible = !p.carMesh;

@@ -12,9 +12,20 @@ rm -rf "$OUT" dist/toycity-site.zip
 mkdir -p "$OUT/models" "$OUT/mp" "$OUT/media"
 cp web/index.html web/facts.html web/places.json "$OUT/"   # the front page: choose a place
 cp web/media/* "$OUT/media/"
-cp web/city.html web/city.js web/loader.worker.js web/textures.js web/avatar.js web/solids.js web/vehicle.js web/autopilot.js web/home.js web/radio.js web/nav.js web/traffic.js web/peds.js web/ambient.js web/birds.js web/player.js web/grid.js web/walker.js web/parked.js web/agent.js web/interior.js "$OUT/"
+cp web/city.html web/city.js web/loader.worker.js web/textures.js web/avatar.js web/solids.js web/vehicle.js web/autopilot.js web/home.js web/radio.js web/nav.js web/traffic.js web/peds.js web/ambient.js web/birds.js web/player.js web/grid.js web/walker.js web/parked.js web/agent.js web/interior.js web/gltf.js "$OUT/"
 cp web/mp/*.js "$OUT/mp/"
 cp web/models/cars.glb web/models/door.glb web/models/anims.glb web/models/goose.glb web/models/mallard.glb web/models/person.glb web/models/persona_*.glb web/models/interior.glb web/models/interior.json web/models/CREDITS.txt "$OUT/models/"
+# the models' geometry and animation meshopt-compressed (web/gltf.js decodes it): about half the
+# download. "medium" only quantises (positions to well under a millimetre); "high" would also squeeze
+# normals and animation, which shows on people. Without the tool (cd tools && npm install) they go as they are.
+GT=tools/node_modules/.bin/gltf-transform
+if [ -x "$GT" ]; then
+  for G in "$OUT"/models/interior.glb "$OUT"/models/person.glb "$OUT"/models/persona_*.glb "$OUT"/models/anims.glb; do
+    # not cars.glb: quantising moves each mesh's scale and offset into its node, and a car door's node
+    # position is its hinge (city.js openParts). Not the birds or the door: small, and the birds bake their nodes.
+    "$GT" meshopt "$G" "$G" --level medium >/dev/null
+  done
+else echo "gltf-transform not installed: models not compressed"; fi
 for R in $RS; do
   mkdir -p "$OUT/regions/$R"
   cp -R web/regions/$R/tiles.json web/regions/$R/search.json web/regions/$R/roads.json web/regions/$R/walks.json \

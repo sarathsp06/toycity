@@ -14,7 +14,7 @@
 //   room.leave()
 //   room.active, room.floorY     you are inside; the floor's height in the scene
 //   room.blockedAt(x, z)         a wall there (the walker's map while inside)
-//   room.solids                  the furniture, a solids.js registry
+//   room.solids                  the furniture, a solids.js registry (a seat as its back, arms and cushion)
 //   room.contains(x, z)          is this point inside the room you are in (someone else in the same house)
 //   room.camera(v, target)       the camera on a boom from target to v, shortened at walls and tall furniture
 //   room.clamp(v, m)             move a point (x, z) to at least m metres inside the walls
@@ -24,6 +24,7 @@
 //   room.standSpot(seat, clear)  where to stand up to (or walk to before sitting): beside the seat,
 //                                clear(x, z) says whether a body fits there
 import * as THREE from 'three';
+import { standOn } from './solids.js';
 
 export const DEPTH = -40;          // metres below the street
 // while you are in a house the camera draws only this layer: the room, the people in it and the
@@ -54,7 +55,9 @@ export function blobMesh(size) {
 }
 // one blob per piece of furniture (interior.json solids, in the room's own coordinates), one draw call
 function contactShadows(list) {
-  const mesh = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), blobMaterial(), list.length), m = new THREE.Matrix4();
+  // its own copy of the material: three.js keeps one shader per material, and a material drawn by an
+  // instanced mesh and by plain meshes (the people's blobs) in the same frame is re-derived each time
+  const mesh = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), blobMaterial().clone(), list.length), m = new THREE.Matrix4();
   list.forEach((f, i) => mesh.setMatrixAt(i, m.makeScale(f.hx * 2.5 + 0.2, 1, f.hz * 2.5 + 0.2).setPosition(f.x, 0.02, f.z)));
   mesh.layers.set(INDOORS); mesh.renderOrder = 1; mesh.frustumCulled = false; mesh.raycast = () => {};
   return mesh;
@@ -83,6 +86,10 @@ export function createInterior({ scene, loader, createSolids }) {
         // the windows glow like the sky outside (daylight() dims them at night); the ceiling lamp is
         // hidden when the camera comes up against it
         const m = o.material; if (m.emissiveIntensity !== undefined && m.emissive?.getHex()) sky.push(m);
+        // no see-through glass (the wall clock's, from Poly Haven): one transmissive material makes three.js
+        // draw the whole room a second time every frame, and switch every shader between the two passes.
+        // Rough glass looks the same as plain see-through, which it already is (transparent, 40 %).
+        if (m.transmission > 0) { m.transmission = 0; m.transparent = true; m.depthWrite = false; }
         for (let q = o; q && q !== g.scene; q = q.parent) if (/lamp/i.test(q.name)) { lampParts.push(o); break; }
         if (m.name === 'floor') floor.push(o);
         o.layers.enable(INDOORS);
@@ -103,7 +110,7 @@ export function createInterior({ scene, loader, createSolids }) {
     group.position.set(d.x, DEPTH, d.z); group.rotation.y = d.yaw; group.visible = true;
     solids.drop('room');
     if (data) {
-      solids.add('room', data.solids.map(f => { const [x, z] = toWorld(f.x, f.z); return { x, z, hx: f.hx, hz: f.hz, yaw: d.yaw, top: f.top }; }));
+      solids.add('room', standOn(data.solids).map(f => { const [x, z] = toWorld(f.x, f.z); return { x, z, hx: f.hx, hz: f.hz, yaw: d.yaw, top: f.top }; }));
       seats = data.seats.map(s => { const [x, z] = toWorld(s.x, s.z); return { ...s, x, z, yaw: s.yaw + d.yaw }; });
       lights = (data.lights || []).map(([lx, ly, lz]) => { const [x, z] = toWorld(lx, lz); return [x, DEPTH + ly, z]; });
       if (lights[0]) lampAt.set(...lights[0]);

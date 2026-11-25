@@ -9,3 +9,7 @@ __pycache__/
 *.pyc
 .DS_Store
 node_modules/
+
+# local editor/agent settings and one-off scripts
+.claude/
+tools/mcp/_*.mjs

@@ -5,7 +5,7 @@
 // tools/retarget_anims.mjs). Bone orientations differ between rigs, so the clips are retargeted once per
 // persona (world-space, by bone name), with the hip height scaled to the persona's proportions.
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { gltfLoader } from './gltf.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
 // Everyone gets a random person (persona) and outfit on their first visit, kept on that device.
@@ -57,7 +57,7 @@ export function dress(model, look) {
     else { o.material.map = null; o.material.color.setHex(c); }
   });
 }
-const loader = new GLTFLoader(), cache = new Map();
+const loader = gltfLoader(), cache = new Map();
 const load = (base, file) => cache.get(file) || cache.set(file, loader.loadAsync(new URL('models/' + file, base).href)).get(file);
 // Retarget a clip from the Xbot (source) onto another Mixamo-named skeleton (target), in world space:
 // every frame, each bone gets the source bone's rotation relative to its rest pose, applied on top

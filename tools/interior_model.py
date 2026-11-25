@@ -13,7 +13,10 @@ Textures are made 512 px in the export so the house stays a few megabytes.
 Coordinates, in metres, y up after export: the origin is the middle of the front door's sill, the
 outside is +z (like door.glb), so the room lies at -z: x from -3 to 3, z from 0 to -8.
 interior.json has what the game needs to walk around in it, in the same coordinates:
-  { size: [w, d, h], solids: [{ x, z, hx, hz, top }], seats: [{ x, z, yaw, h, kind }], lights: [[x, y, z]] }
+  { size: [w, d, h], solids: [{ x, z, hx, hz, top, parts? }], seats: [{ x, z, yaw, h, kind }], lights: [[x, y, z]] }
+A solid's top is the highest point of the piece; a seat's solid also has `parts` (back, seat, arms: the
+surfaces you stand on, each { x, z, hx, hz, top }), which the game uses instead of the whole footprint
+for standing and bumping. The whole footprint stays for the contact shadow.
 """
 import json
 import math
@@ -178,7 +181,54 @@ ANGLE = {"+y": math.pi / 2, "-x": math.pi, "-y": -math.pi / 2, "+x": 0}
 YAW3 = {"+y": math.pi, "-x": -math.pi / 2, "-y": 0, "+x": math.pi / 2}
 
 
-def place(name, x, y, facing="+y", z=0.0, solid=True, top=None, seat=None, seat_h=0.45, scale=1.0):
+def seat_parts(meshes, x, y, hx, hy, facing, seat_h, seat):
+    """A seat's footprint as the surfaces you stand on: the backrest strip, an arm at each end and the
+    cushion between them, each with its own top. One flat top for the whole footprint puts the feet
+    either in the air over the cushion or inside the backrest. The faces are found the way feet meet
+    them, with rays straight down onto the placed piece: walking from the front through each seat point,
+    the back starts where the surface rises well above the cushion; walking from the middle to each end
+    across the cushion, an arm starts the same way."""
+    bpy.context.view_layer.update()
+    vs = [o.matrix_world @ v.co for o in meshes for v in o.data.vertices]
+    peak = max(v.z for v in vs)
+    fx, fy = {"+y": (0, 1), "-y": (0, -1), "+x": (1, 0), "-x": (-1, 0)}[facing]   # towards the front
+    lx, ly = -fy, fx                                                                # along the seat
+    hd, hl = (hy, hx) if fy else (hx, hy)                                           # half depth, half length
+    dg = bpy.context.evaluated_depsgraph_get()
+    def surface(d, l):   # the top of this piece at depth d, along l (the floor and the rug do not count)
+        px, py = x + fx * d + lx * l, y + fy * d + ly * l
+        ok, at, _, _, ob, _ = scene.ray_cast(dg, Vector((px, py, peak + 0.05)), Vector((0, 0, -1)))
+        return at.z if ok and getattr(ob, "original", ob) in meshes else 0.0
+    steps = lambda a, b: [a + (b - a) * k / 60 for k in range(61)]
+    # the backrest's front face: for every seat, from the front edge towards the back; the most forward one
+    b1 = -hd
+    for sx, sy in seat:
+        l = sx * lx + sy * ly
+        for d in steps(hd, -hd):
+            if surface(d, l) > seat_h + 0.15: b1 = max(b1, d); break
+    if b1 <= -hd: return []
+    dm = (b1 + hd) / 2   # across the middle of the cushion
+    def arm(sign):       # the inner face of the arm at that end, or None
+        for l in steps(0, sign * hl):
+            if surface(dm, l) > seat_h + 0.12: return l
+        return None
+    a0, a1 = arm(-1), arm(1)
+    def part(name, d0, d1, l0, l1, top):
+        cd, cl = (d0 + d1) / 2, (l0 + l1) / 2
+        px, py = x + fx * cd + lx * cl, y + fy * cd + ly * cl
+        a, b = (d1 - d0) / 2, (l1 - l0) / 2
+        h_x, h_y = (b, a) if fy else (a, b)
+        return {"part": name, "x": round(px, 3), "z": round(-py, 3), "hx": round(h_x, 3), "hz": round(h_y, 3), "top": round(top, 3)}
+    def top_of(d0, d1, l0, l1):   # the highest surface of the piece over that box, a 12 x 12 grid of rays
+        return max([surface(d0 + (d1 - d0) * (i + 0.5) / 12, l0 + (l1 - l0) * (j + 0.5) / 12) for i in range(12) for j in range(12)] + [seat_h])
+    out = [part("back", -hd, b1, -hl, hl, top_of(-hd, b1, -hl, hl)),
+           part("seat", b1, hd, a0 if a0 is not None else -hl, a1 if a1 is not None else hl, seat_h)]
+    if a0 is not None: out.append(part("arm", b1, hd, -hl, a0, top_of(b1, hd, -hl, a0)))
+    if a1 is not None: out.append(part("arm", b1, hd, a1, hl, top_of(b1, hd, a1, hl)))
+    return out
+
+
+def place(name, x, y, facing="+y", z=0.0, solid=True, seat=None, seat_h=0.45, scale=1.0):
     """the model `name`, its footprint centred on x, y (Blender metres), its front towards `facing`"""
     before = set(bpy.data.objects)
     bpy.ops.import_scene.gltf(filepath=fetch(MODELS[name]))
@@ -193,8 +243,8 @@ def place(name, x, y, facing="+y", z=0.0, solid=True, top=None, seat=None, seat_
     if seat:
         bpy.context.view_layer.update()
         vs = [o.matrix_world @ v.co for o in new if o.type == "MESH" for v in o.data.vertices]
-        top = max(v.z for v in vs); cx = sum(v.x for v in vs) / len(vs); cy = sum(v.y for v in vs) / len(vs)
-        hi = [v for v in vs if v.z > 0.8 * top]
+        peak = max(v.z for v in vs); cx = sum(v.x for v in vs) / len(vs); cy = sum(v.y for v in vs) / len(vs)
+        hi = [v for v in vs if v.z > 0.8 * peak]   # (not `top`: that is the caller's, the seat's height)
         bx = sum(v.x for v in hi) / len(hi) - cx; by = sum(v.y for v in hi) / len(hi) - cy
         # only across the seat (its shorter side): the arms, at both ends, cancel out along the length
         wx = max(v.x for v in vs) - min(v.x for v in vs); wy = max(v.y for v in vs) - min(v.y for v in vs)
@@ -207,7 +257,9 @@ def place(name, x, y, facing="+y", z=0.0, solid=True, top=None, seat=None, seat_
     root.location = (x - (mn[0] + mx[0]) / 2, y - (mn[1] + mx[1]) / 2, z - mn[2])
     hx, hy, h = (mx[0] - mn[0]) / 2, (mx[1] - mn[1]) / 2, mx[2] - mn[2]
     if solid:   # in three.js coordinates: x, z = -y
-        solids.append({"name": name, "x": round(x, 3), "z": round(-y, 3), "hx": round(hx, 3), "hz": round(hy, 3), "top": round(top if top is not None else z + h, 3)})
+        f = {"name": name, "x": round(x, 3), "z": round(-y, 3), "hx": round(hx, 3), "hz": round(hy, 3), "top": round(z + h, 3)}
+        if seat: f["parts"] = seat_parts(meshes, x, y, hx, hy, facing, seat_h, seat)
+        solids.append(f)
     if seat:    # where a person sits, facing like the furniture; h: seat height
         for sx, sy in seat:
             seats.append({"kind": "chair" if name == "armchair" else "sofa", "x": round(x + sx, 3), "z": round(-(y + sy), 3), "yaw": round(YAW3[facing], 4), "h": seat_h})   # h: the top of the seat
@@ -243,7 +295,7 @@ box("fridge_handle", kx - 0.04, kx, K1 - 0.12, K1 - 0.09, 0.9, 1.5, STEEL)
 solids.append({"name": "kitchen", "x": round(kx + KD / 2, 3), "z": round(-(K0 + K1) / 2, 3), "hx": round(KD / 2, 3), "hz": round((K1 - K0) / 2, 3), "top": 0.92})
 
 # the lounge: three sofas round a round tea table, the TV on the left-hand wall facing them all
-# (sofa tops are their seats: you can climb onto one, not onto its back). The furniture leaves a
+# (you can climb onto a sofa's cushion, not its back: see seat_parts). The furniture leaves a
 # walkway of at least 0.75 m everywhere, so you can walk a loop round the room: from the hall past the
 # kitchen, behind the big sofa, along the back window and back along the TV wall.
 CX, CY = -0.9, 5.6
@@ -254,9 +306,9 @@ box("tv", -W / 2 + 0.12, -W / 2 + 0.17, CY - 0.62, CY + 0.62, 0.75, 1.47, SCREEN
 box("tvstand", -W / 2 + 0.1, -W / 2 + 0.22, CY - 0.15, CY + 0.15, 0.45, 0.47, SCREEN)
 box("tvneck", -W / 2 + 0.14, -W / 2 + 0.16, CY - 0.04, CY + 0.04, 0.47, 0.76, SCREEN)
 solids.append({"name": "tvunit", "x": round(-W / 2 + 0.21, 3), "z": round(-CY, 3), "hx": 0.21, "hz": 0.85, "top": 0.45})
-place("sofa3", CX + 1.75, CY, "-x", seat=[(-0.12, -0.85), (-0.12, 0), (-0.12, 0.85)], seat_h=S3_H, top=S3_H)    # three seats, facing the TV
-place("sofa", CX, CY - 1.9, "+y", seat=[(-0.38, 0.1), (0.38, 0.1)], seat_h=S1_H, top=S1_H)
-place("sofa2", CX - 0.15, CY + 1.9, "-y", seat=[(-0.45, -0.12), (0.45, -0.12)], seat_h=S2_H, top=S2_H)   # its back to the back wall
+place("sofa3", CX + 1.75, CY, "-x", seat=[(-0.12, -0.85), (-0.12, 0), (-0.12, 0.85)], seat_h=S3_H)    # three seats, facing the TV
+place("sofa", CX, CY - 1.9, "+y", seat=[(-0.38, 0.1), (0.38, 0.1)], seat_h=S1_H)
+place("sofa2", CX - 0.15, CY + 1.9, "-y", seat=[(-0.45, -0.12), (0.45, -0.12)], seat_h=S2_H)   # its back to the back wall
 place("lamp", CX, CY, "+y", z=H - 0.95, solid=False)
 lights.append([CX, H - 0.65, -CY])
 
@@ -264,8 +316,8 @@ lights.append([CX, H - 0.65, -CY])
 # between them, and a walkway between them and the big sofa
 TX = 2.55
 place("tea", TX + 0.05, 6.0, "+y", scale=0.7)
-place("armchair", TX, 5.1, "-x", seat=[(-0.08, 0)], seat_h=A_H, top=A_H)
-place("armchair", TX, 6.9, "-x", seat=[(-0.08, 0)], seat_h=A_H, top=A_H)
+place("armchair", TX, 5.1, "-x", seat=[(-0.08, 0)], seat_h=A_H)
+place("armchair", TX, 6.9, "-x", seat=[(-0.08, 0)], seat_h=A_H)
 place("plant", TX + 0.05, 6.0, "+y", z=0.5 * 0.7, solid=False)
 
 # shelves on the left wall between the hall and the lounge, a side table and a plant in the hall's

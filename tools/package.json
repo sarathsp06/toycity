@@ -13,5 +13,8 @@
   "dependencies": {
     "polygon-clipping": "^0.15.7",
     "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "@gltf-transform/cli": "^4.1.1"
   }
 }

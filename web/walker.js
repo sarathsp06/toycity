@@ -5,6 +5,8 @@
 //   const walker = createWalker({ blockedAt, wetAt, ground, solids, swimming, flying })
 //     blockedAt(x, z, h)  is the ground at x, z closed to feet h metres up? (walls always, hedges below 0.5 m)
 //     ground(x, z)        how high the open ground is above the road there (pavement 0.12, a garden 0.04)
+//     hedge(x, z)         how high the hedge's top is above the road there, measured from its mesh (a
+//                         front-garden hedge 0.80, a BGT hedge 0.95); 0 or none: HEDGE_TOP
 //     wetAt(x, z)         the water level there, or null on dry land (only asked while swimming)
 //     solids              solids.js registry (parked cars, trees, people), or null
 //     swimming(), flying()
@@ -32,14 +34,14 @@ const PROBES = [0, 0, R0, 0, -R0, 0, 0, R0, 0, -R0];
 // jumping: enough to clear a 1.1 m hedge; up to 1.3 m at the top of the arc
 // (JUMP_V 6.5: a 1.5 m hop, just enough for a car roof)
 export const GRAVITY = 14, JUMP_V = 6.5, CROUCH_T = 0.12, LAND_T = 0.16;
-// heights above the pavement: a hedge's top (as baked, buildtiles.mjs), the highest step you walk up,
+// heights above the road: a hedge's top where its mesh is not known (as baked, buildtiles.mjs), the highest step you walk up,
 // and the body's feet radius for what it stands on
 export const HEDGE_TOP = 1.1, STEP = 0.55, FEET = 0.2;
 
-export function createWalker({ blockedAt, wetAt = () => null, ground = () => 0, step = () => STEP, ceiling = () => Infinity, radius = () => PERSON.r, solids = null, swimming = () => false, flying = () => false, standing = () => true }) {
+export function createWalker({ blockedAt, wetAt = () => null, ground = () => 0, hedge = () => 0, step = () => STEP, ceiling = () => Infinity, radius = () => PERSON.r, solids = null, swimming = () => false, flying = () => false, standing = () => true }) {
   const jump = { h: 0, v: 0, phase: null, t: 0, onHedge: false };
   // the top of the baked map at a point: open ground its own height, a hedge HEDGE_TOP, a wall or water never
-  const groundTop = (x, z) => !blockedAt(x, z, 0) ? ground(x, z) : blockedAt(x, z, 99) ? Infinity : HEDGE_TOP;
+  const groundTop = (x, z) => !blockedAt(x, z, 0) ? ground(x, z) : blockedAt(x, z, 99) ? Infinity : hedge(x, z) || HEDGE_TOP;
   // what the feet stand on: the highest top under them that a person can stand on
   function floorAt(x, z) {
     const g = groundTop(x, z), s = solids ? solids.topAt(x, z, FEET) : 0;

@@ -29,6 +29,13 @@ export const FOOTPRINTS = {
   'furn:busstop': { hx: 1.6, hz: 0.7, top: 2.5 },
 };
 export const PERSON = { r: 0.3 };
+// the road's top in the scene (buildtiles.mjs TOP.road): every `top` above is measured from it, and a
+// car's wheels, a person's feet on the road and the walker's height 0 all stand here
+export const ROAD = 0.15;
+// what you stand on and bump into: a piece with `parts` (a sofa or a chair: its back, arms and cushion,
+// each with its own top, measured by tools/interior_model.py) is those parts, anything else its whole
+// footprint. A top is the surface the feet meet, never just the highest point of the piece.
+export const standOn = list => list.flatMap(f => f.parts || [f]);
 
 const CELL = 8;
 const cellOf = (x, z) => Math.floor(x / CELL) + ',' + Math.floor(z / CELL);

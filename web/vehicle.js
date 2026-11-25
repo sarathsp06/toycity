@@ -11,23 +11,26 @@
 //   - jump out while moving and the car rolls on by itself until it stops or hits something
 //   - leave it outside a parking spot and it gets a ticket on the windscreen, and the neighbours toot
 import * as THREE from 'three';
-import { hits } from './solids.js';
+import { hits, ROAD } from './solids.js';
 import { STRIDE } from './parked.js';
 
 // which end of each model (along its local x axis) is the bonnet; from the head- and taillights in cars.glb
 export const FRONT = { golf: -1, camry: 1, fiat500: 1, jeep: 1, van: 1, suv: -1, suv_wreck: -1, bike: 1 };
 // half length, half width and wheelbase; the car default matches the parked-car footprint in solids.js
 // top: what you stand on, metres above the pavement (the SUV's roof, the bike's saddle; see solids.js)
-const SIZES = { bike: { hl: 1.06, hw: 0.4, wb: 1.45, top: 0.8 } };
+const SIZES = { bike: { hl: 1.06, hw: 0.4, wb: 1.45, top: 0.93 } };   // top: the saddle of a bike on its side stand (leaning), measured in the game
 const sizeOf = m => SIZES[m] || { hl: 2.15, hw: 0.88, wb: 2.6, top: 1.45 };
 export const footprintOf = (m, x, z, yaw) => { const s = sizeOf(m); return { x, z, hx: s.hl, hz: s.hw, yaw, top: s.top }; };
-// where the driver's eyes are, in the model's own frame (x along the car, +z = its left when FRONT is -1)
+// where the driver's eyes are, in the model's own frame: x along the car, y above the wheels' bottom,
+// +z = its left when FRONT is -1
 // Right-hand drive (the player's choice): the driver sits on the car's right, the passenger on the left.
 // The SUV model is left-hand drive, so the car you drive gets its dashboard and steering wheel mirrored.
 // across: metres from the centre line to the right (+) or left (-), along the car's own z (see side()).
 const EYES = { suv: [0.2, 1.22, 0.38], suv_wreck: [0.2, 1.22, 0.38], bike: [-0.35, 1.55, 0] };
 // the passenger: along the car (towards the front, metres) and across (to the left), for each model
 export const PASSENGER = { suv: [0.2, 0.38], suv_wreck: [0.2, 0.38], bike: [-0.6, 0] };
+// the top of a car's seat cushion above the wheels' bottom (a ray down the passenger seat of cars.glb)
+export const SEAT_H = { suv: 0.648, suv_wreck: 0.648 };
 // local z of the car's right-hand side for a model whose bonnet points along FRONT * x
 const right = model => FRONT[model] ?? 1;
 // a seat as a local offset [x, z] in the car's own frame: along the length, then across (+ = right)
@@ -188,7 +191,7 @@ export function createDriving({ scene, player, models, parked, solids, ground, n
   function wreckDriven() {
     const w = wreckOf(st.model); if (!w) return;
     disposeCar(st.car); door = null;
-    st.car = makeCar(models, w, st.color, true); st.car.position.y = -0.15; player.add(st.car);
+    st.car = makeCar(models, w, st.color, true); st.car.position.y = 0; player.add(st.car);
     st.model = w; st.dazed = DAZED; crunch(); note('💥 Crash! That will leave a mark.');
   }
   // a parked car you drove into: hide its instance and put its wreck in its place (it stays solid)
@@ -196,7 +199,7 @@ export function createDriving({ scene, player, models, parked, solids, ground, n
     const key = parked.key(tile, k); if (dented.has(key) || taken.has(key)) return;
     const model = parked.modelAt(tile, k), w = model && wreckOf(model.name); if (!w) return;
     const at = parked.spot(tile, k), mesh = makeCar(models, w, at.color);
-    mesh.position.set(at.x, 0, at.z); mesh.rotation.y = at.yaw;
+    mesh.position.set(at.x, ROAD, at.z); mesh.rotation.y = at.yaw;
     scene.add(mesh); dented.set(key, mesh);
   }
   // a square unloads (city.js disposeTile): its wrecks go, their keys stay so the spots are still dented
@@ -222,7 +225,7 @@ export function createDriving({ scene, player, models, parked, solids, ground, n
   function wreckLeft() {
     const w = wreckOf(left.model); if (!w) return;
     disposeCar(left.mesh); left.model = w;
-    left.mesh = makeCar(models, w, left.color); left.mesh.position.set(left.x, 0, left.z); left.mesh.rotation.y = left.heading; scene.add(left.mesh);
+    left.mesh = makeCar(models, w, left.color); left.mesh.position.set(left.x, ROAD, left.z); left.mesh.rotation.y = left.heading; scene.add(left.mesh);
     crunch();
   }
 
@@ -240,7 +243,7 @@ export function createDriving({ scene, player, models, parked, solids, ground, n
       x = target.x; z = target.z; heading = target.yaw; name = target.model.name; color = target.color;
       if (dented.has(origin)) { dented.get(origin).removeFromParent(); disposeCar(dented.get(origin)); dented.delete(origin); name = wreckOf(name) || name; }
     }
-    const car = makeCar(models, name, color, true); car.position.y = -0.15;
+    const car = makeCar(models, name, color, true); car.position.y = 0;   // the player stands at ROAD while driving: wheels on the road
     swing(car);
     player.add(car); player.position.x = x; player.position.z = z; player.rotation.y = heading;
     Object.assign(st, { car, origin, speed: 0, steer: 0, heading, model: name, color });
@@ -260,7 +263,7 @@ export function createDriving({ scene, player, models, parked, solids, ground, n
     // whichever way along the bay is nearest to how you came in
     let [px, pz, ph] = [x, z, h];
     if (!rolling) { const sp = parked.emptySpotNear(x, z, SNAP); if (sp) { px = sp.x; pz = sp.z; ph = Math.abs(wrap(sp.yaw - h)) < Math.PI / 2 ? sp.yaw : sp.yaw + Math.PI; } }
-    mesh.position.set(px, 0, pz); mesh.rotation.y = ph; scene.add(mesh);
+    mesh.position.set(px, ROAD, pz); mesh.rotation.y = ph; scene.add(mesh);
     if (st.model === 'bike') { mesh.rotation.order = 'YXZ'; mesh.rotation.x = STAND_LEAN; }   // on its side stand: turned to its heading first, then leaned about its own length
     left = { mesh, x: px, z: pz, heading: ph, model: st.model, color: st.color, origin: st.origin, speed: rolling ? st.speed : 0, t: 0, toots: 0, ticket: null };
     swing(mesh); st.car = null; stopEngine();
@@ -298,7 +301,7 @@ export function createDriving({ scene, player, models, parked, solids, ground, n
       const hit = hitsAt(x, z, left.heading, left.model) > hitsAt(left.x, left.z, left.heading, left.model); ignoreLeft = false;
       if (hit) { if (Math.abs(left.speed) > CRASH) wreckLeft(); left.speed = 0; }
       else {
-        left.x = x; left.z = z; left.mesh.position.set(x, 0, z);
+        left.x = x; left.z = z; left.mesh.position.set(x, ROAD, z);
         left.speed -= Math.sign(left.speed) * Math.min(Math.abs(left.speed), 1.6 * dt);
       }
       if (!left.speed) left.t = 0;
@@ -431,7 +434,7 @@ export function createDriving({ scene, player, models, parked, solids, ground, n
     eyes(out) {
       const [ex, ey, ez] = EYES[st.model] || [0, 1.3, 0.4];
       const [lx, lz] = seatLocal(st.model, ex, ez), c = Math.cos(st.heading), s = Math.sin(st.heading);
-      return out.set(player.position.x + lx * c + lz * s, ey, player.position.z - lx * s + lz * c);
+      return out.set(player.position.x + lx * c + lz * s, ROAD + ey, player.position.z - lx * s + lz * c);
     },
     // what other players need to draw my car: "model:colour", empty when on foot
     get shared() { return st.car ? st.model + ':' + st.color.toString(16) : ''; },

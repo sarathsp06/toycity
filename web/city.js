@@ -10,7 +10,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import * as BU from 'three/addons/utils/BufferGeometryUtils.js';
 import * as TX from './textures.js';
 import { loadAvatar, myLook, poseLayer } from './avatar.js';
-import { createSolids, footprintsOf, PERSON } from './solids.js';
+import { createSolids, footprintsOf, PERSON, ROAD } from './solids.js';
 import { createDriving, makeCar, footprintOf, FRONT, PASSENGER, seatLocal } from './vehicle.js';
 import { createParked, STRIDE } from './parked.js';
 import { createGrid, squareKey, getBit, setBit, newBitmap, SIDE, eachCell } from './grid.js';
@@ -27,7 +27,7 @@ import { createInterior, INDOORS, STEP_IN, BODY, blobMesh } from './interior.js'
 import { createRadio, mountRadio } from './radio.js';
 import { createNav, mountNav } from './nav.js';
 import { createBirds } from './birds.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { gltfLoader, floatGeometry } from './gltf.js';
 
 const params = new URLSearchParams(location.search);
 // ?place=<id> picks a place from places.json (the front page lists them): which region to stream and
@@ -95,6 +95,10 @@ scene.add(sun, sun.target);
 const SUN_OFFSET = new THREE.Vector3(-250, 380, 200);
 const hemi = new THREE.HemisphereLight(0xdff0ff, 0x8a9a7a, 1.4), amb = new THREE.AmbientLight(0xffffff, 0.35);
 scene.add(hemi, amb);
+// everything outdoors hangs on `town`: the squares, the overview, doors, parked and moving cars, people,
+// birds, the route line. In a house it is hidden whole (indoorView), so drawing does not walk the town
+// to find the room; the room, you, the other players and the lights hang on the scene itself.
+const town = new THREE.Group(); town.name = 'town'; scene.add(town);
 // The sky is baked, not drawn: the atmosphere shader (sunlight scattered per pixel) runs once into a
 // cubemap when the time of day changes, and every frame just samples that cube for the background
 // and, blurred, for the reflections on cars and windows. Drawing the shader directly would cost the
@@ -244,7 +248,7 @@ const CAR_EXTRA = ['suv_wreck'];       // loaded but never parked: what a crashe
 const CAR_NEAR = 25, CAR_MID = 70;
 function partsOf(obj) {
   const parts = []; obj.updateMatrixWorld(true);
-  obj.traverse(o => { if (o.isMesh) { const geo = o.geometry.clone(); geo.applyMatrix4(o.matrixWorld); parts.push([geo, o.material, o.material.name.startsWith('paint') ? 'paint' : null]); } });
+  obj.traverse(o => { if (o.isMesh) { const geo = floatGeometry(o.geometry.clone()); geo.applyMatrix4(o.matrixWorld); parts.push([geo, o.material, o.material.name.startsWith('paint') ? 'paint' : null]); } });
   return parts;
 }
 // cars with separate doors also come as <name>_body plus <name>_door0.. with their origin on the hinge;
@@ -265,7 +269,7 @@ function openParts(root, name) {
 // list, filled once carsReady settles; a square's cars are placed when both are there (see instances)
 progress(0.08, 'Parking the cars');
 const CAR_MODELS = []; let CAR_W = 0, carsProg = 0;
-const carsReady = new GLTFLoader().loadAsync(new URL('./models/cars.glb?v=view4', import.meta.url).href,
+const carsReady = gltfLoader().loadAsync(new URL('./models/cars.glb?v=view4', import.meta.url).href,
   e => { if (e.total) carsProg = Math.min(0.99, e.loaded / e.total); }).then(g => {
   for (const [name, w] of [...Object.entries(CAR_MIX), ...CAR_EXTRA.map(n => [n, 0])]) {
     const hi = g.scene.getObjectByName(name), lo = g.scene.getObjectByName(name + '_lo');
@@ -443,7 +447,7 @@ function disposeTile(t) {
   for (const tx of t.textures) tx.dispose();
   for (const m of t.materials) m.dispose();
   for (const s of t.sprites) { s.material.map.dispose(); s.material.dispose(); signs.delete(s); }
-  scene.remove(t.group);
+  town.remove(t.group);
   shadowDirty = true;
 }
 
@@ -471,6 +475,7 @@ function applySquare({ key, level, r, req }) {
     if (name.startsWith('wall') || name === 'roof') mesh.userData.solid = true;
     if (name === 'water') tile.water = mesh.geometry;
     if (name.startsWith('surf:')) (tile.surf ||= []).push(mesh.geometry);
+    if (name === 'hedge' || name === 'fhedge') (tile.hedges ||= []).push(mesh.geometry);
     q.add(mesh);
   };
   if (near) {
@@ -491,7 +496,7 @@ function applySquare({ key, level, r, req }) {
         birds.add(tile, xz, tile.water.index.array, ys / n + 0.03, key);
       });
     }
-    if (tile.surf) birdsLater.push(() => { if (tiles.get(key) === tile) tile.ground = groundMap(tile); });
+    if (tile.surf) birdsLater.push(() => { if (tiles.get(key) === tile) { tile.ground = topMap(tile, tile.surf); if (tile.hedges) tile.hedgeTop = topMap(tile, tile.hedges); } });
     for (const [n, k, x, y] of d.header.meta.pois.slice(0, 80)) {
       const sp = label(n, /church|place_of_worship|townhall|school/.test(k) ? '#e6ecff' : '#fff8e6');
       sp.position.set(x, 9.5, -y); tile.group.add(sp); tile.sprites.push(sp); signs.add(sp);
@@ -502,7 +507,7 @@ function applySquare({ key, level, r, req }) {
   }
   disposeTile(tiles.get(key));
   tiles.set(key, tile); tilesRev++; failed.delete(key);
-  scene.add(tile.group);
+  town.add(tile.group);
   maskOverviews();
 }
 
@@ -539,7 +544,7 @@ function updateOverview(X, Y) {
   for (const [oi, oj] of OV.tiles) {
     const key = squareKey(oi, oj), d = Math.hypot(Math.max(oi * S - X, 0, X - (oi + 1) * S), Math.max(oj * S - Y, 0, Y - (oj + 1) * S));
     const have = ovTiles.get(key);
-    if (d > Q.horizon + 500) { if (have && have !== 'loading') { scene.remove(have.group); have.mesh.geometry.dispose(); have.mat.dispose(); have.groundMat.dispose(); have.tex.dispose(); ovTiles.delete(key); } continue; }
+    if (d > Q.horizon + 500) { if (have && have !== 'loading') { town.remove(have.group); have.mesh.geometry.dispose(); have.mat.dispose(); have.groundMat.dispose(); have.tex.dispose(); ovTiles.delete(key); } continue; }
     if (have) continue;
     ovTiles.set(key, 'loading');
     load({ o: url(`o/${key}.bin`) }, { a: url(`o/${key}.jpg`) }).then(({ files: { o }, images: { a } }) => {
@@ -562,7 +567,7 @@ function updateOverview(X, Y) {
         mesh = new THREE.Mesh(geo, mat); mesh.scale.setScalar(OV.q); mesh.position.set(-OV.margin, 0, -OV.margin); group.add(mesh);
       }
       const t = { group, mesh: mesh || { geometry: geo }, mat, groundMat, tex, uniforms, oi, oj };
-      ovTiles.set(key, t); scene.add(group); maskOverview(t);
+      ovTiles.set(key, t); town.add(group); maskOverview(t);
     }).catch(e => { console.warn('overview', key, e); ovTiles.delete(key); });
   }
 }
@@ -761,12 +766,12 @@ function note(text) {
 }
 // ---------- front doors and homes (home.js) ----------
 // the inside of every house (interior.js): you walk about in it while you are in a house
-const room = createInterior({ scene, loader: new GLTFLoader(), createSolids });
-const homes = createHomes({ scene, player, tiles, T, toRD, fromRD, slug, note, loader: new GLTFLoader(),
+const room = createInterior({ scene, loader: gltfLoader(), createSolids });
+const homes = createHomes({ scene: town, player, tiles, T, toRD, fromRD, slug, note, loader: gltfLoader(),
   room: { enter: d => room.load().then(() => { const p = room.enter(d); dist = 3.0; pitch = 0.2; return p; }), leave: () => { room.leave(); dist = 8; } },
   look: y => { yaw = y; pitch = Math.min(pitch, 0.35); dist = room.active ? 3.2 : Math.max(6, Math.min(dist, 12)); },
   onKnock: () => avatar.pose?.set('knock', { once: true }) });
-driving = createDriving({ scene, player, models: CAR_MODELS, parked, solids, ground: (x, z) => blockedAt(x, z), note, onHitPerson: hitPerson, onBumpCar: (x, z) => traffic?.bumped(x, z) });
+driving = createDriving({ scene: town, player, models: CAR_MODELS, parked, solids, ground: (x, z) => blockedAt(x, z), note, onHitPerson: hitPerson, onBumpCar: (x, z) => traffic?.bumped(x, z) });
 
 // ---------- knocking people over, and the card you get for it ----------
 // Drive into someone and they go flying (their own game plays it: see knockDown). The driver gets a card
@@ -954,9 +959,9 @@ function others() {
   return othersList;
 }
 // ---------- birds on the water (birds.js): which ones come from Sovon's survey numbers, see facts.html ----------
-const birds = createBirds({ scene, THREE, loadModel: u => new GLTFLoader().loadAsync(u) });
+const birds = createBirds({ scene: town, THREE, loadModel: u => gltfLoader().loadAsync(u) });
 const birdsLater = [];   // finding the ponds takes a moment: one square's worth per frame, after it is drawn
-const ambientOpts = { scene, autopilot, solids, slug, T, toRD, others, ground: (x, z) => groundAt(x, z) };
+const ambientOpts = { scene: town, autopilot, solids, slug, T, toRD, others, ground: (x, z) => groundAt(x, z) };
 const traffic = createTraffic({ ...ambientOpts, models: CAR_MODELS, sounds: () => social?.ambience?.on ?? true, count: trafficOn ? TRAFFIC_N[qName] || TRAFFIC_N.mid : 0 });
 const peds = createPeds({ ...ambientOpts, count: trafficOn ? PEDS_N[qName] || PEDS_N.mid : 0 });
 const me = { x: 0, z: 0, onFoot: true, inCar: false, fly: false };   // what the ambient life needs to know of me
@@ -972,7 +977,7 @@ setTraffic(trafficOn);
 const radio = createRadio();
 const radioBox = mountRadio(document.body, radio);
 // ---------- finding someone: a route line to another player (nav.js) ----------
-const nav = createNav({ scene, player, driving, autopilot, walksUrl: new URL('walks.json', base), fromRD, heading: () => yaw, note });
+const nav = createNav({ scene: town, player, driving, autopilot, walksUrl: new URL('walks.json', base), fromRD, heading: () => yaw, note });
 mountNav(document.getElementById('nav'), nav);
 const apButton = document.getElementById('apbtn'), apForm = document.getElementById('apform'), apInput = document.getElementById('apq');
 async function autoTo(x, z, label) {
@@ -1132,11 +1137,11 @@ function wetMask(tile, xz, idx) {
 // ---------- the height of the ground: the pavement stands 12 cm above the road, gardens and grass a few cm ----------
 // From the square's own surface shapes (road, pavement, paths, grass, raised beds), the top of the
 // highest one in each 0.5 m cell, in cm above the road. Feet stand on it (walker.js, peds.js); others'
-// feet follow from the height they send.
-const ROAD = 0.15;   // the road's top, the level everything else is measured from (buildtiles.mjs TOP.road)
-function groundMap(tile) {
+// feet follow from the height they send. The same from the hedge meshes gives each hedge cell its top,
+// so feet on a hedge stand on the hedge drawn there (a front-garden hedge is lower than a BGT one).
+function topMap(tile, geoms) {
   const cm = new Uint8Array(SIDE * SIDE), gx = tile.group.position.x, gz = tile.group.position.z, ox = tile.i * T, oy = tile.j * T;
-  for (const g of tile.surf) {
+  for (const g of geoms) {
     const P = g.attributes.position.array, idx = g.index.array;
     const X = k => P[3 * k] * QQ.q - QQ.ox + gx + ORX - ox, Y = k => ORY - (P[3 * k + 2] * QQ.q - QQ.oz + gz) - oy, H = k => P[3 * k + 1] * QQ.q - QQ.oy;
     for (let t = 0; t < idx.length; t += 3) {
@@ -1153,6 +1158,12 @@ function groundAt(x, z) {
   if (room.active) return 0;   // the house's floor
   const X = x + ORX, Y = ORY - z, i = Math.floor(X / T), j = Math.floor(Y / T), t = tiles.get(squareKey(i, j));
   return t && t.ground ? t.ground[grid.cellBit(X, Y, i, j)] / 100 : 0;
+}
+// metres above the road of the hedge drawn at x, z (0: none known there; the walker then takes HEDGE_TOP)
+function hedgeAt(x, z) {
+  if (room.active) return 0;
+  const X = x + ORX, Y = ORY - z, i = Math.floor(X / T), j = Math.floor(Y / T), t = tiles.get(squareKey(i, j));
+  return t && t.hedgeTop ? t.hedgeTop[grid.cellBit(X, Y, i, j)] / 100 : 0;
 }
 function wetAt(x, z) {   // the water level there, or null on dry land
   if (room.active) return null;
@@ -1215,6 +1226,8 @@ function indoorView() {
   const on = room.active;
   if (on !== indoorOn) {
     indoorOn = on; camera.layers.set(on ? INDOORS : 0); indoorT = 0; roomLight(on);
+    town.visible = town.matrixWorldAutoUpdate = !on;   // hidden, and its thousands of matrices left alone (visibility alone does not stop three.js updating them)
+    if (!on) shadowDirty = true;
     // a blink, not a cut; going in, it stays dark until the room's light is ready (the first time the
     // materials are rebuilt for the lamp, about a second), so no half-drawn frame shows
     fadeEl.style.opacity = 1;
@@ -1298,7 +1311,7 @@ swimButton?.addEventListener('click', e => { e.stopPropagation(); startSwim(); }
 // open, dry land you may step onto ends the swim, walls stay walls
 // what you bump into and stand on: the town's things outside, the furniture in a house
 const walkSolids = { topAt: (x, z, r) => (room.active ? room.solids : solids).topAt(x, z, r), hitAbove: (x, z, r, y) => (room.active ? room.solids : solids).hitAbove(x, z, r, y) };
-const walker = createWalker({ blockedAt, wetAt, ground: groundAt, solids: walkSolids,
+const walker = createWalker({ blockedAt, wetAt, ground: groundAt, hedge: hedgeAt, solids: walkSolids,
   step: () => room.active ? STEP_IN : STEP, radius: () => room.active ? BODY : PERSON.r, ceiling: () => room.active ? room.ceiling : Infinity, swimming: () => swim.on, flying: () => fly, standing: () => you.onFoot && !swim.on && !fling.on && !homes.busy && !sat });   // seated: the chair holds you
 const { blocked, lineClear, localPath, jump } = walker;
 // what the player is doing, asked in one place (player.js): may I jump, swim, get in, walk, be hit?
@@ -1508,6 +1521,8 @@ if (localStorage.getItem('toycity.map') === '1') document.readyState === 'comple
 // ---------- frame loop ----------
 const place = document.getElementById('place'), perf = params.get('perf') ? document.getElementById('perf') : {};   // numbers only with ?perf=1
 let last = performance.now(), placeT = 0, wantT = 0, signT = 0, frames = 0, fpsT = performance.now(), loaded = false, placeText = '';
+// the main thread's time per frame: the game's own work, and drawing (three.js walking the scene and issuing draw calls)
+let workMs = 0, drawMs = 0, worstMs = 0;
 // first-person view (V or the eye button): the camera sits at the eyes and looks where you face;
 // dragging still turns and tilts the head, and your own body is hidden
 function setFirstPerson(on) {
@@ -1531,7 +1546,7 @@ function chaseCam() {
     const look = 0.42 - pitch;                     // drag up and down to look up and down
     if (ride) {
       cracks(false);
-      camera.position.set(player.position.x, 1.22, player.position.z);
+      camera.position.set(player.position.x, ROAD + 1.22, player.position.z);   // a passenger's eyes, like the driver's (vehicle.js EYES)
       for (const c of player.children) c.visible = false;
     } else if (driving.driving) {
       // from the driver's seat: you see the dashboard, the steering wheel and the bonnet (or the handlebars)
@@ -1582,13 +1597,15 @@ function peerNear() {
   return false;
 }
 function frame(now) {
+  const f0 = performance.now();
   const dt = Math.min((now - last) / 1000, AGENT ? 0.1 : 0.05); last = now; camDt = dt;
   solids.beginFrame();
 
   // apply decoded squares within a small per-frame time budget: one near square (the big one) per frame,
   // far squares as the budget allows
+  // In a house the town is hidden and you stay put, so decoded squares wait in `ready` until you are out
   const t0 = performance.now(); let nearDone = false;
-  for (let k = 0; k < ready.length && performance.now() - t0 < 6;) {
+  for (let k = 0; k < ready.length && !room.active && performance.now() - t0 < 6;) {
     if (ready[k].level === 'near') { if (nearDone) { k++; continue; } nearDone = true; }
     applySquare(ready.splice(k, 1)[0]);
   }
@@ -1691,7 +1708,8 @@ function frame(now) {
     chaseCam();
   }
   if (!you.atHome) homes.update(dt, you.can('door'));
-  if ((wantT += dt) > 0.3) { wantT = 0; updateWanted(); for (const t of parked.tiles) if (updateCars(t)) shadowDirty = true; }
+  const inHouse = room.active;   // in a house: the town's streaming, signs, traffic, people and birds wait (all of them pick up where the clock says)
+  if ((wantT += dt) > 0.3 && !inHouse) { wantT = 0; updateWanted(); for (const t of parked.tiles) if (updateCars(t)) shadowDirty = true; }
   if ((placeT += dt) > 0.5) {
     placeT = 0;
     const s = (driving.driving ? Math.round(Math.abs(driving.speed) * 3.6) + ' km/h  ·  ' + (autopilot.active ? apLine() : '') : '') + nearestPlace();
@@ -1700,7 +1718,7 @@ function frame(now) {
   }
 
   // only the 12 nearest signs, rescaled with distance
-  if ((signT += dt) > 0.25) {
+  if ((signT += dt) > 0.25 && !inHouse) {
     signT = 0;
     const list = [...signs].map(s => [s, camera.position.distanceTo(s.getWorldPosition(tmpO.position))]).sort((a, b) => a[1] - b[1]);
     list.forEach(([s, d], k) => { s.visible = k < 12 && d < 260 + dist; const sc2 = THREE.MathUtils.clamp(d / 40, 0.6, 4); s.scale.set(s.userData.base * sc2, 2.2 * sc2, 1); });
@@ -1723,13 +1741,13 @@ function frame(now) {
   driving.tick(dt, player.position);
   waterTime.value = (now / 1000) % 1e4;   // the ripples
   if (birdsLater.length) birdsLater.shift()();
-  birds.update(dt, player.position.x, player.position.z);
+  if (!inHouse) birds.update(dt, player.position.x, player.position.z);
   // a bike has no radio; a passenger has the car's radio too (their own, at their own volume)
   radio.update((driving.driving && !driving.rider) || (!!ride && !(ride.car ? carModel(ride.car) : ride.parked?.model || '').startsWith('bike')));
-  nav.update(dt);
+  if (!inHouse) nav.update(dt);
   // the town's own cars and people: where I am and whether I am on foot, in a car, or flying
   me.x = player.position.x; me.z = player.position.z; me.inCar = you.seated; me.onFoot = you.onFoot; me.fly = fly;
-  traffic.update(dt, me); peds.update(dt, me);
+  if (!inHouse) { traffic.update(dt, me); peds.update(dt, me); }
   if (swim.on) { const y = wetAt(player.position.x, player.position.z); if (y === null || driving.driving || fly) stopSwim(); else swim.y = y; }
   player.position.y = swim.on ? swim.y : (room.active ? room.floorY : 0.15) + jump.h + (fling.on ? fling.h : 0);
   // sharp shadows that follow the player
@@ -1740,23 +1758,25 @@ function frame(now) {
   // the shadow map is redrawn when something in it moved: the camera (the map follows it), me, a car,
   // a door, someone nearby; a square or the time of day changing sets shadowDirty where it happens.
   // Standing still, it is kept as it is.
-  if (!camera.position.equals(camAt) || !camera.quaternion.equals(camQ) || you.seated || fling.on || jump.phase
-    || homes.busy || avatar.speed > 0.02 || peerNear() || traffic.near(R) || peds.near(R)) shadowDirty = true;
+  if (!inHouse && (!camera.position.equals(camAt) || !camera.quaternion.equals(camQ) || you.seated || fling.on || jump.phase
+    || homes.busy || avatar.speed > 0.02 || peerNear() || traffic.near(R) || peds.near(R))) shadowDirty = true;
   camAt.copy(camera.position); camQ.copy(camera.quaternion);
   if (shadowDirty && !room.active) { renderer.shadowMap.needsUpdate = true; shadowDirty = false; }   // indoors no shadows are drawn
   indoorView();
-  hideUnderOthers();
+  if (!inHouse) hideUnderOthers();
 
   // an agent's headless browser draws only when the agent asks to see (rendering there is slow, and
   // a slow frame rate would make it slower than a person on foot)
+  const f1 = performance.now();
   if (!AGENT || AGENT.draw > 0) { renderer.render(scene, camera); if (AGENT) AGENT.draw--; }
+  const f2 = performance.now(); workMs += f1 - f0; drawMs += f2 - f1; worstMs = Math.max(worstMs, f2 - f0);
   frames++;
   if (now - fpsT > 500) {
-    const fps = frames * 1000 / (now - fpsT); frames = 0; fpsT = now;
+    const fps = frames * 1000 / (now - fpsT), work = workMs / frames, draw = drawMs / frames, worst = worstMs; frames = 0; fpsT = now; workMs = drawMs = worstMs = 0;
     let nNear = 0, nFar = 0; for (const t of tiles.values()) t.level === 'near' ? nNear++ : nFar++;
     const ri = renderer.info.render;
     perf.textContent = `${fps.toFixed(0)} fps · ${ri.calls} draw calls · ${(ri.triangles / 1e6).toFixed(2)} M triangles · squares ${nNear} near / ${nFar} far · ${inflight.size} loading`;
-    window.__city.stats = { fps, calls: ri.calls, tris: ri.triangles, nNear, nFar, loading: inflight.size, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures };
+    window.__city.stats = { fps, work, draw, worst, calls: ri.calls, tris: ri.triangles, nNear, nFar, loading: inflight.size, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures };
   }
   requestAnimationFrame(frame);
 }

@@ -17,6 +17,7 @@
 //   traffic.count, traffic.near(r)
 import * as THREE from 'three';
 import { makeCar, footprintOf, FRONT } from './vehicle.js';
+import { ROAD } from './solids.js';
 import { createFleet, buildLoop, cornerSpeed, usable, nodesBySquare, seed, rng, catchUp } from './ambient.js';
 
 export const COUNT = { low: 6, mid: 12, high: 20 };
@@ -118,7 +119,7 @@ export function createTraffic({ scene, models, autopilot, solids, slug, T, toRD,
       s.yaw += wrap(h - s.yaw) * Math.min(1, dt * 8);
       const far = a.d > LOD, g = far ? s.lo : s.hi, other = far ? s.hi : s.lo;
       if (other.visible) other.visible = false;
-      g.visible = true; g.position.x = p.x; g.position.z = p.z; g.rotation.y = s.yaw;
+      g.visible = true; g.position.set(p.x, ROAD, p.z); g.rotation.y = s.yaw;
       s.fp.x = p.x; s.fp.z = p.z; s.fp.yaw = s.yaw;
     }
   }

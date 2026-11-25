@@ -17,13 +17,12 @@
 //   peds.setCount(n), peds.count, peds.near(r)
 import * as THREE from 'three';
 import { loadAvatar, poseLayer, randomLook } from './avatar.js';
-import { PERSON } from './solids.js';
+import { PERSON, ROAD } from './solids.js';
 import { createFleet, buildLoop, usable, nodesBySquare, seed, rng, catchUp } from './ambient.js';
 import { FALL_DOWN } from './player.js';
 
 export const COUNT = { low: 6, mid: 12, high: 20 };
 const RADIUS = 170;          // metres: seen within, dropped beyond
-const ROAD = 0.15;           // metres: the road's top, as baked (buildtiles.mjs); people stood 15 cm into it before
 const NEAR = 60;             // metres: animated every frame within this, every 0.2 s beyond
 const PAVEMENT = 4.8;        // metres right of the street's centre line (past a parked car or a cycle lane)
 const wrap = a => Math.atan2(Math.sin(a), Math.cos(a));
